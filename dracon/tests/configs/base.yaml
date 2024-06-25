@@ -1,9 +1,0 @@
-default_settings:
-  setting1: default_value1
-  setting2: default_value2
-  setting_list:
-    - item1
-    - item2
-    - item3
-  <<: *pkg:dracon:tests/configs/params
-  again: *pkg:dracon:tests/configs/params
