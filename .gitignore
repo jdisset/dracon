@@ -2,3 +2,15 @@ dracon/tests/configs/__pycache__
 dracon/tests/__pycache__
 dracon/__pycache__
 dracon.egg-info
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+__archive

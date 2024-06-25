@@ -1,0 +1,5 @@
+ruamel.yaml
+pydantic
+rich
+xxhash
+pytest
