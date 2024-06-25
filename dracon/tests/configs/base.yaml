@@ -6,3 +6,4 @@ default_settings:
     - item2
     - item3
   <<: *pkg:dracon:tests/configs/params
+  again: *pkg:dracon:tests/configs/params
