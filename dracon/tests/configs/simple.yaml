@@ -5,11 +5,15 @@ base: &base
 
 config:
   setting1: newval
-  <<:
-    setting2: newval2
+  <<{+<}[+]:
     setting1: newval1
     setting3: *base
+    setting2: *base@setting2
     extra: *pkg:dracon:tests/configs/extra.yaml
+    home: *env:HOME
+    a_list:
+      - item4
+
   a_list:
     - item1
     - item2

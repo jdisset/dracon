@@ -63,7 +63,7 @@ class DraconComposer(Composer):
         if self.parser.check_event(AliasEvent):
             event = self.parser.get_event()
             node = IncludeNode(
-                value=current_path,
+                value=keypath_str(current_path[:-1]),
                 start_mark=event.start_mark,
                 end_mark=event.end_mark,
                 anchor=event.anchor,
