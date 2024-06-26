@@ -100,8 +100,8 @@ class IncludeAlias(BaseModel):
 
 
 def with_possible_ext(path: str):
-    p = Path(path)
     # return: the original, with .yaml, with .yml, without extension. in that order
+    p = Path(path)
     return [p, p.with_suffix('.yaml'), p.with_suffix('.yml'), p.with_suffix('')]
 
 
@@ -169,29 +169,27 @@ def load_from_include_str(
     if anchors is None:
         anchors = {}
 
+
+    # Handle special cases for relative paths
+    if include_str.startswith('/'):
+        return get_obj_at_keypath(conf_obj, include_str)
+
+    if include_str.startswith('@') or include_str.startswith('.'):
+        print('path_to_node:', path_to_node)
+        current_obj = get_obj_at_keypath(conf_obj, path_to_node)
+        return get_obj_at_keypath(current_obj, include_str[1:])
+
     if '@' in include_str:
         mainpath, keypath = include_str.split('@', 1)
     else:
         mainpath, keypath = include_str, ''
-
-    if path_to_node.startswith('/'):
-        path_to_node = path_to_node[1:]
-
-    # Handle special cases for relative paths
-    if mainpath.startswith('/'):
-        assert keypath == '', 'Key path not allowed for root include'
-        return get_obj_at_keypath(conf_obj, keypath[1:])
-
-    if mainpath.startswith('@') or mainpath.startswith('.'):
-        current_obj = get_obj_at_keypath(conf_obj, path_to_node)
-        return get_obj_at_keypath(current_obj, keypath[1:])
 
     if mainpath in anchors:
         refpath = anchors[mainpath]
         obj = get_obj_at_keypath(conf_obj, refpath)
         return get_obj_at_keypath(obj, keypath)
 
-    assert ':' in mainpath, f'Invalid include path: {mainpath} not in anchors: {anchors}'
+    assert ':' in mainpath, f'Invalid include path: anchor {mainpath} not found'
 
     loader, path = mainpath.split(':', 1)
     if loader not in custom_loaders:
@@ -203,14 +201,19 @@ def load_from_include_str(
 
 
 def resolve_includes(conf_node, full_conf, anchor_paths=None):
+
     if dict_like(conf_node):
         return {k: resolve_includes(v, full_conf, anchor_paths) for k, v in conf_node.items()}
+
     if isinstance(conf_node, list):
         return [resolve_includes(v, full_conf, anchor_paths) for v in conf_node]
+
     if hasattr(conf_node, 'tag') and conf_node.tag == 'dracon_include':
         include_str = conf_node.anchor.value
         keypath = conf_node.value
+        print('include_str:', include_str)
         return load_from_include_str(include_str, keypath, full_conf, anchor_paths)
+
     return conf_node
 
 

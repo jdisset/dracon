@@ -1,4 +1,10 @@
+root:
+  a: 3
+  b: 4
+
 additional_settings:
   setting3: additional_value3
   setting_list:
-    - item4
+    - item_lol
+    - */root.a
+    - *.0
