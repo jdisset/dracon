@@ -4,6 +4,26 @@ import re
 from typing import Optional
 from pydantic import BaseModel
 from enum import Enum
+from dracon.utils import dict_like
+
+
+def perform_merges(conf_obj):
+    if isinstance(conf_obj, list):
+        return [perform_merges(v) for v in conf_obj]
+
+    if dict_like(conf_obj):
+        res = {}
+        merges = []
+        for key, value in conf_obj.items():
+            if hasattr(key, 'tag') and key.tag == 'dracon_merge':
+                merges.append((MergeKey(raw=key.value), value))
+            else:
+                res[key] = perform_merges(value)
+        for merge_key, merge_value in merges:
+            res = merged(res, merge_value, merge_key)
+        return res
+
+    return conf_obj
 
 
 class MergeMode(Enum):
