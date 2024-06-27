@@ -1,6 +1,6 @@
 import xxhash
 import base64
-from typing import Any
+from typing import Any, Optional, Set, Sequence
 
 def dict_like(obj) -> bool:
     return (
@@ -11,6 +11,45 @@ def dict_like(obj) -> bool:
         and hasattr(obj, '__iter__')
         and hasattr(obj, 'items')
     )
+
+
+def simplify_path(path: str):
+    # a path is a string starting with '/'
+    # then each part is separated by '.'
+    # 2 consecutive '.' means go up one level, 3 means go up 2 levels, etc.
+    # this function simplifies a path by removing the '..' and checks if it is in available_paths
+
+    if not path.startswith('/'):
+        path = '/' + path
+
+    # cut at last /
+    path = path[path.rfind('/') :]
+
+    path = path[1:]  # remove leading '/'
+
+    # remove one trailing '.' if present
+    if path.endswith('.'):
+        path = path[:-1]
+    # if path is not in available_paths, try to simplify it
+    parts = path.split('.')
+    simplified = []
+    for part in parts:
+        if part == '':
+            if simplified:
+                simplified.pop()
+        else:
+            simplified.append(part)
+
+    simplified_path = '/' + '.'.join(simplified)
+
+    return simplified_path
+
+
+def combine_paths(paths: Sequence[str]):
+    sp = simplify_path('/' + '.'.join(paths))
+    assert sp is not None
+    return sp
+
 
 
 def with_indent(content: str, indent: int) -> str:
