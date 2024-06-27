@@ -1,6 +1,9 @@
 root:
   a: 3
   b: 4
+  inner:
+    c: 5
+    d: 6
 
 additional_settings:
   setting3: additional_value3
@@ -8,3 +11,4 @@ additional_settings:
     - item_lol
     - */root.a
     - *.0
+
