@@ -83,9 +83,10 @@ class KeyPath:
     def append(self, part: Union[Hashable, KeyPathToken]) -> 'KeyPath':
         return self.down(part)
 
-    # same as down
+    # same as down but not in place
     def __add__(self, other) -> 'KeyPath':
-        return self.down(other)
+        return self.copy().down(other)
+
 
     def copy(self) -> 'KeyPath':
         return deepcopy(self)

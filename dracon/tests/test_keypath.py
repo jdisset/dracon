@@ -157,3 +157,34 @@ def test_root_anywhere():
 def test_multuple_root():
     kp = KeyPath("/a.b.c//..d.e/..f.g.d..")
     assert str(kp) == "/f.g"
+
+
+def test_addition():
+    a = KeyPath("a.b")
+    assert str(a) == "a.b"
+    b = KeyPath("c.d")
+    assert str(b) == "c.d"
+    c = a + b
+    assert str(a) == "a.b"
+    assert str(b) == "c.d"
+    assert str(c) == "a.b.c.d"
+    d = a + KeyPath("e")
+    assert str(d) == "a.b.e"
+    e = KeyPath("f") + b
+    assert str(e) == "f.c.d"
+
+    f = KeyPath("..f")
+    assert str(f) == "..f"
+    assert (a + f).simplified() == KeyPath("a.f")
+
+    aroot = KeyPath("/a.b")
+    assert str(aroot) == "/a.b"
+    broot = KeyPath("/c.d")
+    assert str(broot) == "/c.d"
+    croot = aroot + broot
+    assert str(croot) == "/a.b/c.d"
+    assert str(croot.simplified()) == "/c.d"
+
+
+
+

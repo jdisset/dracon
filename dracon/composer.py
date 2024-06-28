@@ -14,6 +14,16 @@ from pydantic import BaseModel
 from .keypath import KeyPath, KeyPathToken, ROOTPATH
 
 
+class WrappedInWeakRef:
+    def __init__(self, obj):
+        self.obj = obj
+
+    def __hash__(self):
+        return hash(self.obj)
+
+    def __eq__(self, other):
+        return self.obj == other.obj
+
 class IncludeNode(ScalarNode):
 
     def __init__(
@@ -30,6 +40,18 @@ class CompositionResult(BaseModel):
     node_map: dict[KeyPath, Node] = {}  # keypath -> node
     include_nodes: list[KeyPath] = []  # keypaths to include nodes
     anchor_paths: dict[str, KeyPath] = {}  # anchor name -> keypath to that anchor node
+    reverse_map: dict[Node, set[KeyPath]] = {} # nodes are hashable!
+
+    def model_post_init(self, *args, **kwargs):
+        super().model_post_init(*args, **kwargs)
+        self.build_reverse_map()
+
+    def build_reverse_map(self):
+        self.reverse_map = {}
+        for keypath, node in self.node_map.items():
+            if node not in self.reverse_map:
+                self.reverse_map[node] = set()
+            self.reverse_map[node].add(keypath)
 
     def root(self):
         return self.node_map[ROOTPATH]
@@ -66,15 +88,24 @@ class CompositionResult(BaseModel):
             anchor_paths=new_anchor_paths,
         )
 
+
     def replace_at(self, at_path, new_root: 'CompositionResult'):
         # node at at_path will be replaced with the new_root.root()
 
+        assert at_path in self.node_map, f'Invalid {at_path=}, not in {self.node_map.keys()=}'
+
+        previous_node = self.node_map[at_path]
         other_node_map_with_prefix = {
             (at_path + k.rootless()).simplified(): v for k, v in new_root.node_map.items()
         }
 
         self.node_map.update(other_node_map_with_prefix)
-        self.node_map[at_path] = new_root.root()
+        new_node = new_root.root()
+        # replace all references to the previous node with the new node
+        all_keypaths = self.reverse_map[previous_node]
+        for keypath in all_keypaths:
+            self.node_map[keypath] = new_node
+
 
         if at_path in self.include_nodes:
             self.include_nodes.remove(at_path)
@@ -89,6 +120,7 @@ class CompositionResult(BaseModel):
             if anchor not in self.anchor_paths:
                 self.anchor_paths[anchor] = (at_path + anchor_path.rootless()).simplified()
 
+        self.build_reverse_map()
         return self
 
     class Config:
@@ -132,11 +164,7 @@ class DraconComposer(Composer):
             self.node_map[self.curr_path.copy()] = node
             self.curr_path.up()
 
-
-
     def compose_node(self, parent, index):
-        print()
-        # print(f'Composing node with {parent=}, {index=}. {self.curr_path=}')
         if index is not None:
             self.descend_path(parent, index)
 
