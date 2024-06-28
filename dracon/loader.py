@@ -192,9 +192,7 @@ def compose_from_include_str(
 
         # it's a path relative to the current node
         if include_str.startswith('@') or include_str.startswith('.'):  # means relative to parent
-            comb_path = KeyPath(include_node_path[1:]).up().down(mainpath)
-            print(f'Found relative path: {include_str=}, {include_node_path=}, {mainpath=}')
-            print(f'{comb_path=}, composition_result= {composition_result.node_map=}')
+            comb_path = KeyPath(include_node_path).up().down(mainpath)
             return composition_result.rerooted(comb_path)
 
         anchors = composition_result.anchor_paths
@@ -210,7 +208,6 @@ def compose_from_include_str(
         raise ValueError(f'Unknown loader: {loader}')
 
     res = custom_loaders[loader](path)
-    print(f'Loaded {path=}, {res=}')
     if keypath:
         res = res.rerooted(keypath)
     return res
@@ -218,7 +215,6 @@ def compose_from_include_str(
 
 def process_includes(comp_res: CompositionResult):
     incl_node_copy = deepcopy(comp_res.include_nodes)
-    print(f'{incl_node_copy=}')
 
     while comp_res.include_nodes:
         for inode_path in incl_node_copy:
@@ -228,10 +224,9 @@ def process_includes(comp_res: CompositionResult):
             assert (
                 inode_path == inode.at_path
             ), f'Invalid include node path: {inode_path=}, {inode.at_path=}'
-            print(f'{include_str=}, {inode_path=}, {inode=}')
             i_res = compose_from_include_str(include_str, inode_path, comp_res)
-            print(f'{i_res.node_map=}')
             comp_res = comp_res.replace_at(inode_path, i_res)
+            print(f'Processed include: {inode_path} -> {i_res.root()}')
 
     return comp_res
 
