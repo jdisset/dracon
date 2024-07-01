@@ -17,7 +17,6 @@ def test_parse_int_simple():
     assert kp.parts == ['1']
 
 
-
 def test_parse_string_with_root():
     kp = KeyPath("/a.b.c", simplify=False)
     assert kp.parts == [KeyPathToken.ROOT, "a", "b", "c"]
@@ -184,6 +183,34 @@ def test_addition():
     croot = aroot + broot
     assert str(croot) == "/a.b/c.d"
     assert str(croot.simplified()) == "/c.d"
+
+
+
+
+# test get on a dictionary
+D = {
+    "a": {
+        "b": {
+            "c": 1
+        }
+    },
+    "d": 2,
+    "e": 3,
+    "f": {
+        "g": {
+            "h": [4, 5, {"i": 6, "j": [7, 8, 9]}]
+        }
+    },
+}
+
+def test_get():
+    assert KeyPath("d").get_obj(D) == 2
+    assert KeyPath("/f.g.h.1").get_obj(D) == 5
+    assert KeyPath("f.g.h.2.j.1").get_obj(D) == 8
+    assert KeyPath("a.b.c/a").get_obj(D) == {"b": {"c": 1}}
+    assert KeyPath("a.b.c/a.b").get_obj(D) == {"c": 1}
+    assert KeyPath("a.b.c....d").get_obj(D) == 2
+
 
 
 
