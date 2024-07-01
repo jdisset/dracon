@@ -8,72 +8,181 @@ from ruamel.yaml.events import (
     SequenceStartEvent,
     MappingStartEvent,
 )
-from .merge import MergeKey, merged
-from .utils import dict_like, simplify_path, combine_paths
 from pydantic import BaseModel
 from .keypath import KeyPath, KeyPathToken, ROOTPATH
+from typing import Any, Union, Hashable
 
 
-class WrappedInWeakRef:
-    def __init__(self, obj):
-        self.obj = obj
-
-    def __hash__(self):
-        return hash(self.obj)
-
-    def __eq__(self, other):
-        return self.obj == other.obj
-
+## {{{                        --     node types     --
 class IncludeNode(ScalarNode):
 
     def __init__(
         self, value, at_path, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None
     ):
-        if tag is None:
-            tag = 'dracon_include'
         self.at_path = at_path
         ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
 
 
+class MergeNode(ScalarNode):
+
+    def __init__(
+        self, value, at_path, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None
+    ):
+        self.merge_key_raw = value
+        self.at_path = at_path
+        ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
+
+
+class DraconMappingNode(MappingNode):
+
+    # simply keep map the keys to the nodes...
+    def __init__(
+        self,
+        tag: Any,
+        value: Any,
+        start_mark: Any = None,
+        end_mark: Any = None,
+        flow_style: Any = None,
+        comment: Any = None,
+        anchor: Any = None,
+    ) -> None:
+        MappingNode.__init__(self, tag, value, start_mark, end_mark, flow_style, comment, anchor)
+        self.map: dict[Hashable, int] = {}  # key -> index
+        for idx, (key, value) in enumerate(value):
+            if key.value in self.map:
+                # TODO: authorize duplicated merge keys (and use unique ids by concatenating the idx)
+                raise ValueError(f'Duplicate key: {key.value}')
+            self.map[key.value] = idx
+
+    # and implement a get[] (and set) method
+    def __getitem__(self, key: Hashable) -> Node:
+        return self.value[self.map[key]][1]
+
+    def __setitem__(self, key: Hashable, value: Node):
+        idx = self.map[key]
+        realkey, _ = self.value[idx]
+        self.value[idx] = (realkey, value)
+
+    def __delitem__(self, key: Hashable):
+        idx = self.map[key]
+        del self.value[idx]
+        del self.map[key]
+
+    def __contains__(self, key: Hashable) -> bool:
+        return key in self.map
+
+    # all dict-like methods
+    def keys(self):
+        return self.map.keys()
+
+    def values(self):
+        return (value for key, value in self.value)
+
+    def items(self):
+        return ((key, value) for key, value in self.value)
+
+    def get(self, key: Hashable, default=None):
+        return self[key] if key in self else default
+
+    def __len__(self):
+        return len(self.map)
+
+    def copy(self):
+        return self.__class__(
+            tag=self.tag,
+            value=self.value.copy(),
+            start_mark=self.start_mark,
+            end_mark=self.end_mark,
+            flow_style=self.flow_style,
+            comment=self.comment,
+            anchor=self.anchor,
+        )
+
+
+class DraconSequenceNode(SequenceNode):
+
+    def __getitem__(self, index: int) -> Node:
+        return self.value[index]
+
+    def __setitem__(self, index: int, value: Node):
+        self.value[index] = value
+
+    def __delitem__(self, index: int):
+        del self.value[index]
+
+    def __add__(self, other: 'DraconSequenceNode') -> 'DraconSequenceNode':
+        return self.__class__(
+            tag=self.tag,
+            value=self.value + other.value,
+            start_mark=self.start_mark,
+            end_mark=self.end_mark,
+            flow_style=self.flow_style,
+            comment=self.comment,
+            anchor=self.anchor,
+        )
+
+
+def wrapped_node(node: Node) -> Node:
+    if isinstance(node, MappingNode):
+        return DraconMappingNode(
+            tag=node.tag,
+            value=node.value,
+            start_mark=node.start_mark,
+            end_mark=node.end_mark,
+            flow_style=node.flow_style,
+            comment=node.comment,
+            anchor=node.anchor,
+        )
+    elif isinstance(node, SequenceNode):
+        return DraconSequenceNode(
+            tag=node.tag,
+            value=node.value,
+            start_mark=node.start_mark,
+            end_mark=node.end_mark,
+            flow_style=node.flow_style,
+            comment=node.comment,
+            anchor=node.anchor,
+        )
+    elif isinstance(node, (ScalarNode, IncludeNode, MergeNode)):
+        return node
+    else:
+        raise NotImplementedError(f'Node type {type(node)} not supported')
+
+
+##────────────────────────────────────────────────────────────────────────────}}}
+
+
 class CompositionResult(BaseModel):
 
-    node_map: dict[KeyPath, Node] = {}  # keypath -> node
+    root: Node
     include_nodes: list[KeyPath] = []  # keypaths to include nodes
     anchor_paths: dict[str, KeyPath] = {}  # anchor name -> keypath to that anchor node
-    reverse_map: dict[Node, set[KeyPath]] = {} # nodes are hashable!
+
+    merge_nodes: list[KeyPath] = []
 
     def model_post_init(self, *args, **kwargs):
         super().model_post_init(*args, **kwargs)
-        self.build_reverse_map()
 
-    def build_reverse_map(self):
-        self.reverse_map = {}
-        for keypath, node in self.node_map.items():
-            if node not in self.reverse_map:
-                self.reverse_map[node] = set()
-            self.reverse_map[node].add(keypath)
-
-    def root(self):
-        return self.node_map[ROOTPATH]
+    class Config:
+        arbitrary_types_allowed = True
 
     def rerooted(self, new_root: KeyPath):
 
-        new_root.simplify()
+        new_root = new_root.simplified()
+        new_root_node = new_root.get_obj(self.root)
 
-        assert new_root in set(
-            self.node_map.keys()
-        ), f'Invalid {new_root=}, not in {self.node_map.keys()=}'
-
-        new_node_map = {}
-        for old_keypath, node in self.node_map.items():
-            if old_keypath.startswith(new_root):
-                new_keypath = (ROOTPATH + old_keypath[len(new_root) :]).simplified()
-                new_node_map[new_keypath] = node
+        assert new_root_node is not None, f'Invalid new root: {new_root}'
 
         new_include_nodes = [
             (ROOTPATH + include_node[len(new_root) :]).simplified()
             for include_node in self.include_nodes
             if include_node.startswith(new_root)
+        ]
+
+        new_merge_nodes = [
+            (ROOTPATH + merge_node[len(new_root) :]).simplified()
+            for merge_node in self.merge_nodes
+            if merge_node.startswith(new_root)
         ]
 
         new_anchor_paths = {
@@ -83,29 +192,33 @@ class CompositionResult(BaseModel):
         }
 
         return CompositionResult(
-            node_map=new_node_map,
+            root=new_root_node,
             include_nodes=new_include_nodes,
             anchor_paths=new_anchor_paths,
+            merge_nodes=new_merge_nodes,
         )
 
+    def replace_node_at(self, at_path: KeyPath, new_node: Node):
+        if at_path == ROOTPATH:
+            root = new_node
+        else:
+            parent_path = at_path.copy().up()
+            parent_node = parent_path.get_obj(self.root)
 
-    def replace_at(self, at_path, new_root: 'CompositionResult'):
-        # node at at_path will be replaced with the new_root.root()
+            if isinstance(parent_node, DraconMappingNode):
+                key = at_path[-1]
+                parent_node[key] = new_node
+            elif isinstance(parent_node, DraconSequenceNode):
+                idx = int(at_path[-1])
+                parent_node[idx] = new_node
+            else:
+                raise ValueError(f'Invalid parent node type: {type(parent_node)}')
 
-        assert at_path in self.node_map, f'Invalid {at_path=}, not in {self.node_map.keys()=}'
+    def replaced_at(self, at_path: KeyPath, new_root: 'CompositionResult'):
+        if at_path == ROOTPATH:
+            return new_root.model_copy()
 
-        previous_node = self.node_map[at_path]
-        other_node_map_with_prefix = {
-            (at_path + k.rootless()).simplified(): v for k, v in new_root.node_map.items()
-        }
-
-        self.node_map.update(other_node_map_with_prefix)
-        new_node = new_root.root()
-        # replace all references to the previous node with the new node
-        all_keypaths = self.reverse_map[previous_node]
-        for keypath in all_keypaths:
-            self.node_map[keypath] = new_node
-
+        self.replace_node_at(at_path, new_root.root)
 
         if at_path in self.include_nodes:
             self.include_nodes.remove(at_path)
@@ -116,38 +229,44 @@ class CompositionResult(BaseModel):
                 ]
             )
 
+        if at_path in self.merge_nodes:
+            self.merge_nodes.remove(at_path)
+            self.merge_nodes.extend(
+                [
+                    (at_path + merge_node.rootless()).simplified()
+                    for merge_node in new_root.merge_nodes
+                ]
+            )
+
         for anchor, anchor_path in new_root.anchor_paths.items():
             if anchor not in self.anchor_paths:
                 self.anchor_paths[anchor] = (at_path + anchor_path.rootless()).simplified()
 
-        self.build_reverse_map()
         return self
 
-    class Config:
-        arbitrary_types_allowed = True
 
+def is_merge_key(value: str) -> bool:
+    return value.startswith('<<')
 
 class DraconComposer(Composer):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-
         self.node_map: dict[KeyPath, Node] = {}  # keypath -> node
         self.include_nodes: list[KeyPath] = []  # keypaths to include nodes
+        self.merge_nodes: list[KeyPath] = []  # keypaths to merge nodes
         self.anchor_paths: dict[str, KeyPath] = {}  # anchor name -> keypath to that anchor node
-
         self.curr_path = ROOTPATH
 
     def get_result(self) -> CompositionResult:
         return CompositionResult(
-            node_map=self.node_map,
+            root=self.node_map[ROOTPATH],
             include_nodes=self.include_nodes,
             anchor_paths=self.anchor_paths,
         )
 
     def descend_path(self, parent, index):
         assert index is not None, f'Invalid index: {index}'
-        previous_path = str(self.curr_path)
         if parent is None:
             self.curr_path = ROOTPATH
         elif isinstance(parent, MappingNode):
@@ -160,7 +279,6 @@ class DraconComposer(Composer):
 
     def ascend_path(self, node):
         if self.curr_path:
-            previous_path = str(self.curr_path)
             self.node_map[self.curr_path.copy()] = node
             self.curr_path.up()
 
@@ -186,9 +304,12 @@ class DraconComposer(Composer):
 
             self.resolver.descend_resolver(parent, index)
             if self.parser.check_event(ScalarEvent):
-                if event.style is None and MergeKey.is_merge_key(event.value):
-                    event.tag = 'dracon_merge'
-                node = self.compose_scalar_node(anchor)
+                # would probably be more idiomatic to write
+                # my own MergeEvent but this works the same...
+                if event.style is None and is_merge_key(event.value):
+                    node = self.compose_merge_node(anchor)
+                else:
+                    node = self.compose_scalar_node(anchor)
             elif self.parser.check_event(SequenceStartEvent):
                 node = self.compose_sequence_node(anchor)
             elif self.parser.check_event(MappingStartEvent):
@@ -197,10 +318,33 @@ class DraconComposer(Composer):
                 raise RuntimeError(f'Not a valid node event: {event}')
             self.resolver.ascend_resolver()
 
+        node = wrapped_node(node)
+        print(f'Composed node: {type(node)}')
         if index is not None:
             self.ascend_path(node)
-            # assert self.node_map[self.curr_path] == node
         if parent is None:
             assert self.curr_path == ROOTPATH
             self.node_map[self.curr_path.copy()] = node
+
+        return node
+
+    def compose_merge_node(self, anchor: Any) -> Any:
+        event = self.parser.get_event()
+        tag = event.ctag
+        if tag is None or str(tag) == '!':
+            tag = self.resolver.resolve(ScalarNode, event.value, event.implicit)
+            assert not isinstance(tag, str)
+        assert is_merge_key(event.value), f'Invalidly routed to merge node: {event.value}'
+        node = MergeNode(
+            value=event.value,
+            at_path=self.curr_path.copy(),
+            tag=tag,
+            start_mark=event.start_mark,
+            end_mark=event.end_mark,
+            comment=event.comment,
+            anchor=anchor,
+        )
+        if anchor is not None:
+            self.anchors[anchor] = node
+        self.merge_nodes.append(self.curr_path.copy())
         return node
