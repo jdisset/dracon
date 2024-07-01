@@ -1,0 +1,24 @@
+
+base: &base
+  setting1: baseval
+  setting2: baseval2
+
+other_base: *pkg:dracon:tests/configs/base.yaml
+
+config:
+  setting1: newval
+  <<{+<}[+]:
+    setting1: newval1
+    setting3: *base
+    setting2: *base@setting2
+    extra: *pkg:dracon:tests/configs/simple.yaml
+    home: *env:TESTVAR1
+    a_list:
+      - item4
+
+  a_list:
+    - item1
+    - item2
+    - item3
+
+
