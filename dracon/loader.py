@@ -5,17 +5,14 @@ from copy import deepcopy
 import os
 from typing import Type
 import re
-import importlib.resources
 from importlib.resources import files, as_file
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
-from dracon.utils import dict_like, get_obj_at_keypath, simplify_path, combine_paths
-from dracon.merge import perform_merges
 from dracon.composer import IncludeNode, DraconComposer, CompositionResult
 from dracon.keypath import KeyPath
-import importlib.resources
 from importlib.resources import files, as_file
+from dracon.utils import node_print
 
 """
     Dracon allows for including external configuration files in the YAML configuration files.
@@ -158,6 +155,7 @@ def read_from_pkg(path: str):
 
 
 def compose_from_pkg(path: str):
+    print('compose from pkg', path)
     return compose_config_from_str(read_from_pkg(path))
 
 
@@ -218,15 +216,17 @@ def process_includes(comp_res: CompositionResult):
 
     while comp_res.include_nodes:
         for inode_path in incl_node_copy:
-            inode = comp_res.node_map[inode_path]
+            inode = inode_path.get_obj(comp_res.root)
             assert isinstance(inode, IncludeNode), f'Invalid node type: {type(inode)}'
             include_str = inode.value
             assert (
                 inode_path == inode.at_path
             ), f'Invalid include node path: {inode_path=}, {inode.at_path=}'
-            i_res = compose_from_include_str(include_str, inode_path, comp_res)
-            comp_res = comp_res.replace_at(inode_path, i_res)
-            print(f'Processed include: {inode_path} -> {i_res.root()}')
+            include_composed = compose_from_include_str(include_str, inode_path, comp_res)
+            print(
+                f'about to replace at path {inode_path} with: \n{node_print(include_composed.root)}'
+            )
+            comp_res = comp_res.replaced_at(inode_path, include_composed)
 
     return comp_res
 
@@ -248,8 +248,7 @@ def compose_config_from_str(content: str) -> CompositionResult:
 def load_from_composition_result(compres: CompositionResult):
     yaml = YAML()
     yaml.preserve_quotes = True
-    root = compres.root()
-    return yaml.constructor.construct_document(root)
+    return yaml.constructor.construct_document(compres.root)
 
 
 def load_auto(include_str: str, loaders=DEFAULT_LOADERS):
