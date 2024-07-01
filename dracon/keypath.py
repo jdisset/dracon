@@ -1,15 +1,20 @@
 from enum import Enum
 from copy import deepcopy
-from typing import List, Union, Hashable
+from typing import List, Union, Hashable, Any
+from ruamel.yaml.nodes import Node
+from dracon.utils import node_print, list_like, dict_like
+
 
 class KeyPathToken(Enum):
     ROOT = 0
     UP = 1
 
+
 class KeyPath:
     def __init__(
         self, path: Union[str, List[Union[Hashable, KeyPathToken]]], simplify: bool = True
     ):
+        self.is_simple = False
         if isinstance(path, str):
             self.parts = self._parse_string(path)
         elif isinstance(path, (list, tuple)):
@@ -50,7 +55,7 @@ class KeyPath:
 
     def _convert_part(self, part: str) -> Union[Hashable, KeyPathToken]:
         # if part.isdigit():
-            # return int(part)
+        # return int(part)
         return part
 
     def clear(self) -> 'KeyPath':
@@ -64,6 +69,7 @@ class KeyPath:
         return simple
 
     def up(self, simplify=True) -> 'KeyPath':
+        self.is_simple = False
         self.parts.append(KeyPathToken.UP)
         if simplify:
             return self.simplify()
@@ -72,7 +78,11 @@ class KeyPath:
     def pop(self) -> Union[Hashable, KeyPathToken]:
         return self.parts.pop()
 
+    def front_pop(self) -> Union[Hashable, KeyPathToken]:
+        return self.parts.pop(0)
+
     def down(self, path: "str | KeyPath") -> 'KeyPath':
+        self.is_simple = False
         if isinstance(path, KeyPath):
             self.parts.extend(path.parts)
         else:
@@ -87,11 +97,12 @@ class KeyPath:
     def __add__(self, other) -> 'KeyPath':
         return self.copy().down(other)
 
-
     def copy(self) -> 'KeyPath':
         return deepcopy(self)
 
     def simplify(self) -> 'KeyPath':
+        if self.is_simple:
+            return self
         simplified = []
         for part in self.parts:
             if part == KeyPathToken.ROOT:
@@ -105,10 +116,13 @@ class KeyPath:
                 simplified.append(part)
 
         self.parts = simplified
+        self.is_simple = True
         return self
 
     def simplified(self) -> 'KeyPath':
-        return KeyPath(self.parts, simplify=True)
+        new = KeyPath(self.parts, simplify=not self.is_simple)
+        new.is_simple = True
+        return new
 
     def __str__(self) -> str:
         result = ''
@@ -132,7 +146,6 @@ class KeyPath:
     def __repr__(self) -> str:
         return f"KeyPath('{self}')"
 
-
     def __len__(self) -> int:
         return len(self.parts)
 
@@ -153,8 +166,41 @@ class KeyPath:
     def startswith(self, other: 'KeyPath') -> bool:
         if len(other) > len(self):
             return False
-        return self.parts[:len(other)] == other.parts
+        return self.parts[: len(other)] == other.parts
+
+    def get_obj(self, obj: Any) -> Any:
+        if not self.is_simple:
+            simplified = self.simplified()
+            return simplified.get_obj(obj)
+
+        res = obj
+        for part in self.parts:
+            if part == KeyPathToken.UP:
+                raise ValueError(f'Cannot get object from unsimplifiable path: {self}')
+            if part == KeyPathToken.ROOT:
+                continue
+            res = self._get_obj_impl(res, part)
+        return res
+
+    @staticmethod
+    def _get_obj_impl(obj: Any, attr: Any) -> Any:
+        """
+        Get an attribute from an object, handling various types of objects.
+        """
+        if list_like(obj):
+            return obj[int(attr)]
+        if hasattr(obj, attr):
+            return getattr(obj, attr)
+        else:
+            try:  # check if we can access it with __getitem__
+                return obj[attr]
+            except (TypeError, KeyError):
+                if isinstance(obj, Node):
+                    raise AttributeError(
+                        f'Could not find attribute {attr} in node \n{node_print(obj)}'
+                    )
+                else:
+                    raise AttributeError(f'Could not find attribute {attr} in {obj}')
+
 
 ROOTPATH = KeyPath('/')
-
-
