@@ -1,22 +1,14 @@
+root:
+  a: 3
+  b: 4
+  inner:
+    c: 5
+    d: 6
 
-base: &base
-  setting1: baseval
-  setting2: baseval2
+additional_settings:
+  setting3: additional_value3
+  setting_list:
+    - item_lol
+    - */root.a
+    - *.0
 
-config:
-  setting1: newval
-  <<{+<}[+]:
-    setting1: newval1
-    setting3: *base
-    setting2: *base@setting2
-    extra: *pkg:dracon:tests/configs/extra.yaml
-    home: *env:HOME
-    a_list:
-      - item4
-
-  a_list:
-    - item1
-    - item2
-    - item3
-
-# todo, use !type[inner_t] syntax with a custom yaml builder instead of <>
