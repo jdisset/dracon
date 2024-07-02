@@ -7,7 +7,7 @@ other_base: *pkg:dracon:tests/configs/base.yaml
 
 config:
   setting1: newval
-  <<{+<}[+]:
+  <<{<}[+]:
     setting1: newval1
     setting3: *base
     setting2: *base@setting2

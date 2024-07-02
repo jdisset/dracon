@@ -9,10 +9,13 @@ from importlib.resources import files, as_file
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
-from dracon.composer import IncludeNode, DraconComposer, CompositionResult
+from ruamel.yaml.nodes import ScalarNode, Node
+from ruamel.yaml.tag import Tag
+from dracon.composer import IncludeNode, DraconComposer, CompositionResult, make_node
 from dracon.keypath import KeyPath
 from importlib.resources import files, as_file
 from dracon.utils import node_print
+from dracon.merge import merged, MergeKey, MergeNode, process_merges
 
 """
     Dracon allows for including external configuration files in the YAML configuration files.
@@ -155,18 +158,18 @@ def read_from_pkg(path: str):
 
 
 def compose_from_pkg(path: str):
-    print('compose from pkg', path)
     return compose_config_from_str(read_from_pkg(path))
 
 
-def load_from_env(path: str):
-    return os.getenv(path)
+def compose_from_env(path: str):
+    val = str(os.getenv(path))
+    return compose_config_from_str(val)
 
 
 DEFAULT_LOADERS = {
     # 'file': load_from_file,
     'pkg': compose_from_pkg,
-    'env': load_from_env,
+    'env': compose_from_env,
 }
 
 
@@ -206,33 +209,30 @@ def compose_from_include_str(
         raise ValueError(f'Unknown loader: {loader}')
 
     res = custom_loaders[loader](path)
+    assert isinstance(res, CompositionResult)
+
     if keypath:
         res = res.rerooted(keypath)
+
     return res
 
 
 def process_includes(comp_res: CompositionResult):
-    incl_node_copy = deepcopy(comp_res.include_nodes)
 
     while comp_res.include_nodes:
-        for inode_path in incl_node_copy:
-            inode = inode_path.get_obj(comp_res.root)
-            assert isinstance(inode, IncludeNode), f'Invalid node type: {type(inode)}'
-            include_str = inode.value
-            assert (
-                inode_path == inode.at_path
-            ), f'Invalid include node path: {inode_path=}, {inode.at_path=}'
-            include_composed = compose_from_include_str(include_str, inode_path, comp_res)
-            print(
-                f'about to replace at path {inode_path} with: \n{node_print(include_composed.root)}'
-            )
-            comp_res = comp_res.replaced_at(inode_path, include_composed)
+        inode_path = comp_res.include_nodes.pop()
+        inode = inode_path.get_obj(comp_res.root)
+        assert isinstance(inode, IncludeNode), f'Invalid node type: {type(inode)}'
+        include_str = inode.value
+        include_composed = compose_from_include_str(include_str, inode_path, comp_res)
+        comp_res = comp_res.replaced_at(inode_path, include_composed)
 
     return comp_res
 
 
-def dracon_post_process_composed(comp):
+def dracon_post_process_composed(comp: CompositionResult):
     comp = process_includes(comp)
+    comp = process_merges(comp)
     return comp
 
 
@@ -249,8 +249,3 @@ def load_from_composition_result(compres: CompositionResult):
     yaml = YAML()
     yaml.preserve_quotes = True
     return yaml.constructor.construct_document(compres.root)
-
-
-def load_auto(include_str: str, loaders=DEFAULT_LOADERS):
-    comp_res = compose_from_include_str(include_str, custom_loaders=loaders)
-    return load_from_composition_result(comp_res)
