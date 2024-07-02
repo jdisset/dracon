@@ -15,9 +15,6 @@ main_config_path = 'dracon:tests/configs/main.yaml'
 params_config_path = 'dracon:tests/configs/params.yaml'
 base_config_path = 'dracon:tests/configs/base.yaml'
 
-def test_simple_config_composition():
-
-    simple_config_content = read_from_pkg(main_config_path)
 
 
 def test_main_config_composition():
@@ -43,6 +40,8 @@ def test_main_config_composition():
     assert config["other_base"]["default_settings"]["setting1"] == "default_value1"
     assert config["other_base"]["default_settings"]["setting2"] == "default_value2"
     assert config["other_base"]["default_settings"]["again"]["setting2"] == "value_params_2"
+    assert config["other_base"]["default_settings"]["just_simple"]["setting3"] == "additional_value3"
+    assert config["other_base"]["default_settings"]["just_simple"]["setting_list"] == ["item_lol", 3, "item_lol"]
 
 def test_simple_config_inclusion():
     # Load and compose the extra configuration
