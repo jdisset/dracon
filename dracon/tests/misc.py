@@ -15,24 +15,16 @@ def dump(res):
     rprint(stream.getvalue())
 
 content = read_from_pkg('dracon:tests/configs/params.yaml')
-content = read_from_pkg('dracon:tests/configs/extra.yaml')
-content = read_from_pkg('dracon:tests/configs/main.yaml')
+# content = read_from_pkg('dracon:tests/configs/main.yaml')
 
 print(content)
+
 ##
 
 compres = compose_config_from_str(content)
-
-compres.root
-
 print(node_print(compres.root))
-
 res = load_from_composition_result(compres)
-
 dump(res)
-
-
-
 
 
 

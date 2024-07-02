@@ -55,18 +55,8 @@ class ListLike(Generic[E], metaclass=ListLikeMeta):
         ...
 
 
-
 def list_like(obj) -> bool:
     return isinstance(obj, ListLike)
-
-
-# def list_like(obj):
-    # try:
-        # iter(obj)  # Check if the object is iterable
-        # obj[0]    # Check if the object supports indexing
-    # except (TypeError, KeyError, IndexError) as e:
-        # return isinstance(e, IndexError)
-    # return True
 
 
 def with_indent(content: str, indent: int) -> str:
@@ -81,10 +71,13 @@ def get_hash(data: str) -> str:
 def node_print(node: Node, indent_lvl=0, indent=2) -> str:
     out = ''
     if isinstance(node, MappingNode):
-        out += f'{type(node)}'+' {\n'
+        if node.merge:
+            out += f'{type(node)}'+' { MERGE='+str(node.merge)+'\n'
+        else:
+            out += f'{type(node)}'+' {\n'
         for key, value in node.value:
             if hasattr(key, 'value'):
-                out += with_indent(f'{key.value}: {node_print(value, indent_lvl+indent)}', indent_lvl)
+                out += with_indent(f'{key.tag} - {key.value}: {node_print(value, indent_lvl+indent)}', indent_lvl)
             else:
                 out += with_indent(f'noval(<{type(key)}>{key}): {node_print(value, indent_lvl+indent)}', indent_lvl)
         out += '},\n'
@@ -95,7 +88,7 @@ def node_print(node: Node, indent_lvl=0, indent=2) -> str:
             out += with_indent(node_print(value, indent_lvl+indent), indent_lvl)
         out += '],\n'
     elif isinstance(node, ScalarNode):
-        out += f'{node.value},\n'
+        out += f'{node.tag} - {node.value},\n'
     else:
         out += f'<{type(node)}> {node.value},\n'
     return out

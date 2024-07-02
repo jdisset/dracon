@@ -5,6 +5,8 @@ root:
     c: 5
     d: 6
 
+param2: value_simple_2
+
 additional_settings:
   setting3: additional_value3
   setting_list:

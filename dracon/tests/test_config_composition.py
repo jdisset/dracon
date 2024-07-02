@@ -27,16 +27,6 @@ def test_main_config_composition():
     config = load_from_composition_result(compres)
 
     # Check if the composition result matches the expected values
-    assert 'config' in config
-
-    assert 'setting1' in config['config']
-    assert 'setting2' in config['config']
-    assert 'setting3' in config['config']
-    assert 'extra' in config['config']
-    assert 'home' in config['config']
-    assert 'a_list' in config['config']
-
-
     assert config["config"]["setting1"] == "newval1"
     assert config["config"]["setting2"] == "baseval2"
     assert config["config"]["setting3"]["setting1"] == "baseval"
@@ -48,6 +38,11 @@ def test_main_config_composition():
     assert config["config"]["extra"]["additional_settings"]["setting3"] == "additional_value3"
     assert config["config"]["home"] == "test_var_1"
     assert config["config"]["a_list"] == ["item1", "item2", "item3", "item4"]
+
+    assert config["other_base"]["default_settings"]["param1"] == "value1"
+    assert config["other_base"]["default_settings"]["setting1"] == "default_value1"
+    assert config["other_base"]["default_settings"]["setting2"] == "default_value2"
+    assert config["other_base"]["default_settings"]["again"]["setting2"] == "value_params_2"
 
 def test_simple_config_inclusion():
     # Load and compose the extra configuration
@@ -70,7 +65,7 @@ def test_simple_config_inclusion():
     assert config["additional_settings"]["setting3"] == "additional_value3"
     assert config["additional_settings"]["setting_list"] == ["item_lol", 3, "item_lol"]
 
-def test_params_config_inclusion():
+def test_params_config():
     # Load and compose the params configuration
     params_config_content = read_from_pkg(params_config_path)
     compres = compose_config_from_str(params_config_content)
@@ -79,17 +74,8 @@ def test_params_config_inclusion():
     # Check if the params configuration is composed correctly
     assert config["param1"] == "value1"
     assert config["param2"] == "value2"
-    assert config["simple_params"]["config"]["setting1"] == "newval1"
-    assert config["simple_params"]["config"]["setting2"] == "baseval2"
-    assert config["simple_params"]["config"]["setting3"]["setting1"] == "baseval"
-    assert config["simple_params"]["config"]["setting3"]["setting2"] == "baseval2"
-    assert config["simple_params"]["config"]["extra"]["root"]["a"] == 3
-    assert config["simple_params"]["config"]["extra"]["root"]["b"] == 4
-    assert config["simple_params"]["config"]["extra"]["root"]["inner"]["c"] == 5
-    assert config["simple_params"]["config"]["extra"]["root"]["inner"]["d"] == 6
-    assert config["simple_params"]["config"]["extra"]["additional_settings"]["setting3"] == "additional_value3"
-    assert config["simple_params"]["config"]["home"] == "test_var_1"
-    assert config["simple_params"]["config"]["a_list"] == ["item1", "item2", "item3", "item4"]
+    assert config["simple_params"]["root"]["a"] == 3
+    assert config["simple_params"]["additional_settings"]["setting_list"] == ["item_lol", 3, "item_lol"]
 
 def test_env_variable_inclusion():
     # Load and compose the base configuration
