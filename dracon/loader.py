@@ -212,7 +212,7 @@ def compose_from_include_str(
     assert isinstance(res, CompositionResult)
 
     if keypath:
-        res = res.rerooted(keypath)
+        res = res.rerooted(KeyPath(keypath))
 
     return res
 
