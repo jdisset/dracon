@@ -7,16 +7,7 @@ default_settings:
     - item3
   <<: *pkg:dracon:tests/configs/params
   again: *pkg:dracon:tests/configs/params
+  just_simple: *pkg:dracon:tests/configs/params@simple_params.additional_settings
 
 
-# @ means path from scope
-# if there's nothing before, default is current (parent) scope. / means go to root of document
-# it essentially allows to use implicit aliases
-
-#<<: *@/default_settings.setting1 # will include default_value1
-#<<: *@default_settings.setting1 # same, since default is current scope
-#<<: *@.default_settings.setting1 # also same
-#<<: *@.default_settings..default_settings.setting1 # same
-#<<: *@default_settings.again.setting1 # the include resolver will attempt topological ordering to resolve this
-ppath: *env:PYTHONPATH
-
+ppath: *env:TESTVAR2

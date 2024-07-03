@@ -4,26 +4,56 @@ import re
 from typing import Optional
 from pydantic import BaseModel
 from enum import Enum
-from dracon.utils import dict_like
+from dracon.utils import dict_like, list_like, DictLike, ListLike
+from dracon.composer import MergeNode, DraconComposer, CompositionResult
 
 
-def perform_merges(conf_obj):
-    if isinstance(conf_obj, list):
-        return [perform_merges(v) for v in conf_obj]
+def process_merges(comp_res: CompositionResult):
+    print(f'Processing merges. {len(comp_res.merge_nodes)=}')
 
-    if dict_like(conf_obj):
-        res = {}
-        merges = []
-        for key, value in conf_obj.items():
-            if hasattr(key, 'tag') and key.tag == 'dracon_merge':
-                merges.append((MergeKey(raw=key.value), value))
-            else:
-                res[key] = perform_merges(value)
-        for merge_key, merge_value in merges:
-            res = merged(res, merge_value, merge_key)
-        return res
+    while comp_res.merge_nodes:
 
-    return conf_obj
+        merge_path = comp_res.merge_nodes.pop()
+        merge_node = merge_path.get_obj(comp_res.root)
+
+        parent_path = merge_path.copy().up()
+        node_key = merge_path[-1]
+        parent_node = parent_path.get_obj(comp_res.root)
+
+        print(f'Processing {merge_path=}, {node_key=}, {parent_path=}')
+
+        if not dict_like(parent_node):
+            raise ValueError(
+                'While processing merge node',
+                merge_node.start_mark,
+                'Parent of merge node must be a dictionary',
+                f'but got {type(parent_node)} at {parent_node.start_mark}',
+            )
+
+        assert node_key in parent_node, f'Key {node_key} not found in parent node'
+
+        key_node = parent_node.get_key_node(node_key)
+        assert isinstance(
+            key_node, MergeNode
+        ), f'Invalid merge node type: {type(key_node)} at {node_key}. {merge_path=}'
+
+        # we want to do parent_node = merged(parent_node, merge_node, merge_key)
+        new_parent = parent_node.copy()
+        del new_parent[node_key]
+
+        try:
+            merge_key = MergeKey(raw=key_node.merge_key_raw)
+        except Exception as e:
+            raise ValueError(
+                'While processing merge node',
+                merge_node.start_mark,
+                f'Error: {str(e)}',
+            )
+
+        new_parent = merged(new_parent, merge_node, merge_key)
+        comp_res.replace_node_at(parent_path, new_parent)
+
+    return comp_res
 
 
 class MergeMode(Enum):
@@ -117,21 +147,25 @@ class MergeKey(BaseModel):
             )
 
 
-def merged(existing: Dict[str, Any], new: Dict[str, Any], k: MergeKey) -> Dict[str, Any]:
+def merged(
+    existing: DictLike[str, Any], new: DictLike[str, Any], k: MergeKey
+) -> DictLike[str, Any]:
 
     # 1 is existing, 2 is new
 
     def merge_value(v1: Any, v2: Any, depth: int = 0) -> Any:
-        if isinstance(v1, dict) and isinstance(v2, dict):
+        if isinstance(v1, DictLike) and isinstance(v2, DictLike):
             return merge_dicts(v1, v2, depth + 1)
         # If both values are lists, merge them
-        elif isinstance(v1, list) and isinstance(v2, list):
+        elif isinstance(v1, ListLike) and isinstance(v2, ListLike):
             return merge_lists(v1, v2, depth + 1)
         # For other types, return based on the priority
         else:
             return v1 if k.dict_priority == MergePriority.EXISTING else v2
 
-    def merge_dicts(dict1: Dict[str, Any], dict2: Dict[str, Any], depth: int = 0) -> Dict[str, Any]:
+    def merge_dicts(
+        dict1: DictLike[str, Any], dict2: DictLike[str, Any], depth: int = 0
+    ) -> DictLike[str, Any]:
         pdict, other = (
             (dict1, dict2) if k.dict_priority == MergePriority.EXISTING else (dict2, dict1)
         )
@@ -151,7 +185,7 @@ def merged(existing: Dict[str, Any], new: Dict[str, Any], k: MergeKey) -> Dict[s
                     result[key] = merge_value(value, result[key], depth + 1)
         return result
 
-    def merge_lists(list1: List[Any], list2: List[Any], depth: int = 0) -> List[Any]:
+    def merge_lists(list1: ListLike[Any], list2: ListLike[Any], depth: int = 0) -> ListLike[Any]:
         if (k.list_depth is not None and depth > k.list_depth) or k.list_mode == MergeMode.REPLACE:
             return list1 if k.list_priority == MergePriority.EXISTING else list2
         if k.list_priority == MergePriority.EXISTING:
