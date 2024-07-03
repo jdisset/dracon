@@ -14,3 +14,4 @@ ENV/
 env.bak/
 venv.bak/
 __archive
+.DS_Store

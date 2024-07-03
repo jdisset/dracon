@@ -1,17 +1,20 @@
 ## {{{                       --     imports & doc     --
 from ruamel.yaml import YAML
+from copy import deepcopy
 import os
 from typing import Type
-import importlib.resources
+import re
 from importlib.resources import files, as_file
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
-from dracon.utils import dict_like, get_obj_at_keypath
-from dracon.merge import perform_merges
-from dracon.composer import IncludeNode, DraconComposer
-import importlib.resources
+from ruamel.yaml.nodes import ScalarNode, Node
+from ruamel.yaml.tag import Tag
+from dracon.composer import IncludeNode, DraconComposer, CompositionResult, make_node
+from dracon.keypath import KeyPath
 from importlib.resources import files, as_file
+from dracon.utils import node_print
+from dracon.merge import merged, MergeKey, MergeNode, process_merges
 
 """
     Dracon allows for including external configuration files in the YAML configuration files.
@@ -87,6 +90,8 @@ from importlib.resources import files, as_file
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
+from typing import Sequence, Optional, Set
+
 
 class IncludeAlias(BaseModel):
     mainpath: str
@@ -105,7 +110,7 @@ def with_possible_ext(path: str):
     return [p, p.with_suffix('.yaml'), p.with_suffix('.yml'), p.with_suffix('')]
 
 
-def load_from_file(path: str, extra_paths=None):
+def read_from_file(path: str, extra_paths=None):
     all_paths = with_possible_ext(path)
     if not extra_paths:
         extra_paths = []
@@ -125,10 +130,14 @@ def load_from_file(path: str, extra_paths=None):
 
     with open(p, 'r') as f:
         raw = f.read()
-    return load_config_from_str(raw)
+    return raw
 
 
-def load_from_pkg(path: str):
+def compose_from_file(path: str, extra_paths=None):
+    return compose_config_from_str(read_from_file(path, extra_paths))
+
+
+def read_from_pkg(path: str):
     pkg = __name__
 
     if ':' in path:
@@ -140,93 +149,115 @@ def load_from_pkg(path: str):
         try:
             with as_file(files(pkg) / fpath.as_posix()) as p:
                 with open(p, 'r') as f:
-                    return load_config_from_str(f.read())
+                    return f.read()
         except FileNotFoundError:
             pass
 
     raise FileNotFoundError(f'File not found in package {pkg}: {path}')
 
 
-def load_from_env(path: str):
-    return os.getenv(path)
+def compose_from_pkg(path: str):
+    return compose_config_from_str(read_from_pkg(path))
+
+
+def compose_from_env(path: str):
+    val = str(os.getenv(path))
+    return compose_config_from_str(val)
 
 
 DEFAULT_LOADERS = {
-    'file': load_from_file,
-    'pkg': load_from_pkg,
-    'env': load_from_env,
+    'file': compose_from_file,
+    'pkg': compose_from_pkg,
+    'env': compose_from_env,
 }
 
 
-def load_from_include_str(
+def compose_from_include_str(
     include_str: str,
-    path_to_node: str,
-    conf_obj: Any,
-    anchors=None,
+    include_node_path: str = '/',
+    composition_result: Optional[CompositionResult] = None,
     custom_loaders: dict = DEFAULT_LOADERS,
 ) -> Any:
 
-    if anchors is None:
-        anchors = {}
-
-
-    # Handle special cases for relative paths
-    if include_str.startswith('/'):
-        return get_obj_at_keypath(conf_obj, include_str)
-
-    if include_str.startswith('@') or include_str.startswith('.'):
-        print('path_to_node:', path_to_node)
-        current_obj = get_obj_at_keypath(conf_obj, path_to_node)
-        return get_obj_at_keypath(current_obj, include_str[1:])
-
     if '@' in include_str:
-        mainpath, keypath = include_str.split('@', 1)
+        # split at the first unescaped @
+        mainpath, keypath = re.split(r'(?<!\\)@', include_str, 1)
     else:
         mainpath, keypath = include_str, ''
 
-    if mainpath in anchors:
-        refpath = anchors[mainpath]
-        obj = get_obj_at_keypath(conf_obj, refpath)
-        return get_obj_at_keypath(obj, keypath)
+    if composition_result is not None:
+        # it's a path starting with the root of the document
+        if include_str.startswith('/'):
+            return composition_result.rerooted(KeyPath(mainpath))
 
-    assert ':' in mainpath, f'Invalid include path: anchor {mainpath} not found'
+        # it's a path relative to the current node
+        if include_str.startswith('@') or include_str.startswith('.'):  # means relative to parent
+            comb_path = KeyPath(include_node_path).up().down(mainpath)
+            return composition_result.rerooted(comb_path)
+
+        anchors = composition_result.anchor_paths
+        if mainpath in anchors:
+            return composition_result.rerooted(anchors[mainpath] + keypath)
+
+        assert ':' in mainpath, f'Invalid include path: anchor {mainpath} not found in document'
+
+    assert ':' in mainpath, f'Invalid include path: {mainpath}. No loader specified.'
 
     loader, path = mainpath.split(':', 1)
     if loader not in custom_loaders:
         raise ValueError(f'Unknown loader: {loader}')
 
-    obj = custom_loaders[loader](path)
-    return get_obj_at_keypath(obj, keypath)
+    res = custom_loaders[loader](path)
+    assert isinstance(res, CompositionResult)
+
+    if keypath:
+        res = res.rerooted(KeyPath(keypath))
+
+    return res
 
 
+def process_includes(comp_res: CompositionResult):
 
-def resolve_includes(conf_node, full_conf, anchor_paths=None):
+    while comp_res.include_nodes:
+        inode_path = comp_res.include_nodes.pop()
+        inode = inode_path.get_obj(comp_res.root)
+        assert isinstance(inode, IncludeNode), f'Invalid node type: {type(inode)}'
+        include_str = inode.value
+        include_composed = compose_from_include_str(include_str, inode_path, comp_res)
+        comp_res = comp_res.replaced_at(inode_path, include_composed)
 
-    if dict_like(conf_node):
-        return {k: resolve_includes(v, full_conf, anchor_paths) for k, v in conf_node.items()}
-
-    if isinstance(conf_node, list):
-        return [resolve_includes(v, full_conf, anchor_paths) for v in conf_node]
-
-    if hasattr(conf_node, 'tag') and conf_node.tag == 'dracon_include':
-        include_str = conf_node.anchor.value
-        keypath = conf_node.value
-        print('include_str:', include_str)
-        return load_from_include_str(include_str, keypath, full_conf, anchor_paths)
-
-    return conf_node
+    return comp_res
 
 
-def dracon_post_process(loaded, anchor_paths=None):
-    loaded = resolve_includes(loaded, loaded, anchor_paths)
-    loaded = perform_merges(loaded)
-    return loaded
+def dracon_post_process_composed(comp: CompositionResult):
+    comp = process_includes(comp)
+    comp = process_merges(comp)
+    return comp
 
 
-def load_config_from_str(content: str):
+def compose_config_from_str(content: str) -> CompositionResult:
     yaml = YAML()
     yaml.preserve_quotes = True
     yaml.Composer = DraconComposer
-    loaded_raw = yaml.load(content)
-    anchor_paths = yaml.composer.anchor_paths
-    return dracon_post_process(loaded_raw, anchor_paths)
+    yaml.compose(content)
+    res = yaml.composer.get_result()
+    return dracon_post_process_composed(res)
+
+
+def load_from_composition_result(compres: CompositionResult):
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    return yaml.constructor.construct_document(compres.root)
+
+
+def load(config_path: str | Path):
+    if isinstance(config_path, Path):
+        config_path = config_path.resolve().as_posix()
+    if ':' not in config_path:
+        config_path = f'file:{config_path}'
+    comp = compose_from_include_str(config_path, custom_loaders=DEFAULT_LOADERS)
+    return load_from_composition_result(comp)
+
+
+
+
