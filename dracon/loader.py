@@ -1,4 +1,3 @@
-# -- dracon/loader.py
 ## {{{                       --     imports & doc     --
 from ruamel.yaml import YAML
 from copy import deepcopy
@@ -167,7 +166,7 @@ def compose_from_env(path: str):
 
 
 DEFAULT_LOADERS = {
-    # 'file': load_from_file,
+    'file': compose_from_file,
     'pkg': compose_from_pkg,
     'env': compose_from_env,
 }
@@ -238,14 +237,27 @@ def dracon_post_process_composed(comp: CompositionResult):
 
 def compose_config_from_str(content: str) -> CompositionResult:
     yaml = YAML()
+    yaml.preserve_quotes = True
     yaml.Composer = DraconComposer
     yaml.compose(content)
     res = yaml.composer.get_result()
-    res = dracon_post_process_composed(res)
-    return res
+    return dracon_post_process_composed(res)
 
 
 def load_from_composition_result(compres: CompositionResult):
     yaml = YAML()
     yaml.preserve_quotes = True
     return yaml.constructor.construct_document(compres.root)
+
+
+def load(config_path: str | Path):
+    if isinstance(config_path, Path):
+        config_path = config_path.resolve().as_posix()
+    if ':' not in config_path:
+        config_path = f'file:{config_path}'
+    comp = compose_from_include_str(config_path, custom_loaders=DEFAULT_LOADERS)
+    return load_from_composition_result(comp)
+
+
+
+
