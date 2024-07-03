@@ -2,6 +2,7 @@
 base: &base
   setting1: baseval
   setting2: baseval2
+  setting.with.dot: baseval3
 
 other_base: *pkg:dracon:tests/configs/base.yaml
 
@@ -13,6 +14,7 @@ config:
     setting2: *base@setting2
     extra: *pkg:dracon:tests/configs/simple.yaml
     home: *env:TESTVAR1
+    new_with.dot: */base.setting\.with\.dot
     a_list:
       - item4
 
@@ -22,3 +24,11 @@ config:
     - item3
 
 
+new_simple:
+  <<{~>}: *pkg:dracon:tests/configs/simple
+  root:
+    a: 'new_a'
+
+
+plot_config:
+  <<: *pkg:biocomptools:configs/plot_config/default_plotconf

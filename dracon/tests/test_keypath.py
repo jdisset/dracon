@@ -17,6 +17,10 @@ def test_parse_int_simple():
     assert kp.parts == ['1']
 
 
+def test_with_dots():
+    kp = KeyPath("a.b\\.c.d", simplify=False)
+    assert kp.parts == ["a", "b.c", "d"]
+
 def test_parse_string_with_root():
     kp = KeyPath("/a.b.c", simplify=False)
     assert kp.parts == [KeyPathToken.ROOT, "a", "b", "c"]

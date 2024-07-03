@@ -10,6 +10,12 @@ class KeyPathToken(Enum):
     UP = 1
 
 
+def escape_keypath_part(part: str) -> str:
+    return part.replace('.', '\\.').replace('/', '\\/')
+
+def unescape_keypath_part(part: str) -> str:
+    return part.replace('\\.', '.').replace('\\/', '/')
+
 class KeyPath:
     def __init__(
         self, path: Union[str, List[Union[Hashable, KeyPathToken]]], simplify: bool = True
@@ -32,14 +38,19 @@ class KeyPath:
         dot_count = 0
         current_part = ""
 
+        escaped = False
+
         for char in path:
-            if char == '/':
+            if char == '\\' and not escaped:
+                escaped = True
+                continue
+            elif char == '/' and not escaped:
                 if current_part:
                     parts.append(self._convert_part(current_part))
                     current_part = ""
                 parts.append(KeyPathToken.ROOT)
                 dot_count = 0
-            elif char == '.':
+            elif char == '.' and not escaped:
                 if current_part:
                     parts.append(self._convert_part(current_part))
                     current_part = ""
@@ -49,6 +60,7 @@ class KeyPath:
             else:
                 current_part += char
                 dot_count = 0
+            escaped = False
         if current_part:
             parts.append(self._convert_part(current_part))
         return parts
@@ -85,8 +97,11 @@ class KeyPath:
         self.is_simple = False
         if isinstance(path, KeyPath):
             self.parts.extend(path.parts)
-        else:
+        elif isinstance(path, list):
             return self.down(KeyPath(path))
+        else:
+            # escape if it's a string
+            return self.down(KeyPath(escape_keypath_part(path)))
         return self
 
     # same as down
@@ -137,9 +152,9 @@ class KeyPath:
                     result += '..'
             else:
                 if prev == KeyPathToken.ROOT or prev == KeyPathToken.UP or prev is None:
-                    result += str(part)
+                    result += str(escape_keypath_part(str(part)))
                 else:
-                    result += '.' + str(part)
+                    result += '.' + str(escape_keypath_part(str(part)))
             prev = part
         return result
 

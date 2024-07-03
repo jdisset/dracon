@@ -192,7 +192,7 @@ def compose_from_include_str(
 
         # it's a path relative to the current node
         if include_str.startswith('@') or include_str.startswith('.'):  # means relative to parent
-            comb_path = KeyPath(include_node_path).up().down(mainpath)
+            comb_path = KeyPath(include_node_path).up().down(KeyPath(mainpath))
             return composition_result.rerooted(comb_path)
 
         anchors = composition_result.anchor_paths
@@ -236,8 +236,7 @@ def dracon_post_process_composed(comp: CompositionResult):
 
 
 def compose_config_from_str(content: str) -> CompositionResult:
-    yaml = YAML()
-    yaml.preserve_quotes = True
+    yaml = YAML(typ='safe', pure=True)
     yaml.Composer = DraconComposer
     yaml.compose(content)
     res = yaml.composer.get_result()
@@ -245,8 +244,7 @@ def compose_config_from_str(content: str) -> CompositionResult:
 
 
 def load_from_composition_result(compres: CompositionResult):
-    yaml = YAML()
-    yaml.preserve_quotes = True
+    yaml = YAML(typ='safe', pure=True)
     return yaml.constructor.construct_document(compres.root)
 
 
