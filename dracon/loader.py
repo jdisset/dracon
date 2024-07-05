@@ -138,10 +138,13 @@ def compose_from_file(path: str, extra_paths=None):
 
 
 def read_from_pkg(path: str):
-    pkg = __name__
+    pkg = None
 
     if ':' in path:
         pkg, path = path.split(':', 1)
+
+    if not pkg:
+        raise ValueError('No package specified in path')
 
     all_paths = with_possible_ext(path)
 
@@ -153,7 +156,14 @@ def read_from_pkg(path: str):
         except FileNotFoundError:
             pass
 
-    raise FileNotFoundError(f'File not found in package {pkg}: {path}')
+    # it failed
+    tried_files = [str(files(pkg) / p.as_posix()) for p in all_paths]
+    tried_str = '\n'.join(tried_files)
+    resources = [resource.name for resource in files(pkg).iterdir() if not resource.is_file()]
+    resources_str = '\n  - '.join(resources)
+    raise FileNotFoundError(
+        f'File not found in package {pkg}: {path}. Tried: {tried_str}.\nPackage root: {files(pkg)}.\nAvailable subdirs: \n  - {resources_str}'
+    )
 
 
 def compose_from_pkg(path: str):
@@ -255,7 +265,3 @@ def load(config_path: str | Path):
         config_path = f'file:{config_path}'
     comp = compose_from_include_str(config_path, custom_loaders=DEFAULT_LOADERS)
     return load_from_composition_result(comp)
-
-
-
-
