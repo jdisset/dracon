@@ -162,7 +162,7 @@ def read_from_pkg(path: str):
     resources = [resource.name for resource in files(pkg).iterdir() if not resource.is_file()]
     resources_str = '\n  - '.join(resources)
     raise FileNotFoundError(
-        f'File not found in package {pkg}: {path}. Tried: {tried_str}.\nPackage root: {files(pkg)}.\nAvailable subdirs: \n  - {resources_str}'
+        f'File not found in package {pkg}: {path}. Tried: {tried_str}.\nPackage root: {files(pkg)}\nAvailable subdirs: \n  - {resources_str}'
     )
 
 
