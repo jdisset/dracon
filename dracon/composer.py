@@ -268,7 +268,6 @@ class CompositionResult(BaseModel):
         # make unique
         self.include_nodes = list(set(self.include_nodes))
 
-        print(f'Adding merge nodes: {new_root.merge_nodes}. Before: {self.merge_nodes}')
         self.merge_nodes.extend(
             [
                 (at_path + merge_node.rootless()).simplified()
@@ -277,7 +276,6 @@ class CompositionResult(BaseModel):
         )
         # make unique
         self.merge_nodes = list(set(self.merge_nodes))
-        print(f'After: {self.merge_nodes}')
 
 
         for anchor, anchor_path in new_root.anchor_paths.items():
@@ -389,7 +387,6 @@ class DraconComposer(Composer):
         if anchor is not None:
             self.anchors[anchor] = node
         mpath = self.curr_path.copy() + KeyPath(event.value)
-        print(f'Adding merge node at {mpath}')
         self.merge_nodes.append(mpath)
         return node
 

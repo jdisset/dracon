@@ -17,12 +17,10 @@ def dump(res):
 content = read_from_pkg('dracon:tests/configs/params.yaml')
 # content = read_from_pkg('dracon:tests/configs/main.yaml')
 
-print(content)
 
 ##
 
 compres = compose_config_from_str(content)
-print(node_print(compres.root))
 res = load_from_composition_result(compres)
 dump(res)
 

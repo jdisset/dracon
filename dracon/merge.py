@@ -9,7 +9,6 @@ from dracon.composer import MergeNode, DraconComposer, CompositionResult
 
 
 def process_merges(comp_res: CompositionResult):
-    print(f'Processing merges. {len(comp_res.merge_nodes)=}')
 
     while comp_res.merge_nodes:
 
@@ -20,7 +19,6 @@ def process_merges(comp_res: CompositionResult):
         node_key = merge_path[-1]
         parent_node = parent_path.get_obj(comp_res.root)
 
-        print(f'Processing {merge_path=}, {node_key=}, {parent_path=}')
 
         if not dict_like(parent_node):
             raise ValueError(
