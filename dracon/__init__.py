@@ -1,5 +1,6 @@
-from dracon.utils import *
-from dracon.merge import *
-from dracon.loader import *
-from dracon.composer import *
-from dracon.keypath import *
+from .utils import *
+from .merge import *
+from .loader import *
+from .composer import *
+from .keypath import *
+
