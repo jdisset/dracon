@@ -1,18 +1,21 @@
 [build-system]
-requires = ["setuptools>=42", "wheel"]
+requires = ["setuptools", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
+
 
 [project]
 name = "dracon"
-version = "0.1.0"
-description = "A powerful configuration library combining Pydantic, OmegaConf, and Hydra"
 authors = [{name = "Jean Disset", email = "jdisset@mit.edu"}]
+version = "0.1.0"
 readme = "README.md"
+description = "A configuration library that extends yaml's alias, anchor and merge system, combined with Pydantic's type hints"
+requires-python = ">=3.10"
 dependencies = [
+    "hydra-core",
 	"omegaconf",
 	"pydantic",
-	"hydra-core",
 ]
+
 
 [tool.setuptools.package-data]
 dracon = ["tests/configs/*.yaml"]
