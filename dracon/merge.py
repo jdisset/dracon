@@ -1,11 +1,11 @@
 from typing import Callable, Type, Dict, Union, Optional, Any, List
 from copy import deepcopy
 import re
-from typing import Optional
 from pydantic import BaseModel
 from enum import Enum
 from dracon.utils import dict_like, list_like, DictLike, ListLike
 from dracon.composer import MergeNode, DraconComposer, CompositionResult
+from ruamel.yaml.nodes import Node
 
 
 def process_merges(comp_res: CompositionResult):
@@ -18,7 +18,6 @@ def process_merges(comp_res: CompositionResult):
         parent_path = merge_path.copy().up()
         node_key = merge_path[-1]
         parent_node = parent_path.get_obj(comp_res.root)
-
 
         if not dict_like(parent_node):
             raise ValueError(
@@ -49,6 +48,7 @@ def process_merges(comp_res: CompositionResult):
             )
 
         new_parent = merged(new_parent, merge_node, merge_key)
+        assert isinstance(new_parent, Node)
         comp_res.replace_node_at(parent_path, new_parent)
 
     return comp_res
@@ -145,9 +145,7 @@ class MergeKey(BaseModel):
             )
 
 
-def merged(
-    existing: DictLike[str, Any], new: DictLike[str, Any], k: MergeKey
-) -> DictLike[str, Any]:
+def merged(existing: DictLike, new: DictLike, k: MergeKey) -> DictLike:
 
     # 1 is existing, 2 is new
 
@@ -161,9 +159,7 @@ def merged(
         else:
             return v1 if k.dict_priority == MergePriority.EXISTING else v2
 
-    def merge_dicts(
-        dict1: DictLike[str, Any], dict2: DictLike[str, Any], depth: int = 0
-    ) -> DictLike[str, Any]:
+    def merge_dicts(dict1: DictLike, dict2: DictLike, depth: int = 0) -> DictLike:
         pdict, other = (
             (dict1, dict2) if k.dict_priority == MergePriority.EXISTING else (dict2, dict1)
         )
@@ -183,7 +179,7 @@ def merged(
                     result[key] = merge_value(value, result[key], depth + 1)
         return result
 
-    def merge_lists(list1: ListLike[Any], list2: ListLike[Any], depth: int = 0) -> ListLike[Any]:
+    def merge_lists(list1: ListLike, list2: ListLike, depth: int = 0) -> ListLike:
         if (k.list_depth is not None and depth > k.list_depth) or k.list_mode == MergeMode.REPLACE:
             return list1 if k.list_priority == MergePriority.EXISTING else list2
         if k.list_priority == MergePriority.EXISTING:
