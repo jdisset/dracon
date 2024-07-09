@@ -1,22 +1,33 @@
 [build-system]
-requires = ["setuptools >= 70"]
-build-backend = "setuptools.build_meta"
-
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "dracon"
 authors = [{name = "Jean Disset", email = "jdisset@mit.edu"}]
 version = "0.1.0"
-readme = "README.md"
 description = "A configuration library that extends yaml's alias, anchor and merge system, combined with Pydantic's type hints"
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "hydra-core",
-	"omegaconf",
-	"pydantic",
-	"ruamel.yaml",
+    "omegaconf",
+    "pydantic",
+    "ruamel.yaml",
+	"xxhash"
 ]
 
+[project.optional-dependencies]
+test = ["pytest"]
 
-[tool.setuptools.package-data]
-dracon = ["tests/configs/*.yaml"]
+[tool.hatch.build.targets.wheel]
+packages = ["dracon"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/dracon",
+    "/tests",
+]
+
+[tool.hatch.version]
+path = "dracon/__init__.py"
