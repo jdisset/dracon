@@ -1,21 +1,20 @@
-## {{{                       --     imports & doc     --
+## {{{                          --     imports     --
 from ruamel.yaml import YAML
-from copy import deepcopy
-import os
 from typing import Type
 import re
-from importlib.resources import files, as_file
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from pydantic import BaseModel
-from ruamel.yaml.nodes import ScalarNode, Node
-from ruamel.yaml.tag import Tag
-from dracon.composer import IncludeNode, DraconComposer, CompositionResult, make_node
-from dracon.keypath import KeyPath
-from importlib.resources import files, as_file
+from dracon.composer import IncludeNode, CompositionResult, DraconComposer
+from dracon.keypath import KeyPath, ROOTPATH
 from dracon.utils import node_print
-from dracon.merge import merged, MergeKey, MergeNode, process_merges
+from dracon.merge import process_merges
+from dracon.loaders.file import compose_from_file
+from dracon.loaders.pkg import compose_from_pkg
+from dracon.loaders.env import compose_from_env
+##────────────────────────────────────────────────────────────────────────────}}}
 
+## {{{                       --     doc     --
 """
     Dracon allows for including external configuration files in the YAML configuration files.
     Dracon provides 3 default loaders:
@@ -90,19 +89,126 @@ from dracon.merge import merged, MergeKey, MergeNode, process_merges
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
-from typing import Sequence, Optional, Set
+
+DEFAULT_LOADERS = {
+    "file": compose_from_file,
+    "pkg": compose_from_pkg,
+    "env": compose_from_env,
+}
 
 
-class IncludeAlias(BaseModel):
-    mainpath: str
-    keypath: Optional[str] = None
+# class DRAML(YAML):
+    # def __init__(self, *args, **kwargs):
+        # self.Composer = DraconComposer
+        # super().__init__(*args, **kwargs)
+        # # self.Constructor = Draconstructor
 
-    def model_post_init(self, *args, **kwargs):
-        super().model_post_init(*args, **kwargs)
-        if '@' in self.mainpath:
-            assert self.mainpath.count('@') == 1, 'Only one @ is allowed in include path'
-            self.mainpath, self.keypath = self.mainpath.split('@', 1)
+def make_draml():
+    yaml = YAML(typ='safe', pure=True)
+    yaml.Composer = DraconComposer
+    return yaml
 
+
+## {{{                       --     DraconLoader     --
+class DraconLoader:
+    def __init__(
+        self,
+        custom_loaders: Optional[Dict[str, Type[BaseModel]]] = None,
+        custom_types: Optional[Dict[str, Type]] = None,
+    ):
+        self.custom_loaders = DEFAULT_LOADERS
+        self.custom_loaders.update(custom_loaders or {})
+
+    def copy(self):
+        return DraconLoader(self.custom_loaders)
+
+    def compose_from_include_str(
+        self,
+        include_str: str,
+        include_node_path: KeyPath = ROOTPATH,
+        composition_result: Optional[CompositionResult] = None,
+    ) -> Any:
+        if "@" in include_str:
+            # split at the first unescaped @
+            mainpath, keypath = re.split(r"(?<!\\)@", include_str, maxsplit=1)
+        else:
+            mainpath, keypath = include_str, ""
+
+        if composition_result is not None:
+            # it's a path starting with the root of the document
+            if include_str.startswith("/"):
+                return composition_result.rerooted(KeyPath(mainpath))
+
+            # it's a path relative to the current node
+            if include_str.startswith("@") or include_str.startswith(
+                "."
+            ):  # means relative to parent
+                comb_path = include_node_path.parent.down(KeyPath(mainpath))
+                return composition_result.rerooted(comb_path)
+
+            anchors = composition_result.anchor_paths
+            if mainpath in anchors:
+                return composition_result.rerooted(anchors[mainpath] + keypath)
+
+            assert ":" in mainpath, f"Invalid include path: anchor {mainpath} not found in document"
+
+        assert ":" in mainpath, f"Invalid include path: {mainpath}. No loader specified."
+
+        loader, path = mainpath.split(":", 1)
+        if loader not in self.custom_loaders:
+            raise ValueError(f"Unknown loader: {loader}")
+
+        res = self.custom_loaders[loader](path, self.copy())
+        assert isinstance(res, CompositionResult)
+
+        if keypath:
+            res = res.rerooted(KeyPath(keypath))
+
+        return res
+
+    def compose_config_from_str(self, content: str) -> CompositionResult:
+        yaml = make_draml()
+        yaml.compose(content)
+        res = yaml.composer.get_result()
+        return self.post_process_composed(res)
+
+    def load_from_composition_result(self, compres: CompositionResult):
+        yaml = make_draml()
+        return yaml.constructor.construct_document(compres.root)
+
+    def load(self, config_path: str | Path):
+        if isinstance(config_path, Path):
+            config_path = config_path.resolve().as_posix()
+        if ":" not in config_path:
+            config_path = f"file:{config_path}"
+        comp = self.compose_from_include_str(config_path)
+        return self.load_from_composition_result(comp)
+
+    def loads(self, content: str):
+        comp = self.compose_config_from_str(content)
+        return self.load_from_composition_result(comp)
+
+    def post_process_composed(self, comp: CompositionResult):
+        comp = self.process_includes(comp)
+        # comp = process_merges(comp)
+        return comp
+
+    def process_includes(self, comp_res: CompositionResult):
+        while comp_res.include_nodes:
+            inode_path = comp_res.include_nodes.pop()
+            inode = inode_path.get_obj(comp_res.root)
+            assert isinstance(inode, IncludeNode), f"Invalid node type: {type(inode)}"
+            include_str = inode.value
+            include_composed = self.compose_from_include_str(include_str, inode_path, comp_res)
+            comp_res = comp_res.replaced_at(inode_path, include_composed)
+        return comp_res
+
+
+# def load(config_path: str | Path):
+    # loader = DraconLoader()
+    # return loader.load(config_path)
+
+##────────────────────────────────────────────────────────────────────────────}}}
 
 def with_possible_ext(path: str):
     # return: the original, with .yaml, with .yml, without extension. in that order
@@ -138,6 +244,7 @@ def compose_from_file(path: str, extra_paths=None):
 
 
 def read_from_pkg(path: str):
+    from importlib.resources import files, as_file
     pkg = None
 
     if ':' in path:
@@ -171,6 +278,7 @@ def compose_from_pkg(path: str):
 
 
 def compose_from_env(path: str):
+    import os
     val = str(os.getenv(path))
     return compose_config_from_str(val)
 
