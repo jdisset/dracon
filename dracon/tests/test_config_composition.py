@@ -15,11 +15,18 @@ main_config_path = 'dracon:tests/configs/main.yaml'
 params_config_path = 'dracon:tests/configs/params.yaml'
 base_config_path = 'dracon:tests/configs/base.yaml'
 
+
+def get_config(config_path):
+    from dracon.loader import DraconLoader
+    loader = DraconLoader()
+    compres = loader.compose_from_include_str(f"pkg:{config_path}")
+    config = loader.load_from_composition_result(compres)
+    return config
+
+
 def test_main_config_composition():
-    # Load and compose the simple configuration
-    main_config_content = read_from_pkg(main_config_path)
-    compres = compose_config_from_str(main_config_content)
-    config = load_from_composition_result(compres)
+
+    config = get_config(main_config_path)
 
     # Check if the composition result matches the expected values
     assert config["base"]["setting.with.dot"] == "baseval3"
@@ -43,17 +50,25 @@ def test_main_config_composition():
     assert config["other_base"]["default_settings"]["setting1"] == "default_value1"
     assert config["other_base"]["default_settings"]["setting2"] == "default_value2"
     assert config["other_base"]["default_settings"]["again"]["setting2"] == "value_params_2"
-    assert config["other_base"]["default_settings"]["just_simple"]["setting3"] == "additional_value3"
-    assert config["other_base"]["default_settings"]["just_simple"]["setting_list"] == ["item_lol", 3, "item_lol"]
+    assert (
+        config["other_base"]["default_settings"]["just_simple"]["setting3"] == "additional_value3"
+    )
+    assert config["other_base"]["default_settings"]["just_simple"]["setting_list"] == [
+        "item_lol",
+        3,
+        "item_lol",
+    ]
 
-    assert config["new_simple"]["root"]=={"a": "new_a"}
-    assert config["new_simple"]["additional_settings"]["setting_list"] == ["item_lol", 3, "item_lol"]
+    assert config["new_simple"]["root"] == {"a": "new_a"}
+    assert config["new_simple"]["additional_settings"]["setting_list"] == [
+        "item_lol",
+        3,
+        "item_lol",
+    ]
+
 
 def test_simple_config_inclusion():
-    # Load and compose the extra configuration
-    simple_config_content = read_from_pkg(simple_config_path)
-    compres = compose_config_from_str(simple_config_content)
-    config = load_from_composition_result(compres)
+    config = get_config(simple_config_path)
 
     assert 'root' in config
     assert 'inner' in config['root']
@@ -70,27 +85,26 @@ def test_simple_config_inclusion():
     assert config["additional_settings"]["setting3"] == "additional_value3"
     assert config["additional_settings"]["setting_list"] == ["item_lol", 3, "item_lol"]
 
+
 def test_params_config():
-    # Load and compose the params configuration
-    params_config_content = read_from_pkg(params_config_path)
-    compres = compose_config_from_str(params_config_content)
-    config = load_from_composition_result(compres)
+    config = get_config(params_config_path)
 
     # Check if the params configuration is composed correctly
     assert config["param1"] == "value1"
     assert config["param2"] == "value2"
     assert config["simple_params"]["root"]["a"] == 3
-    assert config["simple_params"]["additional_settings"]["setting_list"] == ["item_lol", 3, "item_lol"]
+    assert config["simple_params"]["additional_settings"]["setting_list"] == [
+        "item_lol",
+        3,
+        "item_lol",
+    ]
+
 
 def test_env_variable_inclusion():
-    # Load and compose the base configuration
-    base_config_content = read_from_pkg(base_config_path)
-    compres = compose_config_from_str(base_config_content)
-    config = load_from_composition_result(compres)
+    config = get_config(base_config_path)
 
     # Check if the environment variable is included correctly
     assert config["ppath"] == "test_var_2"
-
 
 
 if __name__ == "__main__":

@@ -1,17 +1,15 @@
-from typing import Callable, Type, Dict, Union, Optional, Any, List
+from typing import Optional, Any
 from copy import deepcopy
 import re
 from pydantic import BaseModel
 from enum import Enum
-from dracon.utils import dict_like, list_like, DictLike, ListLike
-from dracon.composer import MergeNode, DraconComposer, CompositionResult
+from dracon.utils import dict_like, DictLike, ListLike
+from dracon.composer import MergeNode, CompositionResult
 from ruamel.yaml.nodes import Node
 
 
 def process_merges(comp_res: CompositionResult):
-
     while comp_res.merge_nodes:
-
         merge_path = comp_res.merge_nodes.pop()
         merge_node = merge_path.get_obj(comp_res.root)
 
@@ -45,7 +43,7 @@ def process_merges(comp_res: CompositionResult):
                 'While processing merge node',
                 merge_node.start_mark,
                 f'Error: {str(e)}',
-            )
+            ) from e
 
         new_parent = merged(new_parent, merge_node, merge_key)
         assert isinstance(new_parent, Node)
@@ -87,7 +85,10 @@ class MergeKey(BaseModel):
         return key.startswith('<<')
 
     def get_mode_priority(
-        self, mode_str: str, default_mode=MergeMode.APPEND, default_priority=MergePriority.EXISTING
+        self,
+        mode_str: str,
+        default_mode=MergeMode.APPEND,
+        default_priority=MergePriority.EXISTING,
     ):
         # + means RECURSE or APPEND
         # ~ means REPLACE
@@ -146,7 +147,6 @@ class MergeKey(BaseModel):
 
 
 def merged(existing: DictLike, new: DictLike, k: MergeKey) -> DictLike:
-
     # 1 is existing, 2 is new
 
     def merge_value(v1: Any, v2: Any, depth: int = 0) -> Any:
