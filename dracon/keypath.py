@@ -87,6 +87,10 @@ class KeyPath:
             return self.simplify()
         return self
 
+    @property
+    def parent(self) -> 'KeyPath':
+        return self.copy().up()
+
     def pop(self) -> Union[Hashable, KeyPathToken]:
         return self.parts.pop()
 
