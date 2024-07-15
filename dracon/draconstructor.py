@@ -42,7 +42,3 @@ class Draconstructor(Constructor):
             node.tag = self.resolver.DEFAULT_SCALAR_TAG
 
 
-
-# Draconstructor.add_constructor(
-    # '!np.ndrray', lambda self, node: np.array(self.construct_sequence(node))
-# )

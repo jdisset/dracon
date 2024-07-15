@@ -3,11 +3,61 @@ from ruamel.yaml.nodes import MappingNode, SequenceNode, ScalarNode, Node
 import base64
 from typing import Iterable, TypeVar, Type, Tuple, Generic
 from typing import Protocol, runtime_checkable
+import typing
+import importlib
+import inspect
 
 
 K = TypeVar('K')
 V = TypeVar('V')
 E = TypeVar('E')
+
+def get_all_types(items):
+    return {
+        name: obj
+        for name, obj in items.items()
+        if isinstance(
+            obj,
+            (
+                type,
+                typing._GenericAlias,
+                typing._SpecialForm,
+                typing._SpecialGenericAlias,
+            ),
+        )
+    }
+
+
+def get_all_types_from_module(module):
+    if isinstance(module, str):
+        try:
+            module = importlib.import_module(module)
+        except ImportError:
+            print(f"WARNING: Could not import module {module}")
+            return {}
+    return get_all_types(module.__dict__)
+
+
+def get_globals_up_to_frame(frame_n):
+    frames = inspect.stack()
+    globalns = {}
+
+    for frame_id in range(min(frame_n, len(frames)), 0, -1):
+        frame = frames[frame_id]
+        globalns.update(frame.frame.f_globals)
+
+    return globalns
+
+
+def collect_all_types(modules, capture_globals=True, globals_at_frame=5):
+    types = {}
+    for module in modules:
+        types.update(get_all_types_from_module(module))
+    if capture_globals:
+        globalns = get_globals_up_to_frame(globals_at_frame)
+        types.update(get_all_types(globalns))
+    return types
+
 
 
 @runtime_checkable
