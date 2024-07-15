@@ -1,6 +1,7 @@
 ## {{{                          --     imports     --
 from ruamel.yaml import YAML
 from typing import Type, Callable
+import inspect
 import re
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -8,12 +9,14 @@ from pydantic import BaseModel
 from dracon.composer import IncludeNode, CompositionResult, DraconComposer
 from dracon.draconstructor import Draconstructor
 from dracon.keypath import KeyPath, ROOTPATH
-from dracon.utils import node_print
+from dracon.utils import node_print, collect_all_types
 from dracon.merge import process_merges
 from dracon.loaders.file import read_from_file
 from dracon.loaders.pkg import read_from_pkg
 from dracon.loaders.env import read_from_env
 from dracon.representer import DraconRepresenter
+import typing
+import importlib
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 ## {{{                       --     doc     --
@@ -94,19 +97,18 @@ from dracon.representer import DraconRepresenter
 ## {{{                       --     DraconLoader     --
 
 
-def make_draml():
-    yaml = YAML()
-    yaml.Composer = DraconComposer
-    yaml.Constructor = Draconstructor
-    yaml.Representer = DraconRepresenter
-    return yaml
-
-
 DEFAULT_LOADERS: Dict[str, Callable] = {
     'file': read_from_file,
     'pkg': read_from_pkg,
     'env': read_from_env,
 }
+
+DEFAULT_MODULES_FOR_TYPES = [
+    'pydantic',
+    'typing',
+    'dracon',
+    'numpy',
+]
 
 
 class DraconLoader:
@@ -114,10 +116,19 @@ class DraconLoader:
         self,
         custom_loaders: Optional[Dict[str, Callable]] = None,
         custom_types: Optional[Dict[str, Type]] = None,
+        capture_globals: bool = True,
     ):
         self.custom_loaders = DEFAULT_LOADERS
         self.custom_loaders.update(custom_loaders or {})
-        self.yaml = make_draml()
+        self.custom_types = custom_types or {}
+
+        self.yaml = YAML()
+        self.yaml.Composer = DraconComposer
+        self.yaml.Constructor = Draconstructor
+        self.yaml.Representer = DraconRepresenter
+
+        localns = collect_all_types(DEFAULT_MODULES_FOR_TYPES, capture_globals=capture_globals)
+        self.yaml.constructor.localns = localns
 
     def copy(self):
         return DraconLoader(self.custom_loaders)
@@ -214,6 +225,7 @@ class DraconLoader:
     def dump(self, data, stream=None):
         if stream is None:
             from io import StringIO
+
             string_stream = StringIO()
             self.yaml.dump(data, string_stream)
             return string_stream.getvalue()
