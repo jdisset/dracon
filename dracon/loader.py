@@ -6,15 +6,14 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 from pydantic import BaseModel
 from dracon.composer import IncludeNode, CompositionResult, DraconComposer
+from dracon.draconstructor import Draconstructor
 from dracon.keypath import KeyPath, ROOTPATH
 from dracon.utils import node_print
 from dracon.merge import process_merges
-import dracon.loaders.file as fileloader
-import dracon.loaders.pkg as pkgloader
-import dracon.loaders.env as envloader
 from dracon.loaders.file import read_from_file
 from dracon.loaders.pkg import read_from_pkg
 from dracon.loaders.env import read_from_env
+from dracon.representer import DraconRepresenter
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 ## {{{                       --     doc     --
@@ -96,8 +95,10 @@ from dracon.loaders.env import read_from_env
 
 
 def make_draml():
-    yaml = YAML(typ='safe', pure=True)
+    yaml = YAML()
     yaml.Composer = DraconComposer
+    yaml.Constructor = Draconstructor
+    yaml.Representer = DraconRepresenter
     return yaml
 
 
@@ -116,6 +117,7 @@ class DraconLoader:
     ):
         self.custom_loaders = DEFAULT_LOADERS
         self.custom_loaders.update(custom_loaders or {})
+        self.yaml = make_draml()
 
     def copy(self):
         return DraconLoader(self.custom_loaders)
@@ -160,7 +162,7 @@ class DraconLoader:
         res = custom_loaders[loader](path)
         if not isinstance(res, CompositionResult):
             assert isinstance(res, str), f"Invalid loader result: {type(res)}"
-            res = self.compose_config_from_str(res)
+            res = self.copy().compose_config_from_str(res)
 
         if keypath:
             res = res.rerooted(KeyPath(keypath))
@@ -168,14 +170,12 @@ class DraconLoader:
         return res
 
     def compose_config_from_str(self, content: str) -> CompositionResult:
-        yaml = make_draml()
-        yaml.compose(content)
-        res = yaml.composer.get_result()
+        self.yaml.compose(content)
+        res = self.yaml.composer.get_result()
         return self.post_process_composed(res)
 
     def load_from_composition_result(self, compres: CompositionResult):
-        yaml = make_draml()
-        return yaml.constructor.construct_document(compres.root)
+        return self.yaml.constructor.construct_document(compres.root)
 
     def load(self, config_path: str | Path):
         if isinstance(config_path, Path):
@@ -204,10 +204,21 @@ class DraconLoader:
             comp_res = comp_res.replaced_at(inode_path, include_composed)
         return comp_res
 
+    # def dump(self, res):
+    # stream = StringIO()
+    # yaml = make_draml()
+    # yaml.default_flow_style = False
+    # yaml.dump(res, stream)
+    # rprint(stream.getvalue())
 
-def load(config_path: str | Path):
-    loader = DraconLoader()
-    return loader.load(config_path)
+    def dump(self, data, stream=None):
+        if stream is None:
+            from io import StringIO
+            string_stream = StringIO()
+            self.yaml.dump(data, string_stream)
+            return string_stream.getvalue()
+        else:
+            return self.yaml.dump(data, stream)
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
