@@ -4,19 +4,19 @@ from typing import Type, Callable
 import inspect
 import re
 from pathlib import Path
-from typing import Optional, Dict, Any
-from pydantic import BaseModel
+from typing import Optional, Dict, Any, Annotated, TypeVar
+from pydantic import BaseModel, BeforeValidator, Field, PlainSerializer
 from dracon.composer import IncludeNode, CompositionResult, DraconComposer
 from dracon.draconstructor import Draconstructor
 from dracon.keypath import KeyPath, ROOTPATH
-from dracon.utils import node_print, collect_all_types
+from dracon.utils import node_print, collect_all_types, DictLike, MetadataDictLike
 from dracon.merge import process_merges
 from dracon.loaders.file import read_from_file
 from dracon.loaders.pkg import read_from_pkg
 from dracon.loaders.env import read_from_env
+from dracon.dracontainer import Dracontainer
 from dracon.representer import DraconRepresenter
-import typing
-import importlib
+
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 ## {{{                       --     doc     --
@@ -234,3 +234,33 @@ class DraconLoader:
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
+
+
+def load_config_to_dict(maybe_config: str | DictLike) -> DictLike:
+    if isinstance(maybe_config, str):
+        print(f"Loading config from: {maybe_config}")
+        loader = DraconLoader()
+        conf = loader.load(maybe_config)
+        dc = Dracontainer(conf)
+        dc.set_metadata({'dracon_origin': maybe_config})
+        return dc
+    return maybe_config
+
+T = TypeVar('T')
+
+LoadedConfig = Annotated[
+    T | str,
+    BeforeValidator(load_config_to_dict),
+    PlainSerializer(lambda x: serialize_loaded_config(x)),
+    Field(validate_default=True),
+]
+
+
+def serialize_loaded_config(c: DictLike) -> str | DictLike:
+    if isinstance(c, MetadataDictLike):
+        origin = c.get_metadata().get('dracon_origin')
+        if origin is not None:
+            return origin
+    return c
+
+

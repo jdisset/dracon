@@ -29,7 +29,27 @@ class Draconstructor(Constructor):
             tag = tag[1:]
         else:
             return value
-        return TypeAdapter(_eval_type(ForwardRef(tag), globals(), self.localns)).validate_python(
+
+        localns = self.localns
+
+
+        if '.' in tag:
+            print(f'Found a dot in tag: {tag}')
+            module_name, cname = tag.rsplit('.', 1)
+            try:
+                import importlib
+                module = importlib.import_module(module_name)
+                localns[module_name] = module
+                localns[tag] = getattr(module, cname)  # Add the class directly with the full tag
+                print(f'Added {tag} to localns')
+            except ImportError:
+                print(f'Failed to import {module_name}')
+            except AttributeError:
+                print(f'Failed to get {cname} from {module_name}')
+
+
+
+        return TypeAdapter(_eval_type(ForwardRef(tag), globals(), localns)).validate_python(
             value
         )
 
