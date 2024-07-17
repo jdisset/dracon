@@ -117,6 +117,7 @@ class DraconLoader:
         custom_loaders: Optional[Dict[str, Callable]] = None,
         custom_types: Optional[Dict[str, Type]] = None,
         capture_globals: bool = True,
+        base_dict_type: Type[DictLike] = Dracontainer,
     ):
         self.custom_loaders = DEFAULT_LOADERS
         self.custom_loaders.update(custom_loaders or {})
@@ -129,6 +130,7 @@ class DraconLoader:
 
         localns = collect_all_types(DEFAULT_MODULES_FOR_TYPES, capture_globals=capture_globals)
         self.yaml.constructor.localns = localns
+        self.yaml.constructor.yaml_base_dict_type = base_dict_type
 
     def copy(self):
         return DraconLoader(self.custom_loaders)
