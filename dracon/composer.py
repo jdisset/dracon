@@ -1,4 +1,5 @@
 from ruamel.yaml import YAML
+from enum import Enum
 from ruamel.yaml.composer import Composer
 from ruamel.yaml.nodes import MappingNode, SequenceNode, ScalarNode
 from ruamel.yaml.nodes import ScalarNode, Node
@@ -15,27 +16,17 @@ from typing import Any, Union, Hashable
 from dracon.utils import dict_like, list_like, DictLike, ListLike
 from typing import Optional
 from copy import deepcopy
+from dracon.interpolation import LazyInterpolable, outermost_interpolation_exprs
 
 
-## {{{                        --     node types     --
-class IncludeNode(ScalarNode):
-
-    def __init__(
-        self, value, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None
-    ):
-        ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
-
+## {{{                           --     utils     --
 
 MERGE_TAG = Tag(suffix='tag:yaml.org,2002:merge')
 STR_TAG = Tag(suffix='tag:yaml.org,2002:str')
 
-class MergeNode(ScalarNode):
 
-    def __init__(
-        self, value, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None
-    ):
-        self.merge_key_raw = value
-        ScalarNode.__init__(self, STR_TAG, value, start_mark, end_mark, comment=comment, anchor=anchor)
+def is_merge_key(value: str) -> bool:
+    return value.startswith('<<')
 
 
 def make_node(value: Any, tag=None, **kwargs) -> Node:
@@ -49,8 +40,40 @@ def make_node(value: Any, tag=None, **kwargs) -> Node:
         return ScalarNode(tag, value, **kwargs)
 
 
-class DraconMappingNode(MappingNode):
+##────────────────────────────────────────────────────────────────────────────}}}
 
+## {{{                        --     node types     --
+
+
+class IncludeNode(ScalarNode):
+    def __init__(self, value, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
+        ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
+
+
+class MergeNode(ScalarNode):
+    def __init__(self, value, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
+        self.merge_key_raw = value
+        ScalarNode.__init__(
+            self, STR_TAG, value, start_mark, end_mark, comment=comment, anchor=anchor
+        )
+
+
+class LazyInterpolableNode(ScalarNode):
+    def __init__(
+        self,
+        value,
+        start_mark=None,
+        end_mark=None,
+        tag=None,
+        anchor=None,
+        comment=None,
+        init_outermost_interpolations=None,
+    ):
+        self.init_outermost_interpolations = init_outermost_interpolations
+        ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
+
+
+class DraconMappingNode(MappingNode):
     # simply keep map the keys to the nodes...
     def __init__(
         self,
@@ -67,7 +90,6 @@ class DraconMappingNode(MappingNode):
 
     def _recompute_map(self):
         self.map: dict[Hashable, int] = {}  # key -> index
-
 
         for idx, (key, value) in enumerate(self.value):
             if key.value in self.map:
@@ -138,8 +160,8 @@ class DraconMappingNode(MappingNode):
             anchor=self.anchor,
         )
 
-class DraconSequenceNode(SequenceNode):
 
+class DraconSequenceNode(SequenceNode):
     def __getitem__(self, index: int) -> Node:
         return self.value[index]
 
@@ -161,43 +183,16 @@ class DraconSequenceNode(SequenceNode):
         )
 
 
-def wrapped_node(node: Node) -> Node:
-    if isinstance(node, MappingNode):
-        return DraconMappingNode(
-            tag=node.tag,
-            value=node.value,
-            start_mark=node.start_mark,
-            end_mark=node.end_mark,
-            flow_style=node.flow_style,
-            comment=node.comment,
-            anchor=node.anchor,
-        )
-    elif isinstance(node, SequenceNode):
-        return DraconSequenceNode(
-            tag=node.tag,
-            value=node.value,
-            start_mark=node.start_mark,
-            end_mark=node.end_mark,
-            flow_style=node.flow_style,
-            comment=node.comment,
-            anchor=node.anchor,
-        )
-    elif isinstance(node, (ScalarNode, IncludeNode, MergeNode)):
-        return node
-    else:
-        raise NotImplementedError(f'Node type {type(node)} not supported')
-
-
 ##────────────────────────────────────────────────────────────────────────────}}}
+
+## {{{                   --     CompositionResult    --
 
 
 class CompositionResult(BaseModel):
-
     root: Node
     include_nodes: list[KeyPath] = []  # keypaths to include nodes
     anchor_paths: dict[str, KeyPath] = {}  # anchor name -> keypath to that anchor node
     merge_nodes: list[KeyPath] = []
-
 
     def model_post_init(self, *args, **kwargs):
         super().model_post_init(*args, **kwargs)
@@ -206,7 +201,6 @@ class CompositionResult(BaseModel):
         arbitrary_types_allowed = True
 
     def rerooted(self, new_root: KeyPath):
-
         new_root = new_root.simplified()
         new_root_node = new_root.get_obj(self.root)
 
@@ -269,14 +263,10 @@ class CompositionResult(BaseModel):
         self.include_nodes = list(set(self.include_nodes))
 
         self.merge_nodes.extend(
-            [
-                (at_path + merge_node.rootless()).simplified()
-                for merge_node in new_root.merge_nodes
-            ]
+            [(at_path + merge_node.rootless()).simplified() for merge_node in new_root.merge_nodes]
         )
         # make unique
         self.merge_nodes = list(set(self.merge_nodes))
-
 
         for anchor, anchor_path in new_root.anchor_paths.items():
             if anchor not in self.anchor_paths:
@@ -285,12 +275,12 @@ class CompositionResult(BaseModel):
         return self
 
 
-def is_merge_key(value: str) -> bool:
-    return value.startswith('<<')
+##────────────────────────────────────────────────────────────────────────────}}}
+
+## {{{                      --     DraconComposer     --
 
 
 class DraconComposer(Composer):
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.node_map: dict[KeyPath, Node] = {}  # keypath -> node
@@ -298,6 +288,8 @@ class DraconComposer(Composer):
         self.merge_nodes: list[KeyPath] = []  # keypaths to merge nodes
         self.anchor_paths: dict[str, KeyPath] = {}  # anchor name -> keypath to that anchor node
         self.curr_path = ROOTPATH
+        self.interpolation_enabled = True
+        self.merging_enabled = True
 
     def get_result(self) -> CompositionResult:
         return CompositionResult(
@@ -347,7 +339,7 @@ class DraconComposer(Composer):
             if self.parser.check_event(ScalarEvent):
                 # would probably be more idiomatic to write
                 # my own MergeEvent but this works the same...
-                if event.style is None and is_merge_key(event.value):
+                if event.style is None and is_merge_key(event.value) and self.merging_enabled:
                     node = self.compose_merge_node(anchor)
                 else:
                     node = self.compose_scalar_node(anchor)
@@ -359,7 +351,7 @@ class DraconComposer(Composer):
                 raise RuntimeError(f'Not a valid node event: {event}')
             self.resolver.ascend_resolver()
 
-        node = wrapped_node(node)
+        node = self.wrapped_node(node)
         if index is not None:
             self.ascend_path(node)
 
@@ -390,7 +382,47 @@ class DraconComposer(Composer):
         self.merge_nodes.append(mpath)
         return node
 
+    def wrapped_node(self, node: Node) -> Node:
+        if isinstance(node, MappingNode):
+            return DraconMappingNode(
+                tag=node.tag,
+                value=node.value,
+                start_mark=node.start_mark,
+                end_mark=node.end_mark,
+                flow_style=node.flow_style,
+                comment=node.comment,
+                anchor=node.anchor,
+            )
+        elif isinstance(node, SequenceNode):
+            return DraconSequenceNode(
+                tag=node.tag,
+                value=node.value,
+                start_mark=node.start_mark,
+                end_mark=node.end_mark,
+                flow_style=node.flow_style,
+                comment=node.comment,
+                anchor=node.anchor,
+            )
+        if isinstance(node, ScalarNode):
+            if self.interpolation_enabled and isinstance(node.value, str):
+                iexpr = outermost_interpolation_exprs(node.value)
+                if iexpr:
+                    return LazyInterpolableNode(
+                        value=node.value,
+                        start_mark=node.start_mark,
+                        end_mark=node.end_mark,
+                        tag=node.tag,
+                        anchor=node.anchor,
+                        comment=node.comment,
+                        init_outermost_interpolations=iexpr,
+                    )
+            return node
+
+        elif isinstance(node, (IncludeNode, MergeNode)):
+            return node
+        else:
+            raise NotImplementedError(f'Node type {type(node)} not supported')
 
 
-
+##────────────────────────────────────────────────────────────────────────────}}}
 

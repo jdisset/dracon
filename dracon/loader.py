@@ -9,13 +9,13 @@ from pydantic import BaseModel, BeforeValidator, Field, PlainSerializer
 from dracon.composer import IncludeNode, CompositionResult, DraconComposer
 from dracon.draconstructor import Draconstructor
 from dracon.keypath import KeyPath, ROOTPATH
-from dracon.utils import node_print, collect_all_types, DictLike, MetadataDictLike
+from dracon.utils import node_print, collect_all_types, DictLike, MetadataDictLike, ListLike
 from dracon.merge import process_merges
 from dracon.loaders.file import read_from_file
 from dracon.loaders.pkg import read_from_pkg
 from dracon.loaders.env import read_from_env
-from dracon.dracontainer import Dracontainer
 from dracon.representer import DraconRepresenter
+from dracon import dracontainer
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
@@ -117,7 +117,8 @@ class DraconLoader:
         custom_loaders: Optional[Dict[str, Callable]] = None,
         custom_types: Optional[Dict[str, Type]] = None,
         capture_globals: bool = True,
-        base_dict_type: Type[DictLike] = Dracontainer,
+        base_dict_type: Type[DictLike] = dracontainer.Mapping,
+        base_list_type: Type[ListLike] = dracontainer.Sequence,
     ):
         self.custom_loaders = DEFAULT_LOADERS
         self.custom_loaders.update(custom_loaders or {})
