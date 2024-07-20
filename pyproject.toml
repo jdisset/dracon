@@ -14,7 +14,8 @@ dependencies = [
     "omegaconf",
     "pydantic",
     "ruamel.yaml",
-	"xxhash"
+	"xxhash",
+	"asteval"
 ]
 
 [project.optional-dependencies]

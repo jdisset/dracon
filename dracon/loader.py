@@ -217,12 +217,6 @@ class DraconLoader:
             comp_res = comp_res.replaced_at(inode_path, include_composed)
         return comp_res
 
-    # def dump(self, res):
-    # stream = StringIO()
-    # yaml = make_draml()
-    # yaml.default_flow_style = False
-    # yaml.dump(res, stream)
-    # rprint(stream.getvalue())
 
     def dump(self, data, stream=None):
         if stream is None:
@@ -240,12 +234,10 @@ class DraconLoader:
 
 def load_config_to_dict(maybe_config: str | DictLike) -> DictLike:
     if isinstance(maybe_config, str):
-        print(f"Loading config from: {maybe_config}")
         loader = DraconLoader()
         conf = loader.load(maybe_config)
-        dc = Dracontainer(conf)
-        dc.set_metadata({'dracon_origin': maybe_config})
-        return dc
+        conf.set_metadata({'dracon_origin': maybe_config})
+        return conf
     return maybe_config
 
 T = TypeVar('T')
