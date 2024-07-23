@@ -1,7 +1,10 @@
 from typing import Any, Dict, List, Union, TypeVar, Generic, Optional, Set
 from collections.abc import MutableMapping, MutableSequence
 from copy import deepcopy
-from dracon.keypath import ROOTPATH
+from dracon.keypath import ROOTPATH, KeyPath
+from dracon.utils import DictLike, ListLike
+from dracon.interpolation import Lazy, is_lazy_compatible
+
 
 K = TypeVar('K')
 V = TypeVar('V')
@@ -32,9 +35,9 @@ class Dracontainer:
         self._inplace_interp = True
         self._metadata = None
         self._per_item_metadata: Dict[Any, Any] = {}
-        # self._per_item_tags: Dict[Any, Set[Tag]] = {}
         self._dracon_root_obj = self
         self._dracon_current_path = ROOTPATH
+        self._dracon_lazy_resolve = True
 
     def set_metadata(self, metadata):
         self._metadata = metadata
@@ -48,18 +51,13 @@ class Dracontainer:
     def get_item_metadata(self, key):
         return self._per_item_metadata.get(key)
 
-
-        # problem with the tag approach is that it won't work for when building another object type.
-        # Ideally there should be a LazyInterpolation type that allows for the interpolation to be done on access.
-        # if self._auto_interp: # we interpolate on access
-        # if INTERPOLABLE in self._per_item_tags.get(index, tuple()):
-        # element = self._interpolate(element)
-        # if self._inplace_interp:
-        # self._data[index] = element
-        # self._per_item_tags[index].remove(INTERPOLABLE)
-
-
     def __setitem__(self, key, value):
+        raise NotImplementedError
+
+    def __getitem__(self, key):
+        raise NotImplementedError
+
+    def __iter__(self):
         raise NotImplementedError
 
     def __getattr__(self, key):
@@ -73,38 +71,77 @@ class Dracontainer:
         else:
             self[key] = value
 
+    def _handle_lazy(self, name, value):
+        if isinstance(value, Lazy) and self._dracon_lazy_resolve:
+            value.name = name
+            newval = value.get(self, setval=True)
+            return newval
+        return value
+
+    def _handle_lazy_container(self, at_key, container):
+        if is_lazy_compatible(container):
+            print(f"Handling lazy container at key {at_key}. self.current_path: {self._dracon_current_path}")
+            new_path = self._dracon_current_path + KeyPath(str(at_key))
+            container._update_lazy_container_attributes(self._dracon_root_obj, new_path)
+            print(f"current path: {container._dracon_current_path}")
+
+    def _update_lazy_container_attributes(self, root_obj, current_path, recurse=True):
+        self._dracon_root_obj = root_obj
+        self._dracon_current_path = current_path
+        if recurse:
+            for key, item in self.items():
+                if is_lazy_compatible(item):
+                    new_path = current_path + KeyPath(str(key))
+                    item._update_lazy_container_attributes(root_obj, new_path, recurse=True)
+
     @classmethod
-    def create(cls, data: Union[Dict, List, None] = None):
-        if isinstance(data, dict):
+    def create(cls, data: Union[DictLike[K, V], ListLike[V], None] = None):
+        if isinstance(data, DictLike):
             return Mapping(data)
-        elif isinstance(data, list):
+        elif isinstance(data, ListLike):
             return Sequence(data)
         else:
             raise ValueError("Input must be either a dict or a list")
 
-    @classmethod
-    def _convert(cls, value):
-        if isinstance(value, dict):
-            return Mapping(value)
-        elif isinstance(value, list):
-            return Sequence(value)
-        return value
+    def _to_dracontainer(self, value: Any, key: Any):
+        newval = value
+        if isinstance(value, (Mapping, Sequence)):
+            newval = value
+        elif isinstance(value, DictLike):
+            newval = Mapping(value)
+        elif isinstance(value, ListLike) and not isinstance(value, str):
+            newval = Sequence(value)
+
+        self._handle_lazy_container(str(key), newval)
+
+        return newval
+
+    def set_lazy_resolve(self, value, recursive=True):
+        self._dracon_lazy_resolve = value
+        if recursive:
+            for item in self:
+                if isinstance(item, Dracontainer):
+                    item.set_lazy_resolve(value, recursive=True)
 
 
 class Mapping(Dracontainer, MutableMapping[K, V], Generic[K, V]):
-    def __init__(self, data: Optional[Dict[K, V]] = None):
+    def __init__(self, data: Optional[DictLike[K, V]] = None):
         super().__init__()
         self._data: Dict[K, V] = {}
         if data:
             for key, value in data.items():
-                self[key] = Dracontainer._convert(value)
+                self[key] = value
 
     def __getitem__(self, key):
         element = self._data[key]
-        return element
+        return self._handle_lazy(key, element)
 
-    def __setitem__(self, key, value):
-        self._data[key] = Dracontainer._convert(value)
+    def __setitem__(self, key: K, value: V):
+        self._data[key] = self._to_dracontainer(value, key)
+
+    def update(self, other):
+        for key, value in other.items():
+            self._data[key] = self._to_dracontainer(value, key)
 
     def __delitem__(self, key):
         del self._data[key]
@@ -133,21 +170,16 @@ class Mapping(Dracontainer, MutableMapping[K, V], Generic[K, V]):
         return self._data.values()
 
 
-    @classmethod
-    def fromkeys(cls, iterable, value=None):
-        return cls({key: Dracontainer._convert(value) for key in iterable})
-
-
 class Sequence(Dracontainer, MutableSequence[V]):
-    def __init__(self, data: Optional[List[V]] = None):
+    def __init__(self, data: Optional[ListLike[V]] = None):
         super().__init__()
         self._data: List[V] = []
         if data:
             for item in data:
-                self.append(Dracontainer._convert(item))
+                self.append(item)
 
     def __setitem__(self, index, value):
-        self._data[index] = Dracontainer._convert(value)
+        self._data[index] = self._to_dracontainer(value, index)
 
     def __delitem__(self, index):
         del self._data[index]
@@ -156,7 +188,7 @@ class Sequence(Dracontainer, MutableSequence[V]):
 
     def __getitem__(self, index):
         element = self._data[index]
-        return element
+        return self._handle_lazy(str(index), element)
 
     def __len__(self):
         return len(self._data)
@@ -177,17 +209,19 @@ class Sequence(Dracontainer, MutableSequence[V]):
         self._data.clear()
 
     def insert(self, index, value):
-        self._data.insert(index, Dracontainer._convert(value))
+        self._data.insert(index, Dracontainer._to_dracontainer(value, index))
 
     def append(self, value):
-        self._data.append(Dracontainer._convert(value))
+        self._data.append(Dracontainer._to_dracontainer(value, key=len(self._data)))
+
+    def extend(self, values):
+        for value in values:
+            self.append(value)
 
     def __add__(self, other: 'Sequence[V]'):
         new_data = deepcopy(self._data)
         new_data.extend(other)
         return Sequence(new_data)
-
-
 
 
 def create_dracontainer(

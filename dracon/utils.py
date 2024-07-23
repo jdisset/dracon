@@ -126,6 +126,9 @@ def collect_all_types(modules, capture_globals=True, globals_at_frame=5):
 
 ## {{{                         --     printing     --
 
+def print_traceback():
+    import traceback
+    print("".join(traceback.format_stack()[:-2]))
 
 def with_indent(content: str, indent: int) -> str:
     # replace all \n with \n + indent*' ', ONLY if the line is not empty
