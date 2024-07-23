@@ -89,10 +89,16 @@ class Dracontainer:
         self._dracon_root_obj = root_obj
         self._dracon_current_path = current_path
         if recurse:
-            for key, item in self.items():
-                if is_lazy_compatible(item):
-                    new_path = current_path + KeyPath(str(key))
-                    item._update_lazy_container_attributes(root_obj, new_path, recurse=True)
+            if isinstance(self, DictLike):
+                for key, item in self.items():
+                    if is_lazy_compatible(item):
+                        new_path = current_path + KeyPath(str(key))
+                        item._update_lazy_container_attributes(root_obj, new_path, recurse=True)
+            elif isinstance(self, ListLike):
+                for index, item in enumerate(self):
+                    if is_lazy_compatible(item):
+                        new_path = current_path + KeyPath(str(index))
+                        item._update_lazy_container_attributes(root_obj, new_path, recurse=True)
 
     @classmethod
     def create(cls, data: Union[DictLike[K, V], ListLike[V], None] = None):
@@ -209,10 +215,10 @@ class Sequence(Dracontainer, MutableSequence[V]):
         self._data.clear()
 
     def insert(self, index, value):
-        self._data.insert(index, Dracontainer._to_dracontainer(value, index))
+        self._data.insert(index, self._to_dracontainer(value, index))
 
     def append(self, value):
-        self._data.append(Dracontainer._to_dracontainer(value, key=len(self._data)))
+        self._data.append(self._to_dracontainer(value, key=len(self._data)))
 
     def extend(self, values):
         for value in values:
@@ -222,6 +228,12 @@ class Sequence(Dracontainer, MutableSequence[V]):
         new_data = deepcopy(self._data)
         new_data.extend(other)
         return Sequence(new_data)
+
+    def __eq__(self, other):
+        if isinstance(other, Sequence):
+            return self._data == other._data
+        elif isinstance(other, List):
+            return self._data == other
 
 
 def create_dracontainer(
