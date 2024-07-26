@@ -119,6 +119,7 @@ class DraconLoader:
         capture_globals: bool = True,
         base_dict_type: Type[DictLike] = dracontainer.Mapping,
         base_list_type: Type[ListLike] = dracontainer.Sequence,
+        enable_interpolation: bool = False,
     ):
         self.custom_loaders = DEFAULT_LOADERS
         self.custom_loaders.update(custom_loaders or {})
@@ -128,6 +129,7 @@ class DraconLoader:
         self.yaml.Composer = DraconComposer
         self.yaml.Constructor = Draconstructor
         self.yaml.Representer = DraconRepresenter
+        self.yaml.composer.interpolation_enabled = enable_interpolation
 
         localns = collect_all_types(DEFAULT_MODULES_FOR_TYPES, capture_globals=capture_globals)
         self.yaml.constructor.localns = localns
