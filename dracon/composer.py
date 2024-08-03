@@ -44,6 +44,9 @@ def make_node(value: Any, tag=None, **kwargs) -> Node:
 
 ## {{{                        --     node types     --
 
+class DraconScalarNode(ScalarNode):
+    def __init__(self, value, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
+        ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
 
 class IncludeNode(ScalarNode):
     def __init__(self, value, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
