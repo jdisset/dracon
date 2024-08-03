@@ -3,7 +3,11 @@ from collections.abc import MutableMapping, MutableSequence
 from copy import deepcopy
 from dracon.keypath import ROOTPATH, KeyPath
 from dracon.utils import DictLike, ListLike
-from dracon.interpolation import Lazy, is_lazy_compatible
+from dracon.interpolation import (
+    Lazy,
+    is_lazy_compatible,
+    recursive_update_lazy_container,
+)
 
 
 K = TypeVar('K')
@@ -38,6 +42,31 @@ class Dracontainer:
         self._dracon_root_obj = self
         self._dracon_current_path = ROOTPATH
         self._dracon_lazy_resolve = True
+        self._data = None
+
+    def __deepcopy__(self, memo):
+        new_obj = self.__class__()
+        new_obj._auto_interp = self._auto_interp
+        new_obj._inplace_interp = self._inplace_interp
+        new_obj._metadata = deepcopy(self._metadata)
+        new_obj._per_item_metadata = deepcopy(self._per_item_metadata)
+        new_obj._dracon_root_obj = self._dracon_root_obj
+        new_obj._dracon_current_path = self._dracon_current_path
+        new_obj._dracon_lazy_resolve = self._dracon_lazy_resolve
+        new_obj._data = deepcopy(self._data)
+        return new_obj
+
+    def __copy__(self):
+        new_obj = self.__class__()
+        new_obj._auto_interp = self._auto_interp
+        new_obj._inplace_interp = self._inplace_interp
+        new_obj._metadata = self._metadata
+        new_obj._per_item_metadata = self._per_item_metadata
+        new_obj._dracon_root_obj = self._dracon_root_obj
+        new_obj._dracon_current_path = self._dracon_current_path
+        new_obj._dracon_lazy_resolve = self._dracon_lazy_resolve
+        new_obj._data = self._data
+        return new_obj
 
     def set_metadata(self, metadata):
         self._metadata = metadata
@@ -78,28 +107,6 @@ class Dracontainer:
             return newval
         return value
 
-    def _handle_lazy_container(self, at_key, container):
-        if is_lazy_compatible(container):
-            print(f"Handling lazy container at key {at_key}. self.current_path: {self._dracon_current_path}")
-            new_path = self._dracon_current_path + KeyPath(str(at_key))
-            container._update_lazy_container_attributes(self._dracon_root_obj, new_path)
-            print(f"current path: {container._dracon_current_path}")
-
-    def _update_lazy_container_attributes(self, root_obj, current_path, recurse=True):
-        self._dracon_root_obj = root_obj
-        self._dracon_current_path = current_path
-        if recurse:
-            if isinstance(self, DictLike):
-                for key, item in self.items():
-                    if is_lazy_compatible(item):
-                        new_path = current_path + KeyPath(str(key))
-                        item._update_lazy_container_attributes(root_obj, new_path, recurse=True)
-            elif isinstance(self, ListLike):
-                for index, item in enumerate(self):
-                    if is_lazy_compatible(item):
-                        new_path = current_path + KeyPath(str(index))
-                        item._update_lazy_container_attributes(root_obj, new_path, recurse=True)
-
     @classmethod
     def create(cls, data: Union[DictLike[K, V], ListLike[V], None] = None):
         if isinstance(data, DictLike):
@@ -113,12 +120,16 @@ class Dracontainer:
         newval = value
         if isinstance(value, (Mapping, Sequence)):
             newval = value
-        elif isinstance(value, DictLike):
+        elif isinstance(value, dict):
             newval = Mapping(value)
-        elif isinstance(value, ListLike) and not isinstance(value, str):
+        elif isinstance(value, list) and not isinstance(value, str):
             newval = Sequence(value)
 
-        self._handle_lazy_container(str(key), newval)
+        recursive_update_lazy_container(
+            newval,
+            root_obj=self._dracon_root_obj,
+            current_path=self._dracon_current_path + KeyPath(str(key)),
+        )
 
         return newval
 

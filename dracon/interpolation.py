@@ -1,4 +1,5 @@
 import ast
+import collections.abc as cabc
 from asteval import Interpreter
 import re
 from typing import (
@@ -273,14 +274,30 @@ class LazyInterpolable(Lazy[T]):
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
+
+def recursive_update_lazy_container(obj, root_obj, current_path):
+    if is_lazy_compatible(obj):
+        obj._dracon_root_obj = root_obj
+        obj._dracon_current_path = current_path
+
+    if isinstance(obj, cabc.Mapping): # also handles pydantic models
+        for key, value in obj.items():
+            new_path = current_path + KeyPath(str(key))
+            recursive_update_lazy_container(value, root_obj, new_path)
+
+    elif isinstance(obj, cabc.Iterable) and not isinstance(obj, (str, bytes)):
+        for i, item in enumerate(obj):
+            new_path = current_path + KeyPath(str(i))
+            recursive_update_lazy_container(item, root_obj, new_path)
+
+
+
 @runtime_checkable
 class LazyCapable(Protocol):
 
     _dracon_root_obj: Any
     _dracon_current_path: str
 
-    def _update_lazy_container_attributes(self, root_obj, current_path, recurse=True):
-        ...
 
 def is_lazy_compatible(v: Any) -> bool:
     return isinstance(v, LazyCapable)
