@@ -105,7 +105,7 @@ def get_globals_up_to_frame(frame_n):
     frames = inspect.stack()
     globalns = {}
 
-    for frame_id in range(min(frame_n, len(frames)), 0, -1):
+    for frame_id in range(min(frame_n, len(frames)-1), 0, -1):
         frame = frames[frame_id]
         globalns.update(frame.frame.f_globals)
 
