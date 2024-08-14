@@ -1,10 +1,12 @@
 from pathlib import Path
 from typing import ForwardRef, TypeAlias
 from .load_utils import with_possible_ext
+from typing import Optional
+
 
 DraconLoader = ForwardRef('DraconLoader')
 
-def read_from_file(path: str, extra_paths=None):
+def read_from_file(path: str, extra_paths=None, loader: Optional[DraconLoader] = None):
     all_paths = with_possible_ext(path)
     if not extra_paths:
         extra_paths = []
@@ -24,6 +26,11 @@ def read_from_file(path: str, extra_paths=None):
 
     with open(p, 'r') as f:
         raw = f.read()
+
+    if loader:
+        loader.context['$DIR'] = p.parent.as_posix()
+        loader.context['$FILE'] = p.name
+
     return raw
 
 

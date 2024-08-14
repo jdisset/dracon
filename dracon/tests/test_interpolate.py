@@ -88,26 +88,42 @@ def test_lazy():
         "name": "John",
         "n": 5,
         "greetingroot": "Hello, ${@name}!",
+        "quatre": "${2+2}",
         'nested': {
             'inner': {
                 'greeting': 'greetings, ${"dear "+  @/name}!',
-                'list': '${[@/name + "_" + str(i) for i in range(@/n)]}',
+                'list': '${[@/name + "_" + str(i) for i in range(@....n)]}',
                 'ref': '${@/greetingroot}',
             }
         },
     }
 
-    loader = DraconLoader()
+    loader = DraconLoader(enable_interpolation=True)
     ymldump = loader.dump(obj)
+
+
     print(ymldump)
 
     loaded = loader.loads(ymldump)
-    loaded.name
+    loaded_copy = copy.copy(loaded)
+    loaded_deepcopy = copy.deepcopy(loaded)
+
+    assert isinstance(loaded, Mapping)
+    assert isinstance(loaded_copy, Mapping)
+    assert isinstance(loaded_deepcopy, Mapping)
+
     assert loaded.name == 'John'
-    loaded.greetingroot
+    assert loaded.quatre == 4
+
+    assert isinstance(loaded._data['greetingroot'], LazyInterpolable)
     assert loaded.greetingroot == 'Hello, John!'
+    assert isinstance(loaded._data['greetingroot'], str)
+    assert isinstance(loaded_copy._data['greetingroot'], str)
+    assert isinstance(loaded_deepcopy._data['greetingroot'], LazyInterpolable)
+
     assert loaded.nested.inner.greeting == 'greetings, dear John!'
     assert loaded.nested.inner.ref == 'Hello, John!'
+    assert loaded.nested.inner.list == ['John_0', 'John_1', 'John_2', 'John_3', 'John_4']
 
     assert loaded.nested.inner._dracon_current_path == KeyPath('/nested.inner')
 
@@ -116,4 +132,9 @@ def test_lazy():
     assert loaded.nested.inner.new == newstr
     loaded.nested.inner['new'] = LazyInterpolable(loaded.nested.inner['new'])
     assert (loaded.nested.inner.new == 'John greetings, dear John!')
+
+
+
+
+
 

@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 import pytest
 from ruamel.yaml import YAML
-from dracon import *
+from dracon import DraconLoader
 
 # Set a dummy environment variable for testing purposes
 os.environ["TESTVAR1"] = "test_var_1"
@@ -14,7 +14,7 @@ simple_config_path = 'dracon:tests/configs/simple.yaml'
 main_config_path = 'dracon:tests/configs/main.yaml'
 params_config_path = 'dracon:tests/configs/params.yaml'
 base_config_path = 'dracon:tests/configs/base.yaml'
-
+interp_config_path = 'dracon:tests/configs/interpolation.yaml'
 
 def get_config(config_path):
     from dracon.loader import DraconLoader
@@ -107,5 +107,21 @@ def test_env_variable_inclusion():
     assert config["ppath"] == "test_var_2"
 
 
+
+def test_composition_through_interpolation():
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.load(f"pkg:{interp_config_path}")
+
+    assert "default_settings" in config["base"]
+    assert "param1" in config["base"]["default_settings"]
+    assert "setting1" in config["base"]["default_settings"]
+
+    assert config.base.file_stem == "interpolation"
+    assert config.base.interpolated_addition == 4
+
+    assert config.loaded_base.default_settings.param1 == "value1"
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
+

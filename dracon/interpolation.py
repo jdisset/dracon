@@ -19,8 +19,8 @@ from dracon.keypath import KeyPath, ROOTPATH
 from dracon.utils import DictLike, ListLike
 from pydantic.dataclasses import dataclass
 from pydantic import TypeAdapter, BaseModel, field_validator, ConfigDict, WrapValidator, Field
-
-from typing import Protocol, runtime_checkable
+from copy import copy
+from typing import Protocol, runtime_checkable, Optional
 
 
 class InterpolationError(Exception):
@@ -28,6 +28,10 @@ class InterpolationError(Exception):
 
 
 ## {{{                       --     find keypaths     --
+
+# Find all keypaths in an expression string and replace them with a function call
+
+
 @dataclass
 class KeypathMatch:
     start: int
@@ -94,6 +98,46 @@ def resolve_keypath(expr: str):
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
+## {{{                --     find interpolable variables     --
+
+# an interpolable variable is a special $VARIABLE defined by dracon (or the user)
+# they are immmediately replaced by their value when found in the expression string
+# pattern is $ + CAPITAL_LETTER + [a-zA-Z0-9_]
+
+
+@dataclass
+class VarMatch:
+    start: int
+    end: int
+    varname: str
+
+
+def find_interpolable_variables(expr: str) -> List[VarMatch]:
+    matches = []
+    for match in re.finditer(rf"{NOT_ESCAPED_REGEX}\$[A-Z][a-zA-Z0-9_]*", expr):
+        start, end = match.span()
+        matches.append(VarMatch(start, end, match.group()))
+    return matches
+
+
+
+def resolve_interpolable_variables(expr: str, symbols: Dict[str, Any]) -> str:
+    var_matches = find_interpolable_variables(expr)
+    if not var_matches:
+        return expr
+    offset = 0
+    for match in var_matches:
+        if match.varname not in symbols:
+            raise InterpolationError(f"Variable {match.varname} not found in symbols")
+        newexpr = str(symbols[match.varname])
+        expr = expr[: match.start + offset] + newexpr + expr[match.end + offset :]
+        original_len = match.end - match.start
+        offset += len(newexpr) - original_len
+    return expr
+
+
+##────────────────────────────────────────────────────────────────────────────}}}
+
 
 ## {{{                    --     interpolation exprs     --
 @dataclass
@@ -120,12 +164,33 @@ def find_first_occurence(expr, *substrings) -> Optional[int]:
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
+
+## {{{                      --     base functions and symbols   --
+
+
+def load(*_, **__) -> Any:
+    print('LOAD HAS BEEN CALLED')
+
+
+BASE_DRACON_SYMBOLS: Dict[str, Any] = {
+    'load': load,
+    # 'loads': loads,
+}
+
+##────────────────────────────────────────────────────────────────────────────}}}
+
+
 ## {{{                           --     eval     --
 
 
-def do_safe_eval(expr: str, symbols: Optional[dict] = None):
+def preprocess_expr(expr: str, symbols: Optional[dict] = None):
     expr = resolve_keypath(expr)
-    print(f'evaluating: {expr}')
+    expr = resolve_interpolable_variables(expr, symbols or {})
+    return expr
+
+
+def do_safe_eval(expr: str, symbols: Optional[dict] = None):
+    expr = preprocess_expr(expr, symbols)
     safe_eval = Interpreter(user_symbols=symbols or {}, max_string_length=1000)
     return safe_eval(expr)
 
@@ -136,6 +201,7 @@ def resolve_eval_str(
     root_obj: Any = None,
     allow_recurse: int = 2,
     init_outermost_interpolations: Optional[List[InterpolationMatch]] = None,
+    extra_symbols: Optional[Dict[str, Any]] = None,
 ) -> Any:
     interpolations = init_outermost_interpolations
     if init_outermost_interpolations is None:
@@ -144,12 +210,16 @@ def resolve_eval_str(
     if isinstance(current_path, str):
         current_path = KeyPath(current_path)
 
-    symbols = {
-        "__DRACON__CURRENT_PATH": current_path,
-        "__DRACON__PARENT_PATH": current_path.parent,
-        "__DRACON__CURRENT_ROOT_OBJ": root_obj,
-        "__dracon_KeyPath": KeyPath,
-    }
+    symbols = copy(BASE_DRACON_SYMBOLS)
+    symbols.update(
+        {
+            "__DRACON__CURRENT_PATH": current_path,
+            "__DRACON__PARENT_PATH": current_path.parent,
+            "__DRACON__CURRENT_ROOT_OBJ": root_obj,
+            "__dracon_KeyPath": KeyPath,
+        }
+    )
+    symbols.update(extra_symbols or {})
 
     endexpr = None
     if not interpolations:
@@ -222,6 +292,11 @@ class Lazy(Generic[T]):
 
 
 class LazyInterpolable(Lazy[T]):
+    """
+    A lazy object that can be resolved (i.e. interpolated) to a value when needed.
+
+    """
+
     def __init__(
         self,
         value: Any,
@@ -231,9 +306,11 @@ class LazyInterpolable(Lazy[T]):
         root_obj: Any = None,
         init_outermost_interpolations: Optional[List[InterpolationMatch]] = None,
         permissive: bool = False,
+        extra_symbols: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(value, validator, name)
 
+        self.extra_symbols = extra_symbols
         self.current_path = current_path
         self.root_obj = root_obj
         self.init_outermost_interpolations = (
@@ -252,17 +329,18 @@ class LazyInterpolable(Lazy[T]):
                 self.current_path,
                 self.root_obj,
                 init_outermost_interpolations=self.init_outermost_interpolations,
+                extra_symbols=self.extra_symbols,
             )
 
         return self.validate(self.value)
 
     def get(self, owner_instance, setval=False):
+        """Get the value of the lazy object, and optionally set it as an attribute of the owner instance."""
         if hasattr(owner_instance, '_dracon_root_obj'):
             self.root_obj = owner_instance._dracon_root_obj
             assert hasattr(
                 owner_instance, '_dracon_current_path'
             ), f"Instance {owner_instance} has no current path"
-            print(f'current path: {owner_instance._dracon_current_path}')
             self.current_path = owner_instance._dracon_current_path + self.name
 
         newval = self.resolve()
@@ -280,7 +358,7 @@ def recursive_update_lazy_container(obj, root_obj, current_path):
         obj._dracon_root_obj = root_obj
         obj._dracon_current_path = current_path
 
-    if isinstance(obj, cabc.Mapping): # also handles pydantic models
+    if isinstance(obj, cabc.Mapping):  # also handles pydantic models
         for key, value in obj.items():
             new_path = current_path + KeyPath(str(key))
             recursive_update_lazy_container(value, root_obj, new_path)
@@ -291,12 +369,22 @@ def recursive_update_lazy_container(obj, root_obj, current_path):
             recursive_update_lazy_container(item, root_obj, new_path)
 
 
-
 @runtime_checkable
 class LazyCapable(Protocol):
+    """
+    A protocol for objects that can hold lazy values and resolve them
+    even if they have relative and absolute keypath references.
 
-    _dracon_root_obj: Any
-    _dracon_current_path: str
+    For example, a field like "${.name}" should be resolved to the value of the
+    "name" field of the current object, while "${/sub.name}" should be resolved
+    to the value of root_obj["sub"]["name"].
+
+    For that to work, the object must have the following attributes:
+
+    """
+
+    _dracon_root_obj: Any  # The root object from which to resolve absolute keypaths
+    _dracon_current_path: str  # The current path of the object in the root object
 
 
 def is_lazy_compatible(v: Any) -> bool:
@@ -319,6 +407,9 @@ class LazyDraconModel(BaseModel):
     _dracon_current_path: KeyPath = ROOTPATH
 
     def _update_lazy_container_attributes(self, root_obj, current_path, recurse=True):
+        """
+        Update the lazy attributes of the model with the root object and current path.
+        """
         self._dracon_root_obj = root_obj
         self._dracon_current_path = current_path
         if recurse:
