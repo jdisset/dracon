@@ -1,11 +1,12 @@
 from .load_utils import with_possible_ext
 from importlib.resources import files, as_file
-from typing import ForwardRef
+from typing import ForwardRef, Optional
+from pathlib import Path
 
 DraconLoader = ForwardRef('DraconLoader')
 
 
-def read_from_pkg(path: str):
+def read_from_pkg(path: str, loader: Optional[DraconLoader] = None):
     pkg = None
 
     if ':' in path:
@@ -20,6 +21,10 @@ def read_from_pkg(path: str):
         try:
             with as_file(files(pkg) / fpath.as_posix()) as p:
                 with open(p, 'r') as f:
+                    if loader:
+                        loader.context['$FILE'] = Path(p).resolve().absolute().as_posix()
+                        loader.context['$DIR'] = Path(p).parent.resolve().absolute().as_posix()
+                        loader.context['$FILE_STEM'] = Path(p).stem
                     return f.read()
         except FileNotFoundError:
             pass
