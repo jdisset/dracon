@@ -167,15 +167,7 @@ def find_first_occurence(expr, *substrings) -> Optional[int]:
 
 ## {{{                      --     base functions and symbols   --
 
-
-def load(*_, **__) -> Any:
-    print('LOAD HAS BEEN CALLED')
-
-
-BASE_DRACON_SYMBOLS: Dict[str, Any] = {
-    'load': load,
-    # 'loads': loads,
-}
+BASE_DRACON_SYMBOLS: Dict[str, Any] = {}
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
