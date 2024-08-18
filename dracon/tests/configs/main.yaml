@@ -10,7 +10,7 @@ config:
   setting1: newval
   <<{<}[+]:
     setting1: newval1
-    setting3: *base
+    setting3: *base # testing anchor reference
     setting2: *base@setting2
     extra: *pkg:dracon:tests/configs/simple.yaml
     home: *env:TESTVAR1

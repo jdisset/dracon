@@ -1,0 +1,18 @@
+default_settings: 
+  setting1: default_value1
+  setting2: default_value2
+  setting_list:
+    - item1
+    - item2
+    - item3
+  <<{<}[<]: *pkg:dracon:tests/configs/simple@additional_settings
+
+<<{<}@default_settings.setting1: override_value1
+
+<<[>+]@default_settings:
+  setting3: override_value3
+  setting_list:
+    - item4
+
+<<@default_settings.setting_list.0: override_item1
+
