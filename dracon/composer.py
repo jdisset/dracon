@@ -11,7 +11,7 @@ from ruamel.yaml.events import (
     MappingStartEvent,
 )
 from pydantic import BaseModel
-from .keypath import KeyPath, KeyPathToken, ROOTPATH
+from .keypath import KeyPath, KeyPathToken, ROOTPATH, escape_keypath_part
 from typing import Any, Union, Hashable
 from dracon.utils import dict_like, list_like, DictLike, ListLike
 from typing import Optional
@@ -278,6 +278,17 @@ class CompositionResult(BaseModel):
         return self
 
 
+    def sort_merge_nodes(self):
+        # we sort them by innermost first but keep the order of the same level
+        lens = [len(m) for m in self.merge_nodes]
+        self.merge_nodes = [
+            m
+            for _, m in sorted(
+                zip(lens, self.merge_nodes),
+                key=lambda x: x[0],
+            )
+        ]
+
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 ## {{{                      --     DraconComposer     --
@@ -381,7 +392,7 @@ class DraconComposer(Composer):
         )
         if anchor is not None:
             self.anchors[anchor] = node
-        mpath = self.curr_path.copy() + KeyPath(event.value)
+        mpath = self.curr_path.copy() + KeyPath(escape_keypath_part(event.value))
         self.merge_nodes.append(mpath)
         return node
 

@@ -15,6 +15,7 @@ main_config_path = 'dracon:tests/configs/main.yaml'
 params_config_path = 'dracon:tests/configs/params.yaml'
 base_config_path = 'dracon:tests/configs/base.yaml'
 interp_config_path = 'dracon:tests/configs/interpolation.yaml'
+override_config_path = 'dracon:tests/configs/override.yaml'
 
 def get_config(config_path):
     from dracon.loader import DraconLoader
@@ -120,6 +121,17 @@ def test_composition_through_interpolation():
     assert config.base.interpolated_addition == 4
 
     assert config.loaded_base.default_settings.param1 == "value1"
+
+
+def test_override():
+    loader = DraconLoader()
+    config = loader.load(f"pkg:{override_config_path}")
+
+    assert config["default_settings"]["setting1"] == "override_value1"
+    assert config["default_settings"]["setting2"] == "default_value2"
+    assert config["default_settings"]["setting3"] == "override_value3"
+    assert config["default_settings"]["setting_list"] == ["override_item1", 3, "item_lol", "item4"]
+
 
 
 if __name__ == "__main__":

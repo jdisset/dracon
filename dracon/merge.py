@@ -6,13 +6,16 @@ from enum import Enum
 from dracon.utils import dict_like, DictLike, ListLike
 from dracon.composer import MergeNode, CompositionResult
 from ruamel.yaml.nodes import Node
+from dracon.keypath import KeyPath
 
 
 def process_merges(comp_res: CompositionResult):
+    comp_res.sort_merge_nodes()
+
     while comp_res.merge_nodes:
         merge_path = comp_res.merge_nodes.pop()
-        merge_node = merge_path.get_obj(comp_res.root)
 
+        merge_node = merge_path.get_obj(comp_res.root)
         parent_path = merge_path.copy().up()
         node_key = merge_path[-1]
         parent_node = parent_path.get_obj(comp_res.root)
@@ -27,14 +30,12 @@ def process_merges(comp_res: CompositionResult):
 
         assert node_key in parent_node, f'Key {node_key} not found in parent node'
 
-        key_node = parent_node.get_key_node(node_key)
+        key_node = parent_node.get_key_node(
+            node_key
+        )  # the scalar node that contains the merge instruction
         assert isinstance(
             key_node, MergeNode
         ), f'Invalid merge node type: {type(key_node)} at {node_key}. {merge_path=}'
-
-        # we want to do parent_node = merged(parent_node, merge_node, merge_key)
-        new_parent = parent_node.copy()
-        del new_parent[node_key]
 
         try:
             merge_key = MergeKey(raw=key_node.merge_key_raw)
@@ -44,6 +45,15 @@ def process_merges(comp_res: CompositionResult):
                 merge_node.start_mark,
                 f'Error: {str(e)}',
             ) from e
+
+        # we want to do parent_node = merged(parent_node, merge_node, merge_key)
+
+        del parent_node[node_key]
+
+        if merge_key.keypath:
+            parent_path = parent_path + KeyPath(merge_key.keypath)
+
+        new_parent = deepcopy(parent_path.get_obj(comp_res.root))
 
         new_parent = merged(new_parent, merge_node, merge_key)
         assert isinstance(new_parent, Node)
@@ -79,6 +89,7 @@ class MergeKey(BaseModel):
     list_mode: MergeMode = MergeMode.REPLACE
     list_priority: MergePriority = MergePriority.EXISTING
     list_depth: Optional[int] = None
+    keypath: Optional[str] = None
 
     @staticmethod
     def is_merge_key(key: str) -> bool:
@@ -105,6 +116,7 @@ class MergeKey(BaseModel):
         assert (
             '>' not in mode_str or '<' not in mode_str
         ), 'Only one of > or < is allowed in dict_priority'
+
         if '>' in mode_str:
             priority = MergePriority.EXISTING
         if '<' in mode_str:
@@ -131,24 +143,40 @@ class MergeKey(BaseModel):
         assert self.raw.count('{') == self.raw.count('}'), 'Mismatched {} in merge key'
         assert self.raw.count('[') == self.raw.count(']'), 'Mismatched [] in merge key'
 
+        # check if it has a keypath part (anything after @)
+        default_dict_priority = MergePriority.EXISTING
+        default_dict_mode = MergeMode.APPEND
+        default_list_priority = MergePriority.EXISTING
+        default_list_mode = MergeMode.REPLACE
+
+        keypath_str = re.search(r'@(.+)', self.raw)
+        if keypath_str: # it's an @ keypath, aka an override
+            self.keypath = keypath_str.group(1)
+            # by default, we override with the new value
+            default_dict_priority = MergePriority.NEW
+            default_list_priority = MergePriority.NEW
+
         dict_str = re.search(r'{(.+)}', self.raw)
         if dict_str:
             dict_str = dict_str.group(1)
-            self.dict_mode, self.dict_priority, self.dict_depth = self.get_mode_priority(
-                dict_str, self.dict_mode, self.dict_priority
-            )
+        else:
+            dict_str = ''
+
+        self.dict_mode, self.dict_priority, self.dict_depth = self.get_mode_priority(
+            dict_str, default_mode=default_dict_mode, default_priority=default_dict_priority
+        )
 
         list_str = re.search(r'\[(.+)\]', self.raw)
         if list_str:
             list_str = list_str.group(1)
-            self.list_mode, self.list_priority, self.list_depth = self.get_mode_priority(
-                list_str, self.list_mode, self.list_priority
-            )
+        else:
+            list_str = ''
+        self.list_mode, self.list_priority, self.list_depth = self.get_mode_priority(
+            list_str, default_mode=default_list_mode, default_priority=default_list_priority
+        )
 
 
-def merged(existing: DictLike, new: DictLike, k: MergeKey) -> DictLike:
-    # 1 is existing, 2 is new
-
+def merged(existing: Any, new: Any, k: MergeKey) -> DictLike:
     def merge_value(v1: Any, v2: Any, depth: int = 0) -> Any:
         if isinstance(v1, DictLike) and isinstance(v2, DictLike):
             return merge_dicts(v1, v2, depth + 1)
@@ -186,5 +214,4 @@ def merged(existing: DictLike, new: DictLike, k: MergeKey) -> DictLike:
             return list1 + list2
         return list2 + list1
 
-    # Start the merge process with the top-level dictionaries
-    return merge_dicts(existing, new)
+    return merge_value(existing, new)
