@@ -112,7 +112,7 @@ def get_globals_up_to_frame(frame_n):
     return globalns
 
 
-def collect_all_types(modules, capture_globals=True, globals_at_frame=5):
+def collect_all_types(modules, capture_globals=True, globals_at_frame=15):
     types = {}
     for module in modules:
         types.update(get_all_types_from_module(module))

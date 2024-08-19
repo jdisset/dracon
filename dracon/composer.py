@@ -24,6 +24,8 @@ from dracon.interpolation import LazyInterpolable, outermost_interpolation_exprs
 MERGE_TAG = Tag(suffix='tag:yaml.org,2002:merge')
 STR_TAG = Tag(suffix='tag:yaml.org,2002:str')
 
+DRACON_UNSET_VALUE = '__!DRACON_UNSET_VALUE!__'
+
 
 def is_merge_key(value: str) -> bool:
     return value.startswith('<<')
@@ -44,20 +46,33 @@ def make_node(value: Any, tag=None, **kwargs) -> Node:
 
 ## {{{                        --     node types     --
 
+
 class DraconScalarNode(ScalarNode):
     def __init__(self, value, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
         ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
 
+
 class IncludeNode(ScalarNode):
     def __init__(self, value, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
         ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
-
 
 class MergeNode(ScalarNode):
     def __init__(self, value, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
         self.merge_key_raw = value
         ScalarNode.__init__(
             self, STR_TAG, value, start_mark, end_mark, comment=comment, anchor=anchor
+        )
+
+class UnsetNode(ScalarNode):
+    def __init__(self, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
+        ScalarNode.__init__(
+            self,
+            tag=STR_TAG,
+            value=DRACON_UNSET_VALUE,
+            start_mark=start_mark,
+            end_mark=end_mark,
+            comment=comment,
+            anchor=anchor,
         )
 
 
@@ -115,7 +130,7 @@ class DraconMappingNode(MappingNode):
             realkey, _ = self.value[idx]
             self.value[idx] = (realkey, value)
         else:
-            assert isinstance(key, Node)
+            # assert isinstance(key, Node)
             self.value.append((key, value))
             self._recompute_map()
 
@@ -277,7 +292,6 @@ class CompositionResult(BaseModel):
 
         return self
 
-
     def sort_merge_nodes(self):
         # we sort them by innermost first but keep the order of the same level
         lens = [len(m) for m in self.merge_nodes]
@@ -288,6 +302,7 @@ class CompositionResult(BaseModel):
                 key=lambda x: x[0],
             )
         ]
+
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
@@ -398,6 +413,7 @@ class DraconComposer(Composer):
 
     def wrapped_node(self, node: Node) -> Node:
         if isinstance(node, MappingNode):
+            print(f'MappingNode with tag: {node.tag}')
             return DraconMappingNode(
                 tag=node.tag,
                 value=node.value,
@@ -418,6 +434,8 @@ class DraconComposer(Composer):
                 anchor=node.anchor,
             )
         if isinstance(node, ScalarNode):
+            if node.value == DRACON_UNSET_VALUE:
+                return UnsetNode()
             if self.interpolation_enabled and isinstance(node.value, str):
                 iexpr = outermost_interpolation_exprs(node.value)
                 if iexpr:
@@ -440,3 +458,49 @@ class DraconComposer(Composer):
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
+
+def delete_unset_nodes(comp_res: CompositionResult):
+    # when we delete an unset node, we have to check if the parent is a mapping node
+    # and if we just made it empty. If so, we have to replace it with an UnsetNode
+    # and so on, until we reach the root
+
+    def _delete_unset_nodes(node: Node, parent: Optional[Node], key: Optional[Hashable]) -> Node:
+        if isinstance(node, DraconMappingNode):
+            new_value = []
+            for k, v in node.value:
+                if isinstance(v, UnsetNode):
+                    continue
+                new_value.append((k, _delete_unset_nodes(v, node, k)))
+            if not new_value:
+                return UnsetNode()
+            return DraconMappingNode(
+                tag=node.tag,
+                value=new_value,
+                start_mark=node.start_mark,
+                end_mark=node.end_mark,
+                flow_style=node.flow_style,
+                comment=node.comment,
+                anchor=node.anchor,
+            )
+        elif isinstance(node, DraconSequenceNode):
+            new_value = []
+            for v in node.value:
+                if isinstance(v, UnsetNode):
+                    continue
+                new_value.append(_delete_unset_nodes(v, node, None))
+            return DraconSequenceNode(
+                tag=node.tag,
+                value=new_value,
+                start_mark=node.start_mark,
+                end_mark=node.end_mark,
+                flow_style=node.flow_style,
+                comment=node.comment,
+                anchor=node.anchor,
+            )
+        else:
+            return node
+
+
+    comp_res.root = _delete_unset_nodes(comp_res.root, None, None)
+
+    return comp_res

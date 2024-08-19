@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 from typing import Optional, Dict, Any, Annotated, TypeVar
 from pydantic import BaseModel, BeforeValidator, Field, PlainSerializer
-from dracon.composer import IncludeNode, CompositionResult, DraconComposer
+from dracon.composer import IncludeNode, CompositionResult, DraconComposer, delete_unset_nodes
 from dracon.draconstructor import Draconstructor
 from dracon.keypath import KeyPath, ROOTPATH
 from dracon.utils import node_print, collect_all_types, DictLike, MetadataDictLike, ListLike
@@ -100,7 +100,6 @@ from copy import deepcopy
 
 ## {{{                       --     DraconLoader     --
 
-
 DEFAULT_LOADERS: Dict[str, Callable] = {
     'file': read_from_file,
     'pkg': read_from_pkg,
@@ -160,6 +159,7 @@ class DraconLoader:
         self.yaml.composer.interpolation_enabled = enable_interpolation
 
         localns = collect_all_types(DEFAULT_MODULES_FOR_TYPES, capture_globals=capture_globals)
+        localns.update(self.custom_types)
         self.yaml.constructor.localns = localns
         self.yaml.constructor.yaml_base_dict_type = base_dict_type
 
@@ -256,6 +256,7 @@ class DraconLoader:
     def post_process_composed(self, comp: CompositionResult):
         comp = self.process_includes(comp)
         comp = process_merges(comp)
+        comp = delete_unset_nodes(comp)
         return comp
 
     def process_includes(self, comp_res: CompositionResult):
