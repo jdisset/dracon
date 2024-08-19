@@ -4,9 +4,16 @@ import re
 from pydantic import BaseModel
 from enum import Enum
 from dracon.utils import dict_like, DictLike, ListLike
-from dracon.composer import MergeNode, CompositionResult
+from dracon.composer import MergeNode, CompositionResult, DraconMappingNode, DraconSequenceNode
 from ruamel.yaml.nodes import Node
 from dracon.keypath import KeyPath
+
+
+def make_default_empty_mapping_node():
+    return DraconMappingNode(
+        tag='',
+        value=[],
+    )
 
 
 def process_merges(comp_res: CompositionResult):
@@ -53,7 +60,11 @@ def process_merges(comp_res: CompositionResult):
         if merge_key.keypath:
             parent_path = parent_path + KeyPath(merge_key.keypath)
 
-        new_parent = deepcopy(parent_path.get_obj(comp_res.root))
+        new_parent = deepcopy(
+            parent_path.get_obj(
+                comp_res.root,
+            )
+        )
 
         new_parent = merged(new_parent, merge_node, merge_key)
         assert isinstance(new_parent, Node)
@@ -150,7 +161,7 @@ class MergeKey(BaseModel):
         default_list_mode = MergeMode.REPLACE
 
         keypath_str = re.search(r'@(.+)', self.raw)
-        if keypath_str: # it's an @ keypath, aka an override
+        if keypath_str:  # it's an @ keypath, aka an override
             self.keypath = keypath_str.group(1)
             # by default, we override with the new value
             default_dict_priority = MergePriority.NEW

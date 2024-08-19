@@ -10,7 +10,7 @@ import numpy as np
 class DraconRepresenter(RoundTripRepresenter):
     def __init__(self, *args, full_module_path=True, **kwargs):
         super().__init__(*args, **kwargs)
-        self.full_module_path = full_module_path
+        self.full_module_path = full_module_path # if True, the full module path will be used as the tag
 
 
 def represent_pydantic_model(self, data):

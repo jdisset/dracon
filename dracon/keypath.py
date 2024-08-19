@@ -13,8 +13,10 @@ class KeyPathToken(Enum):
 def escape_keypath_part(part: str) -> str:
     return part.replace('.', '\\.').replace('/', '\\/')
 
+
 def unescape_keypath_part(part: str) -> str:
     return part.replace('\\.', '.').replace('\\/', '/')
+
 
 class KeyPath:
     def __init__(
@@ -187,10 +189,12 @@ class KeyPath:
             return False
         return self.parts[: len(other)] == other.parts
 
-    def get_obj(self, obj: Any) -> Any:
+    def get_obj(
+        self, obj: Any, create_path_if_not_exists=False, default_mapping_constructor=None
+    ) -> Any:
         if not self.is_simple:
             simplified = self.simplified()
-            return simplified.get_obj(obj)
+            return simplified.get_obj(obj, create_path_if_not_exists, default_mapping_constructor)
 
         res = obj
         for part in self.parts:
@@ -198,11 +202,15 @@ class KeyPath:
                 raise ValueError(f'Cannot get object from unsimplifiable path: {self}')
             if part == KeyPathToken.ROOT:
                 continue
-            res = self._get_obj_impl(res, part)
+            res = self._get_obj_impl(
+                res, part, create_path_if_not_exists, default_mapping_constructor
+            )
         return res
 
     @staticmethod
-    def _get_obj_impl(obj: Any, attr: Any) -> Any:
+    def _get_obj_impl(
+        obj: Any, attr: Any, create_path_if_not_exists=False, default_mapping_constructor=None
+    ) -> Any:
         """
         Get an attribute from an object, handling various types of objects.
         """
@@ -214,6 +222,10 @@ class KeyPath:
             try:  # check if we can access it with __getitem__
                 return obj[attr]
             except (TypeError, KeyError):
+                if create_path_if_not_exists:
+                    assert default_mapping_constructor is not None
+                    obj[attr] = default_mapping_constructor()
+                    return obj[attr]
                 if isinstance(obj, Node):
                     raise AttributeError(
                         f'Could not find attribute {attr} in node \n{node_print(obj)}'
