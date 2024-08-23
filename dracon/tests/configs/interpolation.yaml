@@ -4,3 +4,11 @@ base:
   file_stem: ${"$FILE_STEM"}
 
 loaded_base: ${load('$DIR/base.yaml')}
+
+
+string: ${2+2}
+
+floatstr: "$(str('float'))"
+
+tag_interp: !$(str('float')) ${2+2}
+
