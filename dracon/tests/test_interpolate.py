@@ -18,7 +18,6 @@ from pydantic import (
 
 from dracon.interpolation import (
     outermost_interpolation_exprs,
-    find_first_occurence,
     find_keypaths,
     resolve_keypath,
     resolve_eval_str,
@@ -52,9 +51,16 @@ def test_dict():
     assert kp[2].expr == r"haha./../p[3"
 
     test_expr2 = "${@/name\\.greeting..back+2 + / @path.${'haha' + @inner.match }to.list\\[2] } = @haha./../p\\[3{] + ${2+2}"
+    test_expr_paren = "$(@/name\\.greeting..back+2 + / @path.${'haha' + @inner.match }to.list\\[2] ) = @haha./../p\\[3{] + ${2+2}"
 
     interp_matches = outermost_interpolation_exprs(test_expr2)
+    assert len(interp_matches) == 2
+    assert interp_matches[0].start == 0
 
+    interp_matches = outermost_interpolation_exprs(test_expr_paren)
+    assert len(interp_matches) == 2
+    print(interp_matches)
+    assert interp_matches[0].start == 0
 
     obj = {
         "name": "John",
@@ -132,6 +138,8 @@ def test_lazy():
     assert loaded.nested.inner.new == newstr
     loaded.nested.inner['new'] = LazyInterpolable(loaded.nested.inner['new'])
     assert (loaded.nested.inner.new == 'John greetings, dear John!')
+
+
 
 
 

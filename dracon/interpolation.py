@@ -1,4 +1,6 @@
 import ast
+import regex
+import pyparsing as pp
 import collections.abc as cabc
 from asteval import Interpreter
 import re
@@ -120,7 +122,6 @@ def find_interpolable_variables(expr: str) -> List[VarMatch]:
     return matches
 
 
-
 def resolve_interpolable_variables(expr: str, symbols: Dict[str, Any]) -> str:
     var_matches = find_interpolable_variables(expr)
     if not var_matches:
@@ -140,6 +141,8 @@ def resolve_interpolable_variables(expr: str, symbols: Dict[str, Any]) -> str:
 
 
 ## {{{                    --     interpolation exprs     --
+
+
 @dataclass
 class InterpolationMatch:
     start: int
@@ -147,19 +150,46 @@ class InterpolationMatch:
     expr: str
 
 
-def outermost_interpolation_exprs(text: str) -> List[InterpolationMatch]:
-    # match all ${...} expressions
-    matches = list(re.finditer(r"\${[^}]+}", text))
-    return [InterpolationMatch(m.start(), m.end(), m.group(0)[2:-1]) for m in matches]
+def fast_interpolation_exprs_check(  # about 1000x faster than the pyparsing version but can't handle nested expressions
+    text: str, interpolation_start_char='$', interpolation_boundary_chars=('{}', '()')
+) -> bool:
+    patterns = [
+        re.escape(interpolation_start_char) + re.escape(bound[0]) + r".*?" + re.escape(bound[1])
+        for bound in interpolation_boundary_chars
+    ]
+    matches = re.search("|".join(patterns), text)
+    return matches is not None
 
 
-def find_first_occurence(expr, *substrings) -> Optional[int]:
-    pat = re.compile("|".join([NOT_ESCAPED_REGEX + re.escape(s) for s in substrings]))
-    match = pat.search(expr)
-    if match is None:
-        return None
-    else:
-        return match.start()
+def fast_prescreen_interpolation_exprs_check(  # 5000x but very simple and limited
+    text: str, interpolation_start_char='$', interpolation_boundary_chars=('{}', '()')
+) -> bool:
+    start_patterns = [interpolation_start_char + bound[0] for bound in interpolation_boundary_chars]
+    for start_pattern in start_patterns:
+        if start_pattern in text:
+            return True
+    return False
+
+
+def outermost_interpolation_exprs(
+    text: str, interpolation_start_char='$', interpolation_boundary_chars=('{}', '()')
+) -> List[InterpolationMatch]:
+    matches = []
+    if not fast_prescreen_interpolation_exprs_check(
+        text, interpolation_start_char, interpolation_boundary_chars
+    ):
+        return matches
+
+    scanner = pp.MatchFirst(
+        [
+            pp.originalTextFor(pp.nestedExpr(bounds[0], bounds[1]))
+            for bounds in interpolation_boundary_chars
+        ]
+    )
+    scanner = pp.Combine(interpolation_start_char + scanner)
+    for match, start, end in scanner.scanString(text):
+        matches.append(InterpolationMatch(start, end, match[0][2:-1]))
+    return sorted(matches, key=lambda m: m.start)
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
@@ -199,6 +229,9 @@ def resolve_eval_str(
     if init_outermost_interpolations is None:
         interpolations = outermost_interpolation_exprs(expr)
 
+    if interpolations is None:
+        return expr
+
     if isinstance(current_path, str):
         current_path = KeyPath(current_path)
 
@@ -222,11 +255,15 @@ def resolve_eval_str(
         and interpolations[0].start == 0
         and interpolations[0].end == len(expr)
     ):
-        endexpr = do_safe_eval(interpolations[0].expr, symbols)
-
+        print(f"Match: {interpolations[0]}")
+        expr = interpolations[0].expr
+        endexpr = do_safe_eval(
+            resolve_eval_str(expr, current_path, root_obj, allow_recurse=allow_recurse), symbols
+        )
     else:
         offset = 0
         for match in interpolations:  # will be returned as a concatenation of strings
+            print(f"Match: {match}")
             newexpr = str(
                 do_safe_eval(
                     resolve_eval_str(
@@ -311,7 +348,7 @@ class LazyInterpolable(Lazy[T]):
         self.permissive = permissive
         if not self.permissive:
             assert isinstance(
-                value, str
+                value, (str, tuple)
             ), f"LazyInterpolable expected string, got {type(value)}. Did you mean to contruct with permissive=True?"
 
     def resolve(self):

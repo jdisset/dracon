@@ -122,6 +122,13 @@ def test_composition_through_interpolation():
 
     assert config.loaded_base.default_settings.param1 == "value1"
 
+    assert type(config.string) is int
+    assert config.string == 4
+    assert config.floatstr == 'float'
+
+    assert isinstance(config.tag_interp, float)
+    assert config.tag_interp == 4.0
+
 
 def test_override():
     loader = DraconLoader()

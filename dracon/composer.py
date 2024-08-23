@@ -56,12 +56,14 @@ class IncludeNode(ScalarNode):
     def __init__(self, value, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
         ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
 
+
 class MergeNode(ScalarNode):
     def __init__(self, value, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
         self.merge_key_raw = value
         ScalarNode.__init__(
             self, STR_TAG, value, start_mark, end_mark, comment=comment, anchor=anchor
         )
+
 
 class UnsetNode(ScalarNode):
     def __init__(self, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
@@ -413,7 +415,6 @@ class DraconComposer(Composer):
 
     def wrapped_node(self, node: Node) -> Node:
         if isinstance(node, MappingNode):
-            print(f'MappingNode with tag: {node.tag}')
             return DraconMappingNode(
                 tag=node.tag,
                 value=node.value,
@@ -436,18 +437,25 @@ class DraconComposer(Composer):
         if isinstance(node, ScalarNode):
             if node.value == DRACON_UNSET_VALUE:
                 return UnsetNode()
-            if self.interpolation_enabled and isinstance(node.value, str):
-                iexpr = outermost_interpolation_exprs(node.value)
-                if iexpr:
-                    return LazyInterpolableNode(
-                        value=node.value,
-                        start_mark=node.start_mark,
-                        end_mark=node.end_mark,
-                        tag=node.tag,
-                        anchor=node.anchor,
-                        comment=node.comment,
-                        init_outermost_interpolations=iexpr,
-                    )
+            if self.interpolation_enabled:
+                # check if tag can be interpolated
+                tag_iexpr = outermost_interpolation_exprs(node.tag)
+                value_iexpr = (
+                    outermost_interpolation_exprs(node.value)
+                    if isinstance(node.value, str)
+                    else None
+                )
+                if tag_iexpr or value_iexpr:
+                    if value_iexpr:
+                        return LazyInterpolableNode(
+                            value=node.value,
+                            start_mark=node.start_mark,
+                            end_mark=node.end_mark,
+                            tag=node.tag,
+                            anchor=node.anchor,
+                            comment=node.comment,
+                            init_outermost_interpolations=value_iexpr,
+                        )
             return node
 
         elif isinstance(node, (IncludeNode, MergeNode)):
@@ -499,7 +507,6 @@ def delete_unset_nodes(comp_res: CompositionResult):
             )
         else:
             return node
-
 
     comp_res.root = _delete_unset_nodes(comp_res.root, None, None)
 
