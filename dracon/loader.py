@@ -181,6 +181,7 @@ class DraconLoader:
             enable_interpolation=self.yaml.composer.interpolation_enabled,
             context=deepcopy(self.context),
         )
+        new_loader.yaml.constructor.yaml_constructors = copy.deepcopy(self.yaml.constructor.yaml_constructors)
         return new_loader
 
     def compose_from_include_str(

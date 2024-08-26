@@ -139,7 +139,6 @@ def resolve_interpolable_variables(expr: str, symbols: Dict[str, Any]) -> str:
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
-
 ## {{{                    --     interpolation exprs     --
 
 
@@ -194,13 +193,11 @@ def outermost_interpolation_exprs(
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
-
 ## {{{                      --     base functions and symbols   --
 
 BASE_DRACON_SYMBOLS: Dict[str, Any] = {}
 
 ##────────────────────────────────────────────────────────────────────────────}}}
-
 
 ## {{{                           --     eval     --
 
@@ -258,7 +255,8 @@ def resolve_eval_str(
         print(f"Match: {interpolations[0]}")
         expr = interpolations[0].expr
         endexpr = do_safe_eval(
-            resolve_eval_str(expr, current_path, root_obj, allow_recurse=allow_recurse), symbols
+            str(resolve_eval_str(expr, current_path, root_obj, allow_recurse=allow_recurse)),
+            symbols,
         )
     else:
         offset = 0
@@ -266,8 +264,10 @@ def resolve_eval_str(
             print(f"Match: {match}")
             newexpr = str(
                 do_safe_eval(
-                    resolve_eval_str(
-                        match.expr, current_path, root_obj, allow_recurse=allow_recurse
+                    str(
+                        resolve_eval_str(
+                            match.expr, current_path, root_obj, allow_recurse=allow_recurse
+                        )
                     ),
                     symbols,
                 )
@@ -307,7 +307,7 @@ class Lazy(Generic[T]):
                 raise InterpolationError(f"Failed to lazyly validate attribute{quoted_name}") from e
         return value
 
-    def resolve(self):
+    def resolve(self) -> T:
         return self.validate(self.value)
 
     def get(self, owner_instance, setval=False):
@@ -351,7 +351,7 @@ class LazyInterpolable(Lazy[T]):
                 value, (str, tuple)
             ), f"LazyInterpolable expected string, got {type(value)}. Did you mean to contruct with permissive=True?"
 
-    def resolve(self):
+    def resolve(self) -> T:
         if isinstance(self.value, str):
             self.value = resolve_eval_str(
                 self.value,
