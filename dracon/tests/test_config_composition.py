@@ -3,6 +3,8 @@ from pathlib import Path
 import pytest
 from ruamel.yaml import YAML
 from dracon import DraconLoader
+from dracon.resolvable import Resolvable
+from pydantic import BaseModel
 
 # Set a dummy environment variable for testing purposes
 os.environ["TESTVAR1"] = "test_var_1"
@@ -15,6 +17,7 @@ main_config_path = 'dracon:tests/configs/main.yaml'
 params_config_path = 'dracon:tests/configs/params.yaml'
 base_config_path = 'dracon:tests/configs/base.yaml'
 interp_config_path = 'dracon:tests/configs/interpolation.yaml'
+resolvable_config_path = 'dracon:tests/configs/resolvable.yaml'
 override_config_path = 'dracon:tests/configs/override.yaml'
 
 def get_config(config_path):
@@ -122,12 +125,20 @@ def test_composition_through_interpolation():
 
     assert config.loaded_base.default_settings.param1 == "value1"
 
-    assert type(config.string) is int
-    assert config.string == 4
+    assert type(config.int4) is int
+    assert config.int4 == 4
     assert config.floatstr == 'float'
+
+    assert config.nested_int4 == 4
 
     assert isinstance(config.tag_interp, float)
     assert config.tag_interp == 4.0
+
+    assert config.interp_later ==  5
+    assert type(config.interp_later) is int
+
+    assert config.interp_later_tag == 5.0
+    assert type(config.interp_later_tag) is float
 
 
 def test_override():
@@ -139,6 +150,29 @@ def test_override():
     assert config["default_settings"]["setting3"] == "override_value3"
     assert config["default_settings"]["setting_list"] == ["override_item1", 3, "item_lol", "item4"]
 
+class Person(BaseModel):
+    name: str
+    age: int
+
+class WithResolvable(BaseModel):
+    ned: Resolvable[Person]
+
+
+def test_resolvable():
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.load(f"pkg:{resolvable_config_path}")
+
+    assert type(config.ned) is Resolvable
+    ned = config.ned.resolve()
+    assert type(ned) is Person
+    assert ned.name == "Eddard"
+    assert ned.age == 40
+
+    # TODO: resolvable + interpolable
+    # assert type(config.jon) is Resolvable
+    # print(config.jon.node)
+    # jon = config.jon.resolve()
+    # assert type(jon) == Person
 
 
 if __name__ == "__main__":

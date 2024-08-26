@@ -446,16 +446,15 @@ class DraconComposer(Composer):
                     else None
                 )
                 if tag_iexpr or value_iexpr:
-                    if value_iexpr:
-                        return LazyInterpolableNode(
-                            value=node.value,
-                            start_mark=node.start_mark,
-                            end_mark=node.end_mark,
-                            tag=node.tag,
-                            anchor=node.anchor,
-                            comment=node.comment,
-                            init_outermost_interpolations=value_iexpr,
-                        )
+                    return LazyInterpolableNode(
+                        value=node.value,
+                        start_mark=node.start_mark,
+                        end_mark=node.end_mark,
+                        tag=node.tag,
+                        anchor=node.anchor,
+                        comment=node.comment,
+                        init_outermost_interpolations=value_iexpr,
+                    )
             return node
 
         elif isinstance(node, (IncludeNode, MergeNode)):
