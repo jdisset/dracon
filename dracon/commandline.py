@@ -175,7 +175,7 @@ class Program(BaseModel, Generic[T]):
         if conf is not None:
             for action in actions:
                 action(self, conf)
-        return conf
+        return conf, args
 
     def generate_config(self, args: dict[str, str]) -> Optional[T]:
         def make_override(argname, value):
@@ -186,7 +186,9 @@ class Program(BaseModel, Generic[T]):
 
         override_str = "\n".join([make_override(k, v) for k, v in args.items()])
         custom_types = {self.conf_type.__name__: self.conf_type}
-        loader = DraconLoader(custom_types=custom_types, enable_interpolation=True)
+        loader = DraconLoader(
+            custom_types=custom_types, enable_interpolation=True, base_list_type=list, base_dict_type=dict
+        )
         loader.yaml.representer.full_module_path = False
 
         empty_model = self.conf_type.model_construct()
@@ -219,7 +221,6 @@ class Program(BaseModel, Generic[T]):
                         resolvable_node.tag = new_tag
                         print(f"Set tag to {new_tag} for {field_name}")
 
-
             return loader.load_from_composition_result(comp)
 
         except ValidationError as e:
@@ -238,4 +239,3 @@ def make_program(conf_type: type, **kwargs):
     if not issubclass(conf_type, BaseModel):
         raise ValueError("make_program requires a BaseModel subclass")
     return Program[conf_type](conf_type=conf_type, **kwargs)
-

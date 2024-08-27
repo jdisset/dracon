@@ -42,11 +42,12 @@ class Resolvable(Generic[T]):
         ])
 
 
-    def resolve(self, context=None, localns=None):
+    def resolve(self, context=None, localns=None, interpolate_all=False):
         assert self.ctor is not None
         assert self.node is not None
         self.ctor.context.update(context or {})
         self.ctor.localns.update(localns or {})
+        self.ctor.interpolate_all = interpolate_all
         return self.ctor.construct_object(self.node)
 
 

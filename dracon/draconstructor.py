@@ -75,12 +75,13 @@ def parse_resolvable_tag(tag):
     return Any
 
 class Draconstructor(Constructor):
-    def __init__(self, preserve_quotes=None, loader=None, localns=None, context=None):
+    def __init__(self, preserve_quotes=None, loader=None, localns=None, context=None, interpolate_all=False):
         Constructor.__init__(self, preserve_quotes=preserve_quotes, loader=loader)
         self.yaml_base_dict_type = dracontainer.Mapping
         self.yaml_base_sequence_type = dracontainer.Sequence
         self.localns = localns or {}
         self.context = context or {}
+        self.interpolate_all = interpolate_all
 
     def construct_object(self, node, deep=True):
         # force deep construction so that obj is always fully constructed
@@ -122,12 +123,16 @@ class Draconstructor(Constructor):
                 validator = partial(validator_f)
 
             # TODO: current_path, root_obj
-            return LazyInterpolable(
+            lzy = LazyInterpolable(
                 value=node_value,
                 init_outermost_interpolations=init_outermost_interpolations,
                 validator=validator,
                 extra_symbols=deepcopy(self.context),
             )
+            if self.interpolate_all:
+                lzy = lzy.get(self)
+
+            return lzy
 
 
         if tag.startswith('!'):
