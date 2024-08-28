@@ -117,13 +117,13 @@ DEFAULT_CONTEXT = {
     # some SAFE os functions (not all of them are safe)
     # need no side effects, and no access to the filesystem
     'getenv': os.getenv,
-    'getenvb': os.getenvb,
+    # 'getenvb': os.getenvb,
     'environ': os.environ,
-    'environb': os.environb,
+    # 'environb': os.environb,
     'getcwd': os.getcwd,
     'listdir': os.listdir,
-    'getpid': os.getpid,
-    'getppid': os.getppid,
+    # 'getpid': os.getpid,
+    # 'getppid': os.getppid,
 }
 
 
