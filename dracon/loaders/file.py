@@ -6,6 +6,7 @@ from typing import Optional
 
 DraconLoader = ForwardRef('DraconLoader')
 
+
 def read_from_file(path: str, extra_paths=None, loader: Optional[DraconLoader] = None):
     all_paths = with_possible_ext(path)
     if not extra_paths:
@@ -28,12 +29,10 @@ def read_from_file(path: str, extra_paths=None, loader: Optional[DraconLoader] =
         raw = f.read()
 
     if loader:
-        loader.context['$DIR'] = p.parent.as_posix()
-        loader.context['$FILE'] = p.name
+        loader.update_context({'$DIR': p.parent.as_posix(), '$FILE': p.name, '$FILE_STEM': p.stem})
 
     return raw
 
 
 def compose_from_file(path: str, loader: DraconLoader, extra_paths=None):
     return loader.compose_config_from_str(read_from_file(path, extra_paths))
-

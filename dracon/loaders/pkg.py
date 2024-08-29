@@ -22,9 +22,17 @@ def read_from_pkg(path: str, loader: Optional[DraconLoader] = None):
             with as_file(files(pkg) / fpath.as_posix()) as p:
                 with open(p, 'r') as f:
                     if loader:
-                        loader.context['$FILE'] = Path(p).resolve().absolute().as_posix()
-                        loader.context['$DIR'] = Path(p).parent.resolve().absolute().as_posix()
-                        loader.context['$FILE_STEM'] = Path(p).stem
+                        # loader.context['$FILE'] = Path(p).resolve().absolute().as_posix()
+                        # loader.context['$DIR'] = Path(p).parent.resolve().absolute().as_posix()
+                        # loader.context['$FILE_STEM'] = Path(p).stem
+                        loader.update_context(
+                            {
+                                '$FILE': Path(p).resolve().absolute().as_posix(),
+                                '$DIR': Path(p).parent.resolve().absolute().as_posix(),
+                                '$FILE_STEM': Path(p).stem,
+                            }
+                        )
+
                     return f.read()
         except FileNotFoundError:
             pass
