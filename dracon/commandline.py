@@ -128,6 +128,7 @@ class Program(BaseModel, Generic[T]):
 
         args = {}
         actions = []
+        defined_vars = {}
         i = 0
 
         def read_value(argstr, i):
@@ -139,10 +140,15 @@ class Program(BaseModel, Generic[T]):
         while i < len(argv):
             argstr = argv[i]
             modifier = lambda x: x
-            if argstr in self._arg_map:
+            if argstr.startswith('--define.'):
+                var_name = argstr[9:]
+                var_value, i = read_value(argstr, i)
+                defined_vars[f'${var_name}'] = var_value
+                i += 1
+                continue
+            elif argstr in self._arg_map:
                 arg_obj = self._arg_map[argstr]
                 print(f"Arg: {arg_obj.real_name}, {arg_obj.arg_type}, {arg_obj.action}")
-                # Check for an action
 
                 if arg_obj.action is not None:
                     print(f"Action: {arg_obj.action} for {arg_obj.real_name}")
@@ -171,13 +177,13 @@ class Program(BaseModel, Generic[T]):
 
             args[argstr] = modifier(v)
 
-        conf = self.generate_config(args)
+        conf = self.generate_config(args, defined_vars)
         if conf is not None:
             for action in actions:
                 action(self, conf)
         return conf, args
 
-    def generate_config(self, args: dict[str, str]) -> Optional[T]:
+    def generate_config(self, args: dict[str, str], defined_vars: dict[str, str]) -> Optional[T]:
         def make_override(argname, value):
             argname = argname.lstrip('-')
             if '@' in argname:
@@ -187,7 +193,10 @@ class Program(BaseModel, Generic[T]):
         override_str = "\n".join([make_override(k, v) for k, v in args.items()])
         custom_types = {self.conf_type.__name__: self.conf_type}
         loader = DraconLoader(
-            custom_types=custom_types, enable_interpolation=True, base_list_type=list, base_dict_type=dict
+            custom_types=custom_types,
+            enable_interpolation=True,
+            base_list_type=list,
+            base_dict_type=dict,
         )
         loader.yaml.representer.full_module_path = False
 
@@ -203,6 +212,7 @@ class Program(BaseModel, Generic[T]):
         try:
             print("Loading...")
             loader.reset_context()
+            loader.update_context(defined_vars)
             comp = loader.compose_config_from_str(dmp)
             print("Composed")
 
