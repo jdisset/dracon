@@ -148,12 +148,8 @@ class DraconLoader:
         self.yaml.Constructor = Draconstructor
         self.yaml.Representer = DraconRepresenter
 
-        self.context = context or {}
-
-        self.context.update({
-            **DEFAULT_CONTEXT,
-            'load': self.load,
-        })
+        self.reset_context()
+        self.update_context(context or {})
 
         self.yaml.constructor.context.update(self.context)
         self.yaml.composer.interpolation_enabled = enable_interpolation
@@ -165,9 +161,12 @@ class DraconLoader:
 
 
     def reset_context(self):
-        self.context: Dict[str, Any] = {}
+        self.context: Dict[str, Any] = {
+            **DEFAULT_CONTEXT,
+            'load': self.load,
+        }
 
-    def update_context(self, **kwargs):
+    def update_context(self, kwargs):
         # make sure it's created if it doesn't exist
         self.context.update(kwargs)
 
@@ -267,7 +266,8 @@ class DraconLoader:
             assert isinstance(inode, IncludeNode), f"Invalid node type: {type(inode)}"
             include_str = inode.value
             include_str= resolve_interpolable_variables(include_str, self.context)
-            include_composed = self.compose_from_include_str(include_str, inode_path, comp_res)
+            new_loader = self.copy()
+            include_composed = new_loader.compose_from_include_str(include_str, inode_path, comp_res)
             comp_res = comp_res.replaced_at(inode_path, include_composed)
         return comp_res
 
