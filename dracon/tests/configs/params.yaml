@@ -3,3 +3,6 @@ param2: value2
 setting2: value_params_2
 simple_params:
   <<: *pkg:dracon:tests/configs/simple
+
+<<{~<}[~<]: *pkg:dracon:tests/configs/list2
+<<{<}: !include "pkg:dracon:tests/configs/params 2"

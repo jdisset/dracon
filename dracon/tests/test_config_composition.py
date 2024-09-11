@@ -50,7 +50,7 @@ def test_main_config_composition():
 
     assert config["config"]["new_with.dot"] == "baseval3"
 
-    assert config["other_base"]["default_settings"]["param1"] == "value1"
+    assert config["other_base"]["default_settings"]["param1"] == "value1_overriden"
     assert config["other_base"]["default_settings"]["setting1"] == "default_value1"
     assert config["other_base"]["default_settings"]["setting2"] == "default_value2"
     assert config["other_base"]["default_settings"]["again"]["setting2"] == "value_params_2"
@@ -94,7 +94,7 @@ def test_params_config():
     config = get_config(params_config_path)
 
     # Check if the params configuration is composed correctly
-    assert config["param1"] == "value1"
+    assert config["param1"] == "value1_overriden"
     assert config["param2"] == "value2"
     assert config["simple_params"]["root"]["a"] == 3
     assert config["simple_params"]["additional_settings"]["setting_list"] == [
@@ -102,6 +102,8 @@ def test_params_config():
         3,
         "item_lol",
     ]
+
+    assert config["list2"] == [7, 8, 9]
 
 
 def test_env_variable_inclusion():
@@ -123,7 +125,7 @@ def test_composition_through_interpolation():
     assert config.base.file_stem == "interpolation"
     assert config.base.interpolated_addition == 4
 
-    assert config.loaded_base.default_settings.param1 == "value1"
+    assert config.loaded_base.default_settings.param1 == "value1_overriden"
 
     assert type(config.int4) is int
     assert config.int4 == 4
