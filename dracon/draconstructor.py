@@ -1,23 +1,34 @@
-from ruamel.yaml.constructor import Constructor, ConstructorError
-from ruamel.yaml.nodes import MappingNode, SequenceNode, ScalarNode
-from typing import Any, Dict
+from ruamel.yaml.constructor import Constructor
+import sys
+import importlib
+from ruamel.yaml.nodes import MappingNode, SequenceNode
 from copy import deepcopy
 
-from ruamel.yaml.constructor import Constructor, SafeConstructor
-from pydantic import BaseModel, create_model, ValidationError, TypeAdapter, PydanticSchemaGenerationError
+from pydantic import (
+    TypeAdapter,
+    PydanticSchemaGenerationError,
+)
 
 from dracon import dracontainer
 from dracon.composer import LazyInterpolableNode
-from dracon.interpolation import LazyInterpolable, Lazy, outermost_interpolation_exprs
+from dracon.interpolation import LazyInterpolable, outermost_interpolation_exprs
 from dracon.resolvable import Resolvable, get_inner_type
 
-from typing import Hashable, ForwardRef, Union, List, Tuple, _eval_type, get_origin  # type: ignore
+from typing import (
+    Optional,
+    Type,
+    Any,
+    ForwardRef,
+    List,
+    get_origin,
+)
 from functools import partial
 
 
 def pydantic_validate(tag, value, localns=None):
-    tag_type = get_type(tag, localns or {})
+    tag_type = resolve_type(tag, localns=localns or {})
     return TypeAdapter(tag_type).validate_python(value)
+
 
 DEFAULT_TYPES = {
     'Any': Any,
@@ -25,46 +36,60 @@ DEFAULT_TYPES = {
     'DraconResolvable': Resolvable,
 }
 
-def get_type(tag, localns):
-    if tag.startswith('!'):
-        tag = tag[1:]
-    else:
+
+def resolve_type(
+    type_str: str,
+    localns: Optional[dict] = None,
+    available_module_names: Optional[List[str]] = None,
+) -> Type:
+    if not type_str.startswith('!'):
         return Any
 
-    localns = {**DEFAULT_TYPES, **localns}
-    if '.' in tag:
-        module_name, cname = tag.rsplit('.', 1)
-        try:
-            import importlib
+    type_str = type_str[1:]
 
+    if available_module_names is None:
+        available_module_names = ["__main__"]
+    localns = localns or {}
+
+    # Attempt regular import
+    module_name, type_name = type_str.rsplit(".", 1) if "." in type_str else ("", type_str)
+    if module_name:
+        available_module_names = [module_name] + available_module_names
+
+    for module_name in available_module_names:
+        try:
+            module = sys.modules.get(module_name) or importlib.import_module(module_name)
+            if hasattr(module, type_name):
+                return getattr(module, type_name)
+        except ImportError:
+            continue
+
+    # Fall back to _eval_type
+    if '.' in type_str:
+        module_name, cname = type_str.rsplit('.', 1)
+        try:
             module = importlib.import_module(module_name)
             localns[module_name] = module
-            localns[tag] = getattr(module, cname)  # Add the class directly with the full tag
-        except ImportError:
-            print(f'Failed to import {module_name}')
-        except AttributeError:
-            print(f'Failed to get {cname} from {module_name}')
+            localns[type_str] = getattr(module, cname)
+        except (ImportError, AttributeError):
+            pass
 
     try:
-        return _eval_type(ForwardRef(tag), globals(), localns)
+        from typing import _eval_type
+
+        return _eval_type(ForwardRef(type_str), globals(), localns)
     except NameError as e:
-        raise ConstructorError(None, None, f"Failed to resolve type {tag}") from e
+        raise ValueError(f"Failed to resolve type {type_str}") from e
+    except Exception:
+        return Resolvable if type_str.startswith('Resolvable[') else Any
 
-    except Exception as e:
-        if tag.startswith('Resolvable['):
-            return Resolvable
-        return Any
-
-# for delayed instanciation, maybe allow ${...} expression in tags
-# which will mark the whole branch as delayed, and allow the type to actually be resolved later
-# maybe a special Resolvable type
-# And of course I need to write the equivalent serialiazer that turns Resolvable[T] into !${T}
 
 def get_origin_type(t):
     orig = get_origin(t)
     if orig is None:
         return t
     return orig
+
 
 def parse_resolvable_tag(tag):
     if tag.startswith('!'):
@@ -74,8 +99,11 @@ def parse_resolvable_tag(tag):
         return inner
     return Any
 
+
 class Draconstructor(Constructor):
-    def __init__(self, preserve_quotes=None, loader=None, localns=None, context=None, interpolate_all=False):
+    def __init__(
+        self, preserve_quotes=None, loader=None, localns=None, context=None, interpolate_all=False
+    ):
         Constructor.__init__(self, preserve_quotes=preserve_quotes, loader=loader)
         self.yaml_base_dict_type = dracontainer.Mapping
         self.yaml_base_sequence_type = dracontainer.Sequence
@@ -87,8 +115,7 @@ class Draconstructor(Constructor):
         # force deep construction so that obj is always fully constructed
         tag = node.tag
 
-        tag_type = get_type(tag, self.localns)
-
+        tag_type = resolve_type(tag, localns=self.localns)
 
         if issubclass(get_origin_type(tag_type), Resolvable):
             inner_type = get_inner_type(tag_type)
@@ -106,20 +133,21 @@ class Draconstructor(Constructor):
             res = Resolvable(node=node, ctor=self, inner_type=inner_type)
             return res
 
-
         if isinstance(node, LazyInterpolableNode):
             node_value = node.value
             init_outermost_interpolations = node.init_outermost_interpolations
             validator = partial(pydantic_validate, tag, localns=self.localns)
             tag_iexpr = outermost_interpolation_exprs(tag)
             if tag_iexpr:  # tag is an interpolation itself
-                # we can make a combo interpolation that evaluates 
+                # we can make a combo interpolation that evaluates
                 # to a tuple of the resolved tag and value
                 node_value = "${('" + str(tag) + "', " + str(node.value) + ")}"
                 init_outermost_interpolations = outermost_interpolation_exprs(node_value)
+
                 def validator_f(value, localns=self.localns):
                     tag, value = value
                     return pydantic_validate(tag, value, localns=localns)
+
                 validator = partial(validator_f)
 
             # TODO: current_path, root_obj
@@ -134,16 +162,16 @@ class Draconstructor(Constructor):
 
             return lzy
 
-
         if tag.startswith('!'):
             self.reset_tag(node)
 
         obj = super().construct_object(node, deep=True)
 
         try:
-            return pydantic_validate(tag, obj, self.localns)
-
+            obj = pydantic_validate(tag, obj, self.localns)
+            return obj
         except PydanticSchemaGenerationError as e:
+            print(f"Error while validating {tag}: {obj}: {e}")
             # rebuild the object with the original tag
             node.tag = tag
             new = super().construct_object(node)
@@ -156,5 +184,3 @@ class Draconstructor(Constructor):
             node.tag = self.resolver.DEFAULT_MAPPING_TAG
         else:
             node.tag = self.resolver.DEFAULT_SCALAR_TAG
-
-
