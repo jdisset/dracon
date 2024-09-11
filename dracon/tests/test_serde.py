@@ -5,7 +5,7 @@ from typing import Annotated, List, get_type_hints
 
 
 class ClassA(BaseModel):
-    attr3: float
+    attr3: float = 0
 
 
 class ClassB(BaseModel):
@@ -33,6 +33,7 @@ def test_simple():
         attrA: !ClassA
             attr3: 3.14
     """
+
     loader = DraconLoader()
     loader.yaml.representer.full_module_path = False
 
@@ -64,3 +65,19 @@ def test_complex():
         conf
         == "!ClassC\nattr1:\n- custom_hello\n- custom_world\nattrB: !ClassB\n  attr1: hello\n  attr2: 42\n  attrA: !ClassA\n    attr3: 3.14\n"
     )
+
+
+class ClassEx(BaseModel):
+    attr: float = 0
+
+def test_empty():
+    conf = """
+        emptyd: !ClassEx {}
+        """
+    loader = DraconLoader()
+    loader.yaml.representer.full_module_path = False
+    obj = loader.loads(conf)
+    assert isinstance(obj.emptyd, ClassEx)
+    assert obj.emptyd.attr == 0
+
+
