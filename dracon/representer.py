@@ -9,9 +9,12 @@ import numpy as np
 
 
 class DraconRepresenter(RoundTripRepresenter):
-    def __init__(self, *args, full_module_path=True, **kwargs):
+    def __init__(self, *args, full_module_path=True, exclude_defaults=True, **kwargs):
         super().__init__(*args, **kwargs)
-        self.full_module_path = full_module_path # if True, the full module path will be used as the tag
+        self.full_module_path = (
+            full_module_path  # if True, the full module path will be used as the tag
+        )
+        self.exclude_defaults = exclude_defaults
 
 
 def represent_pydantic_model(self, data):
@@ -21,7 +24,7 @@ def represent_pydantic_model(self, data):
     if self.full_module_path:
         tag = f"!{data.__class__.__module__}.{data.__class__.__name__}"
 
-    model_dump = data.model_dump()
+    model_dump = data.model_dump(exclude_defaults=self.exclude_defaults)
 
     # we dump the object using the model_dump method
     # (which uses the preffered aliases and serializations)
@@ -43,5 +46,5 @@ def represent_pydantic_model(self, data):
     node = self.represent_mapping(tag, model_dump)
     return node
 
-DraconRepresenter.add_multi_representer(BaseModel, represent_pydantic_model)
 
+DraconRepresenter.add_multi_representer(BaseModel, represent_pydantic_model)
