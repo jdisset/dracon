@@ -208,6 +208,12 @@ def merged(existing: Any, new: Any, k: MergeKey) -> DictLike:
 
         result = deepcopy(pdict)
 
+        if hasattr(pdict, 'tag') and hasattr(other, 'tag'):
+            if pdict.tag.startswith('!'):
+                result.tag = pdict.tag
+            elif other.tag.startswith('!'):
+                result.tag = other.tag
+
         for key, value in other.items():
             if key not in result:  # If the key doesn't exist in result, add it
                 result[key] = value
