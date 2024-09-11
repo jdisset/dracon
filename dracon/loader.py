@@ -290,6 +290,10 @@ def load(config_path: str | Path, raw_dict=False, **kwargs):
         loader.yaml.constructor.yaml_base_dict_type = dict
     return loader.load(config_path)
 
+def load_file(config_path: str | Path, raw_dict=True, **kwargs):
+    # just prepend 'file:' to the path
+    return load(f'file:{config_path}', raw_dict, **kwargs)
+
 def loads(config_str: str, raw_dict=False, **kwargs):
     loader = DraconLoader(**kwargs)
     if raw_dict:
