@@ -1,15 +1,21 @@
 import argparse
 from pydantic import BaseModel, Field, ValidationError
+from typing import List, Dict, Any
 from dracon import DraconLoader, with_indent
 from dracon.composer import DRACON_UNSET_VALUE
+from dracon.utils import node_print
 from typing import Optional, Annotated, Any, TypeVar, Generic, Callable, ForwardRef
 from dracon.resolvable import Resolvable, get_inner_type
 from dracon.keypath import KeyPath
+from dracon.loader import DEFAULT_LOADERS
+import logging
 import traceback
 
 B = TypeVar("B", bound=BaseModel)
 
 ProgramType = ForwardRef("Program")
+
+logger = logging.getLogger("dracon.commandline")
 
 
 class Arg:
@@ -91,6 +97,10 @@ def print_help(prg, _):
 T = TypeVar("T")
 
 
+class ArgParseError(Exception):
+    pass
+
+
 class Program(BaseModel, Generic[T]):
     conf_type: type[T]
 
@@ -115,75 +125,103 @@ class Program(BaseModel, Generic[T]):
             )
         )
 
-    def parse_args(self, argv: list[str]) -> Optional[T]:
-        self._positionals = [arg for arg in self._args if arg.positional].reverse()
-        self._arg_map = {}
-        for arg in self._args:
-            if arg.short:
-                assert arg.short not in self._arg_map, f"Short arg {arg.short} already exists"
-                self._arg_map[f'-{arg.short}'] = arg
-            if arg.long:
-                assert arg.long not in self._arg_map, f"Long arg {arg.long} already exists"
-                self._arg_map[f'--{arg.long}'] = arg
+    def parse_args(self, argv: List[str]) -> tuple[Optional[T], Dict[str, Any]]:
+        self._positionals = [arg for arg in self._args if arg.positional]
+        self._positionals.reverse()
+        self._arg_map = {f'-{arg.short}': arg for arg in self._args if arg.short} | {
+            f'--{arg.long}': arg for arg in self._args if arg.long
+        }
 
-        args = {}
-        actions = []
-        defined_vars = {}
+        args, defined_vars, actions, confs_to_merge = {}, {}, [], []
+
         i = 0
-
-        def read_value(argstr, i):
-            i += 1
-            if i >= len(argv) or argv[i].startswith('-'):
-                raise ValueError(f"Expected value for argument {argstr}")
-            return argv[i], i + 1
-
         while i < len(argv):
-            argstr = argv[i]
-            modifier = lambda x: x
-            if argstr.startswith('--define.'):
-                var_name = argstr[9:]
-                var_value, i = read_value(argstr, i)
-                defined_vars[f'${var_name}'] = var_value
-                i += 1
-                continue
-            elif argstr in self._arg_map:
-                arg_obj = self._arg_map[argstr]
-                print(f"Arg: {arg_obj.real_name}, {arg_obj.arg_type}, {arg_obj.action}")
+            i = self._parse_single_arg(argv, i, args, defined_vars, actions, confs_to_merge)
 
-                if arg_obj.action is not None:
-                    print(f"Action: {arg_obj.action} for {arg_obj.real_name}")
-                    actions.append(arg_obj.action)
-                    i += 1
-                    continue
-
-                if arg_obj.arg_type is bool:
-                    args[arg_obj.real_name] = True
-                    i += 1
-                    continue
-
-                if not argstr.startswith('-'):  # treat as positional argument
-                    if not self._positionals:
-                        raise ValueError(f"Unexpected positional argument {argstr}")
-                    arg_obj = self._positionals.pop()
-                    args[arg_obj.real_name] = argstr
-                    i += 1
-                    continue
-
-                if arg_obj.is_file:
-                    modifier = lambda x: f"*file:{x}"
-
-            assert argstr.startswith('--'), f"Expected argument {argstr} to start with --"
-            v, i = read_value(argstr, i)
-
-            args[argstr] = modifier(v)
-
-        conf = self.generate_config(args, defined_vars)
+        conf = self.generate_config(args, defined_vars, confs_to_merge)
         if conf is not None:
             for action in actions:
                 action(self, conf)
         return conf, args
 
-    def generate_config(self, args: dict[str, str], defined_vars: dict[str, str]) -> Optional[T]:
+    def _parse_single_arg(
+        self,
+        argv: List[str],
+        i: int,
+        args: Dict,
+        defined_vars: Dict,
+        actions: List,
+        confs_to_merge: List,
+    ) -> int:
+        argstr = argv[i]
+
+        if argstr.startswith('--define.'): # a define statement
+            return self._handle_define(argv, i, defined_vars)
+
+        elif argstr.startswith('+'): # conf merge
+            confs_to_merge.append(argv[i][1:])
+            return i + 1
+
+        elif not argstr.startswith('-'): # positional argument
+            return self._handle_positional(argv, i, args)
+
+        else: # regular optionnal argument
+            return self._handle_option(argv, i, args, actions)
+
+    def _handle_define(self, argv: List[str], i: int, defined_vars: Dict) -> int:
+        var_name = argv[i][9:]
+        var_value, i = self._read_value(argv, i)
+        defined_vars[f'${var_name}'] = var_value
+        return i
+
+
+    def _handle_positional(self, argv: List[str], i: int, args: Dict) -> int:
+        if not self._positionals:
+            raise ArgParseError(f"Unexpected positional argument {argv[i]}")
+        arg_obj = self._positionals.pop()
+        args[arg_obj.real_name] = argv[i]
+        return i + 1
+
+    def _handle_option(self, argv: List[str], i: int, args: Dict, actions: List) -> int:
+        argstr = argv[i]
+        if argstr not in self._arg_map:
+            raise ArgParseError(f"Unknown argument {argstr}")
+
+        arg_obj = self._arg_map[argstr]
+
+        if arg_obj.action is not None:
+            actions.append(arg_obj.action)
+            return i + 1
+
+        if arg_obj.arg_type is bool:
+            args[arg_obj.real_name] = True
+            return i + 1
+
+        modifier = lambda x: f"*file:{x}" if arg_obj.is_file else lambda x: x
+        v, i = self._read_value(argv, i)
+        args[arg_obj.real_name] = modifier(v)
+        return i
+
+    def _read_value(self, argv: List[str], i: int) -> tuple[str, int]:
+        i += 1
+        if i >= len(argv) or argv[i].startswith('-'):
+            raise ArgParseError(f"Expected value for argument {argv[i-1]}")
+        return argv[i], i + 1
+
+    def make_merge_str(self, confs_to_merge):
+        DEFAULT_MERGE_ARGS = "{~<}[~<]"
+        for i, conf in enumerate(confs_to_merge):
+            key = f"<<{DEFAULT_MERGE_ARGS}_merge{i}"
+            # key = f"<<{DEFAULT_MERGE_ARGS}"
+            # if starts with any of DEFAULT_LOADERS.keys(), assume it's a loader
+            if conf.startswith(tuple(DEFAULT_LOADERS.keys())):
+                yield f"{key}: !include \"{conf}\""
+            else:  # assume it's a file
+                yield f"{key}: !include \"file:{conf}\""
+
+    def generate_config(
+        self, args: dict[str, str], defined_vars: dict[str, str], confs_to_merge: list[str]
+    ) -> Optional[T]:
         def make_override(argname, value):
             argname = argname.lstrip('-')
             if '@' in argname:
@@ -198,23 +236,31 @@ class Program(BaseModel, Generic[T]):
             base_list_type=list,
             base_dict_type=dict,
         )
-        loader.yaml.representer.full_module_path = False
+        # loader.yaml.representer.full_module_path = False
 
         empty_model = self.conf_type.model_construct()
+
         for field_name, field in self.conf_type.model_fields.items():
             # If the field is missing in the instance, set it to "???"
             if not hasattr(empty_model, field_name):
                 setattr(empty_model, field_name, DRACON_UNSET_VALUE)
 
         dmp = loader.dump(empty_model)
+
+        merge_str = "\n".join(list(self.make_merge_str(confs_to_merge)))
+        if merge_str:
+            dmp += '\n' + merge_str
         dmp += '\n' + override_str
-        print(f"Dumping: {dmp}")
+
+        logger.debug(f"Parsed all args passed to commandline prog: {args}")
+        logger.debug(f"Defined vars: {defined_vars}")
+        logger.debug(f"Going to parse generated config:\n{dmp}\n")
+
         try:
-            print("Loading...")
             loader.reset_context()
             loader.update_context(defined_vars)
             comp = loader.compose_config_from_str(dmp)
-            print("Composed")
+            logger.debug(f"Composition result: {comp}")
 
             real_name_map = {arg.real_name: arg for arg in self._args}
             # then we wrap all resolvable args in a !Resolvable[...] tag
@@ -229,10 +275,8 @@ class Program(BaseModel, Generic[T]):
                         resolvable_node = field_path.get_obj(comp.root)
                         new_tag = f"!Resolvable[{field_t.__name__}]"
                         resolvable_node.tag = new_tag
-                        print(f"Set tag to {new_tag} for {field_name}")
 
             return loader.load_from_composition_result(comp)
-
         except ValidationError as e:
             # Intercept the validation error
             print()
@@ -243,6 +287,9 @@ class Program(BaseModel, Generic[T]):
                     print(f"Validation Error: {error['loc'][0]} - {error['msg']}")
             print_help(self, None)
             print()
+        except Exception as e:
+            print(f"Error: {e}")
+            print(traceback.format_exc())
 
 
 def make_program(conf_type: type, **kwargs):
