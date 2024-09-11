@@ -55,6 +55,7 @@ class DraconScalarNode(ScalarNode):
 class IncludeNode(ScalarNode):
     def __init__(self, value, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
         ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
+        print(f'IncludeNode: {value}')
 
 
 class MergeNode(ScalarNode):
@@ -368,12 +369,23 @@ class DraconComposer(Composer):
 
             self.resolver.descend_resolver(parent, index)
             if self.parser.check_event(ScalarEvent):
-                # would probably be more idiomatic to write
-                # my own MergeEvent but this works the same...
-                if event.style is None and is_merge_key(event.value) and self.merging_enabled:
-                    node = self.compose_merge_node(anchor)
+                if event.ctag == "!include":
+                    normal_node = self.compose_scalar_node(anchor)
+                    node = IncludeNode(
+                        value=normal_node.value,
+                        start_mark=event.start_mark,
+                        end_mark=event.end_mark,
+                        comment=event.comment,
+                        anchor=anchor,
+                    )
+                    self.include_nodes.append(self.curr_path.copy())
                 else:
-                    node = self.compose_scalar_node(anchor)
+                    # would probably be more idiomatic to write
+                    # my own MergeEvent but this works the same...
+                    if event.style is None and is_merge_key(event.value) and self.merging_enabled:
+                        node = self.compose_merge_node(anchor)
+                    else:
+                        node = self.compose_scalar_node(anchor)
             elif self.parser.check_event(SequenceStartEvent):
                 node = self.compose_sequence_node(anchor)
             elif self.parser.check_event(MappingStartEvent):
@@ -436,6 +448,7 @@ class DraconComposer(Composer):
             )
         if isinstance(node, ScalarNode):
             if node.value == DRACON_UNSET_VALUE:
+                print(f'Unset node at {node.start_mark}: {node.value}')
                 return UnsetNode()
             if self.interpolation_enabled:
                 # check if tag can be interpolated
@@ -478,7 +491,7 @@ def delete_unset_nodes(comp_res: CompositionResult):
                 if isinstance(v, UnsetNode):
                     continue
                 new_value.append((k, _delete_unset_nodes(v, node, k)))
-            if not new_value:
+            if not new_value and not node.tag.startswith('!'):
                 return UnsetNode()
             return DraconMappingNode(
                 tag=node.tag,
