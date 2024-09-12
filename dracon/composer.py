@@ -1,4 +1,3 @@
-from ruamel.yaml import YAML
 from enum import Enum
 from ruamel.yaml.composer import Composer
 from ruamel.yaml.nodes import MappingNode, SequenceNode, ScalarNode
@@ -324,8 +323,17 @@ class DraconComposer(Composer):
         self.merging_enabled = True
 
     def get_result(self) -> CompositionResult:
+        if self.node_map:
+            root_node = self.node_map[ROOTPATH]
+        else:
+            # create an empty root node
+            root_node = DraconMappingNode(
+                value=[],
+                tag='',
+            )
+
         return CompositionResult(
-            root=self.node_map[ROOTPATH],
+            root=root_node,
             include_nodes=deepcopy(self.include_nodes),
             anchor_paths=deepcopy(self.anchor_paths),
             merge_nodes=deepcopy(self.merge_nodes),
@@ -523,3 +531,12 @@ def delete_unset_nodes(comp_res: CompositionResult):
     comp_res.root = _delete_unset_nodes(comp_res.root, None, None)
 
     return comp_res
+
+
+"""
+# TODO
+- [ ] Remove Resolvable[...] syntax, replace by correct Resolvable(...)
+- [ ] Maybe make resolvable use a dedicated symbol like & or !$typename or $$('expr'))
+- [ ] Add a function eval type !applyfunc(funcname):result
+
+"""
