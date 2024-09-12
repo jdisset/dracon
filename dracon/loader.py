@@ -127,7 +127,6 @@ DEFAULT_CONTEXT = {
 }
 
 
-
 class DraconLoader:
     def __init__(
         self,
@@ -159,7 +158,6 @@ class DraconLoader:
         self.yaml.constructor.localns = localns
         self.yaml.constructor.yaml_base_dict_type = base_dict_type
 
-
     def reset_context(self):
         self.context: Dict[str, Any] = {
             **DEFAULT_CONTEXT,
@@ -180,7 +178,9 @@ class DraconLoader:
             enable_interpolation=self.yaml.composer.interpolation_enabled,
             context=deepcopy(self.context),
         )
-        new_loader.yaml.constructor.yaml_constructors = copy.deepcopy(self.yaml.constructor.yaml_constructors)
+        new_loader.yaml.constructor.yaml_constructors = copy.deepcopy(
+            self.yaml.constructor.yaml_constructors
+        )
         return new_loader
 
     def compose_from_include_str(
@@ -232,6 +232,7 @@ class DraconLoader:
 
     def compose_config_from_str(self, content: str) -> CompositionResult:
         self.yaml.compose(content)
+        assert isinstance(self.yaml.composer, DraconComposer)
         res = self.yaml.composer.get_result()
         return self.post_process_composed(res)
 
@@ -265,9 +266,11 @@ class DraconLoader:
             inode = inode_path.get_obj(comp_res.root)
             assert isinstance(inode, IncludeNode), f"Invalid node type: {type(inode)}"
             include_str = inode.value
-            include_str= resolve_interpolable_variables(include_str, self.context)
+            include_str = resolve_interpolable_variables(include_str, self.context)
             new_loader = self.copy()
-            include_composed = new_loader.compose_from_include_str(include_str, inode_path, comp_res)
+            include_composed = new_loader.compose_from_include_str(
+                include_str, inode_path, comp_res
+            )
             comp_res = comp_res.replaced_at(inode_path, include_composed)
         return comp_res
 
@@ -284,15 +287,18 @@ class DraconLoader:
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
+
 def load(config_path: str | Path, raw_dict=False, **kwargs):
     loader = DraconLoader(**kwargs)
     if raw_dict:
         loader.yaml.constructor.yaml_base_dict_type = dict
     return loader.load(config_path)
 
+
 def load_file(config_path: str | Path, raw_dict=True, **kwargs):
     # just prepend 'file:' to the path
     return load(f'file:{config_path}', raw_dict, **kwargs)
+
 
 def loads(config_str: str, raw_dict=False, **kwargs):
     loader = DraconLoader(**kwargs)
@@ -300,9 +306,11 @@ def loads(config_str: str, raw_dict=False, **kwargs):
         loader.yaml.constructor.yaml_base_dict_type = dict
     return loader.loads(config_str)
 
+
 def dump(data, stream=None, **kwargs):
     loader = DraconLoader(**kwargs)
     return loader.dump(data, stream)
+
 
 def load_config_to_dict(maybe_config: str | DictLike) -> DictLike:
     if isinstance(maybe_config, str):
