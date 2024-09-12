@@ -155,17 +155,17 @@ class Program(BaseModel, Generic[T]):
     ) -> int:
         argstr = argv[i]
 
-        if argstr.startswith('--define.'): # a define statement
+        if argstr.startswith('--define.'):  # a define statement
             return self._handle_define(argv, i, defined_vars)
 
-        elif argstr.startswith('+'): # conf merge
+        elif argstr.startswith('+'):  # conf merge
             confs_to_merge.append(argv[i][1:])
             return i + 1
 
-        elif not argstr.startswith('-'): # positional argument
+        elif not argstr.startswith('-'):  # positional argument
             return self._handle_positional(argv, i, args)
 
-        else: # regular optionnal argument
+        else:  # regular optionnal argument
             return self._handle_option(argv, i, args, actions)
 
     def _handle_define(self, argv: List[str], i: int, defined_vars: Dict) -> int:
@@ -173,7 +173,6 @@ class Program(BaseModel, Generic[T]):
         var_value, i = self._read_value(argv, i)
         defined_vars[f'${var_name}'] = var_value
         return i
-
 
     def _handle_positional(self, argv: List[str], i: int, args: Dict) -> int:
         if not self._positionals:
@@ -260,7 +259,7 @@ class Program(BaseModel, Generic[T]):
             loader.reset_context()
             loader.update_context(defined_vars)
             comp = loader.compose_config_from_str(dmp)
-            logger.debug(f"Composition result: {comp}")
+            logger.debug(f"Composition result: {node_print(comp.root)}")
 
             real_name_map = {arg.real_name: arg for arg in self._args}
             # then we wrap all resolvable args in a !Resolvable[...] tag
@@ -276,7 +275,10 @@ class Program(BaseModel, Generic[T]):
                         new_tag = f"!Resolvable[{field_t.__name__}]"
                         resolvable_node.tag = new_tag
 
-            return loader.load_from_composition_result(comp)
+            res = loader.load_from_composition_result(comp)
+            if not isinstance(res, self.conf_type):
+                raise ArgParseError(f"Expected {self.conf_type} but got {type(res)}")
+            return res
         except ValidationError as e:
             # Intercept the validation error
             print()
@@ -290,6 +292,7 @@ class Program(BaseModel, Generic[T]):
         except Exception as e:
             print(f"Error: {e}")
             print(traceback.format_exc())
+            raise ArgParseError(f"Error while parsing commandline arguments: {e}")
 
 
 def make_program(conf_type: type, **kwargs):
