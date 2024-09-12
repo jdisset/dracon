@@ -8,6 +8,21 @@ DraconLoader = ForwardRef('DraconLoader')
 
 
 def read_from_file(path: str, extra_paths=None, loader: Optional[DraconLoader] = None):
+    """
+    Reads the content of a file, searching in the specified path and additional paths if provided.
+
+    Args:
+        path (str): The primary path to the file.
+        extra_paths (list, optional): Additional paths to search for the file. Defaults to None.
+        loader (Optional[DraconLoader], optional): An optional loader to update context. Defaults to None.
+
+    Returns:
+        str: The content of the file.
+
+    Raises:
+        FileNotFoundError: If the file is not found in any of the specified paths.
+    """
+
     all_paths = with_possible_ext(path)
     if not extra_paths:
         extra_paths = []
@@ -16,7 +31,7 @@ def read_from_file(path: str, extra_paths=None, loader: Optional[DraconLoader] =
 
     for ep in extra_path:
         for p in all_paths:
-            p = ep / p
+            p = (ep / p).expanduser().resolve()
             if Path(p).exists():
                 path = p.as_posix()
                 break
