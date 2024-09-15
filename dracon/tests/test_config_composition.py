@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 import pytest
 from ruamel.yaml import YAML
-from dracon import DraconLoader
+from dracon.loader import DraconLoader
 from dracon.resolvable import Resolvable
 from pydantic import BaseModel
 
@@ -20,8 +20,8 @@ interp_config_path = 'dracon:tests/configs/interpolation.yaml'
 resolvable_config_path = 'dracon:tests/configs/resolvable.yaml'
 override_config_path = 'dracon:tests/configs/override.yaml'
 
+
 def get_config(config_path):
-    from dracon.loader import DraconLoader
     loader = DraconLoader()
     compres = loader.compose_from_include_str(f"pkg:{config_path}")
     config = loader.load_from_composition_result(compres)
@@ -29,7 +29,6 @@ def get_config(config_path):
 
 
 def test_main_config_composition():
-
     config = get_config(main_config_path)
 
     # Check if the composition result matches the expected values
@@ -113,7 +112,6 @@ def test_env_variable_inclusion():
     assert config["ppath"] == "test_var_2"
 
 
-
 def test_composition_through_interpolation():
     loader = DraconLoader(enable_interpolation=True)
     config = loader.load(f"pkg:{interp_config_path}")
@@ -136,7 +134,7 @@ def test_composition_through_interpolation():
     assert isinstance(config.tag_interp, float)
     assert config.tag_interp == 4.0
 
-    assert config.interp_later ==  5
+    assert config.interp_later == 5
     assert type(config.interp_later) is int
 
     assert config.interp_later_tag == 5.0
@@ -152,9 +150,11 @@ def test_override():
     assert config["default_settings"]["setting3"] == "override_value3"
     assert config["default_settings"]["setting_list"] == ["override_item1", 3, "item_lol", "item4"]
 
+
 class Person(BaseModel):
     name: str
     age: int
+
 
 class WithResolvable(BaseModel):
     ned: Resolvable[Person]
@@ -170,13 +170,6 @@ def test_resolvable():
     assert ned.name == "Eddard"
     assert ned.age == 40
 
-    # TODO: resolvable + interpolable
-    # assert type(config.jon) is Resolvable
-    # print(config.jon.node)
-    # jon = config.jon.resolve()
-    # assert type(jon) == Person
-
 
 if __name__ == "__main__":
     pytest.main([__file__])
-

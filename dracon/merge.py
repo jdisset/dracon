@@ -208,7 +208,7 @@ def merged(existing: Any, new: Any, k: MergeKey) -> DictLike:
 
         result = deepcopy(pdict)
 
-        if hasattr(pdict, 'tag') and hasattr(other, 'tag'):
+        if hasattr(pdict, 'tag') and hasattr(other, 'tag'):  # we're dealing with nodes
             if pdict.tag.startswith('!'):
                 result.tag = pdict.tag
             elif other.tag.startswith('!'):
@@ -232,3 +232,7 @@ def merged(existing: Any, new: Any, k: MergeKey) -> DictLike:
         return list2 + list1
 
     return merge_value(existing, new)
+
+
+# ideal syntax:
+# <<{>~}(attr1,attr2{+<}[+](subattr{~})): "value"

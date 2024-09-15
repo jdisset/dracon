@@ -90,6 +90,7 @@ from copy import deepcopy
         - *alias@..setting1 # same but using relative path to &alias
 
         - *pkgalias # dumps the entire dict from the package
+        - ${1 + 1} # Interpolable value. Will be interpolated to 2
 
     ```
 
@@ -150,6 +151,7 @@ class DraconLoader:
         self.reset_context()
         self.update_context(context or {})
 
+        self.yaml.constructor.drloader = self
         self.yaml.constructor.context.update(self.context)
         self.yaml.composer.interpolation_enabled = enable_interpolation
 
@@ -283,6 +285,9 @@ class DraconLoader:
             return string_stream.getvalue()
         else:
             return self.yaml.dump(data, stream)
+
+    def dump_to_node(self, data):
+        return self.yaml.representer.represent_data(data)
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
