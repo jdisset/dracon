@@ -1,207 +1,30 @@
-from enum import Enum
+## {{{                          --     imports     --
 from ruamel.yaml.composer import Composer
-from ruamel.yaml.nodes import MappingNode, SequenceNode, ScalarNode
-from ruamel.yaml.nodes import ScalarNode, Node
-from ruamel.yaml.tag import Tag
+from ruamel.yaml.nodes import Node, MappingNode, SequenceNode, ScalarNode
+
+from dracon.nodes import (
+    DraconMappingNode,
+    DraconSequenceNode,
+    LazyInterpolableNode,
+    IncludeNode,
+    MergeNode,
+    UnsetNode,
+    DRACON_UNSET_VALUE,
+)
+
 from ruamel.yaml.events import (
     AliasEvent,
     ScalarEvent,
     SequenceStartEvent,
     MappingStartEvent,
 )
+
 from pydantic import BaseModel
-from .keypath import KeyPath, KeyPathToken, ROOTPATH, escape_keypath_part
-from typing import Any, Union, Hashable
-from dracon.utils import dict_like, list_like, DictLike, ListLike
+from .keypath import KeyPath, ROOTPATH, escape_keypath_part
+from typing import Any, Hashable
 from typing import Optional
 from copy import deepcopy
-from dracon.interpolation import LazyInterpolable, outermost_interpolation_exprs
-
-
-## {{{                           --     utils     --
-
-MERGE_TAG = Tag(suffix='tag:yaml.org,2002:merge')
-STR_TAG = Tag(suffix='tag:yaml.org,2002:str')
-
-DRACON_UNSET_VALUE = '__!DRACON_UNSET_VALUE!__'
-
-
-def is_merge_key(value: str) -> bool:
-    return value.startswith('<<')
-
-
-def make_node(value: Any, tag=None, **kwargs) -> Node:
-    if dict_like(value):
-        return DraconMappingNode(
-            tag, value=[(make_node(k), make_node(v)) for k, v in value.items()], **kwargs
-        )
-    elif list_like(value):
-        return DraconSequenceNode(tag, value=[make_node(v) for v in value], **kwargs)
-    else:
-        return ScalarNode(tag, value, **kwargs)
-
-
-##────────────────────────────────────────────────────────────────────────────}}}
-
-## {{{                        --     node types     --
-
-
-class DraconScalarNode(ScalarNode):
-    def __init__(self, value, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
-        ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
-
-
-class IncludeNode(ScalarNode):
-    def __init__(self, value, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
-        ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
-        print(f'IncludeNode: {value}')
-
-
-class MergeNode(ScalarNode):
-    def __init__(self, value, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
-        self.merge_key_raw = value
-        ScalarNode.__init__(
-            self, STR_TAG, value, start_mark, end_mark, comment=comment, anchor=anchor
-        )
-
-
-class UnsetNode(ScalarNode):
-    def __init__(self, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
-        ScalarNode.__init__(
-            self,
-            tag=STR_TAG,
-            value=DRACON_UNSET_VALUE,
-            start_mark=start_mark,
-            end_mark=end_mark,
-            comment=comment,
-            anchor=anchor,
-        )
-
-
-class LazyInterpolableNode(ScalarNode):
-    def __init__(
-        self,
-        value,
-        start_mark=None,
-        end_mark=None,
-        tag=None,
-        anchor=None,
-        comment=None,
-        init_outermost_interpolations=None,
-    ):
-        self.init_outermost_interpolations = init_outermost_interpolations
-        ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
-
-
-class DraconMappingNode(MappingNode):
-    # simply keep map the keys to the nodes...
-    def __init__(
-        self,
-        tag: Any,
-        value: Any,
-        start_mark: Any = None,
-        end_mark: Any = None,
-        flow_style: Any = None,
-        comment: Any = None,
-        anchor: Any = None,
-    ) -> None:
-        MappingNode.__init__(self, tag, value, start_mark, end_mark, flow_style, comment, anchor)
-        self._recompute_map()
-
-    def _recompute_map(self):
-        self.map: dict[Hashable, int] = {}  # key -> index
-
-        for idx, (key, value) in enumerate(self.value):
-            if key.value in self.map:
-                raise ValueError(f'Duplicate key: {key.value}')
-            self.map[key.value] = idx
-
-    # and implement a get[] (and set) method
-    def __getitem__(self, key: Hashable) -> Node:
-        if isinstance(key, Node):
-            key = key.value
-        return self.value[self.map[key]][1]
-
-    def __setitem__(self, key: Hashable, value: Node):
-        if isinstance(key, Node):
-            keyv = key.value
-        else:
-            keyv = key
-        if keyv in self.map:
-            idx = self.map[keyv]
-            realkey, _ = self.value[idx]
-            self.value[idx] = (realkey, value)
-        else:
-            # assert isinstance(key, Node)
-            self.value.append((key, value))
-            self._recompute_map()
-
-    def __delitem__(self, key: Hashable):
-        if isinstance(key, Node):
-            key = key.value
-        idx = self.map[key]
-        del self.value[idx]
-        self._recompute_map()
-
-    def __contains__(self, key: Hashable) -> bool:
-        if isinstance(key, Node):
-            key = key.value
-        return key in self.map
-
-    # all dict-like methods
-    def keys(self):
-        return self.map.keys()
-
-    def values(self):
-        return (value for key, value in self.value)
-
-    def items(self):
-        # return ((key.value, value) for key, value in self.value)
-        return self.value
-
-    def get(self, key: Hashable, default=None):
-        return self[key] if key in self else default
-
-    def get_key_node(self, key: Hashable):
-        idx = self.map[key]
-        return self.value[idx][0]
-
-    def __len__(self):
-        return len(self.map)
-
-    def copy(self):
-        return self.__class__(
-            tag=self.tag,
-            value=self.value.copy(),
-            start_mark=self.start_mark,
-            end_mark=self.end_mark,
-            flow_style=self.flow_style,
-            comment=self.comment,
-            anchor=self.anchor,
-        )
-
-
-class DraconSequenceNode(SequenceNode):
-    def __getitem__(self, index: int) -> Node:
-        return self.value[index]
-
-    def __setitem__(self, index: int, value: Node):
-        self.value[index] = value
-
-    def __delitem__(self, index: int):
-        del self.value[index]
-
-    def __add__(self, other: 'DraconSequenceNode') -> 'DraconSequenceNode':
-        return self.__class__(
-            tag=self.tag,
-            value=self.value + other.value,
-            start_mark=self.start_mark,
-            end_mark=self.end_mark,
-            flow_style=self.flow_style,
-            comment=self.comment,
-            anchor=self.anchor,
-        )
-
+from dracon.interpolation import outermost_interpolation_exprs
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
@@ -486,6 +309,12 @@ class DraconComposer(Composer):
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
+## {{{                           --     utils     --
+
+
+def is_merge_key(value: str) -> bool:
+    return value.startswith('<<')
+
 
 def delete_unset_nodes(comp_res: CompositionResult):
     # when we delete an unset node, we have to check if the parent is a mapping node
@@ -533,10 +362,4 @@ def delete_unset_nodes(comp_res: CompositionResult):
     return comp_res
 
 
-"""
-# TODO
-- [ ] Remove Resolvable[...] syntax, replace by correct Resolvable(...)
-- [ ] Maybe make resolvable use a dedicated symbol like & or !$typename or $$('expr'))
-- [ ] Add a function eval type !applyfunc(funcname):result
-
-"""
+##────────────────────────────────────────────────────────────────────────────}}}

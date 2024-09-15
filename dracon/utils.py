@@ -1,8 +1,8 @@
 import xxhash
 from ruamel.yaml.nodes import MappingNode, SequenceNode, ScalarNode, Node
 import base64
-from typing import Iterable, TypeVar, Type, Tuple, Generic, Annotated, Union, Dict
-from typing import Protocol, runtime_checkable
+from typing import Iterable, TypeVar, Type, Tuple, Generic, Annotated, Union, Dict, Any, Protocol
+from typing import runtime_checkable, get_args, get_origin
 import typing
 import importlib
 import inspect
@@ -40,6 +40,7 @@ class MetadataDictLike(Protocol[K, V]):
 def metadata_dict_like(obj) -> bool:
     return isinstance(obj, MetadataDictLike)
 
+
 def dict_like(obj) -> bool:
     return isinstance(obj, DictLike)
 
@@ -58,12 +59,14 @@ def permissive_list_like(obj) -> bool:
 
 class ListLikeMeta(type):
     def __instancecheck__(cls, instance):
-        return permissive_list_like(instance) and not dict_like(instance)
+        return (
+            permissive_list_like(instance)
+            and not dict_like(instance)
+            and not isinstance(instance, str)
+        )
 
 
 class ListLike(Generic[E], metaclass=ListLikeMeta):
-    pass
-
     def __getitem__(self, index: int) -> E: ...
 
     def __add__(self, other: 'ListLike[E]') -> 'ListLike[E]': ...
@@ -72,7 +75,9 @@ class ListLike(Generic[E], metaclass=ListLikeMeta):
 def list_like(obj) -> bool:
     return isinstance(obj, ListLike)
 
+
 ##────────────────────────────────────────────────────────────────────────────}}}
+
 
 ## {{{                      --     type collection     --
 def get_all_types(items):
@@ -105,7 +110,7 @@ def get_globals_up_to_frame(frame_n):
     frames = inspect.stack()
     globalns = {}
 
-    for frame_id in range(min(frame_n, len(frames)-1), 0, -1):
+    for frame_id in range(min(frame_n, len(frames) - 1), 0, -1):
         frame = frames[frame_id]
         globalns.update(frame.frame.f_globals)
 
@@ -126,9 +131,12 @@ def collect_all_types(modules, capture_globals=True, globals_at_frame=15):
 
 ## {{{                         --     printing     --
 
+
 def print_traceback():
     import traceback
+
     print("".join(traceback.format_stack()[:-2]))
+
 
 def with_indent(content: str, indent: int) -> str:
     # replace all \n with \n + indent*' ', ONLY if the line is not empty
@@ -172,3 +180,21 @@ def node_print(node: Node, indent_lvl=0, indent=2) -> str:
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
+## {{{                    --     resolvable helpers     --
+
+
+def get_origin_type(t):
+    orig = get_origin(t)
+    if orig is None:
+        return t
+    return orig
+
+
+def get_inner_type(resolvable_type: Type):
+    args = get_args(resolvable_type)
+    if args:
+        return args[0]
+    return Any
+
+
+##────────────────────────────────────────────────────────────────────────────}}}

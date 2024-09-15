@@ -10,7 +10,7 @@ from pydantic import (
 )
 
 from dracon import dracontainer
-from dracon.composer import LazyInterpolableNode
+from dracon.nodes import LazyInterpolableNode
 from dracon.interpolation import LazyInterpolable, outermost_interpolation_exprs
 from dracon.resolvable import Resolvable, get_inner_type
 
@@ -102,9 +102,16 @@ def parse_resolvable_tag(tag):
 
 class Draconstructor(Constructor):
     def __init__(
-        self, preserve_quotes=None, loader=None, localns=None, context=None, interpolate_all=False
+        self,
+        preserve_quotes=None,
+        loader=None,
+        drloader=None,
+        localns=None,
+        context=None,
+        interpolate_all=False,
     ):
         Constructor.__init__(self, preserve_quotes=preserve_quotes, loader=loader)
+        self.drloader = drloader  # Store the loader
         self.yaml_base_dict_type = dracontainer.Mapping
         self.yaml_base_sequence_type = dracontainer.Sequence
         self.localns = localns or {}
@@ -129,7 +136,6 @@ class Draconstructor(Constructor):
                     node.tag = f"!{inner_type}"
                 else:
                     node.tag = f"!{inner_type.__name__}"
-
             res = Resolvable(node=node, ctor=self, inner_type=inner_type)
             return res
 
