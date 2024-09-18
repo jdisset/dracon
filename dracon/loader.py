@@ -12,90 +12,23 @@ from pydantic import BaseModel, BeforeValidator, Field, PlainSerializer
 from dracon.composer import IncludeNode, CompositionResult, DraconComposer, delete_unset_nodes
 from dracon.draconstructor import Draconstructor
 from dracon.keypath import KeyPath, ROOTPATH
-from dracon.utils import node_print, collect_all_types, DictLike, MetadataDictLike, ListLike
+from dracon.utils import (
+    node_print,
+    collect_all_types,
+    DictLike,
+    MetadataDictLike,
+    ListLike,
+    generate_unique_id,
+)
 from dracon.merge import process_merges
 from dracon.loaders.file import read_from_file
+from dracon.nodes import InterpolableNode, MappingNode, SequenceNode
 from dracon.loaders.pkg import read_from_pkg
 from dracon.loaders.env import read_from_env
+from dracon.interpolation import find_field_references
 from dracon.representer import DraconRepresenter
 from dracon import dracontainer
 from copy import deepcopy
-
-##────────────────────────────────────────────────────────────────────────────}}}
-
-## {{{                       --     doc     --
-"""
-    Dracon allows for including external configuration files in the YAML configuration files.
-    Dracon provides 3 default loaders:
-
-    pkg: for including files from a python package
-    file: for including files from the filesystem
-    env: for including environment variables
-
-    special loaders (no need for ':'):
-    / root of the current document
-    @ current scope
-    ..(n) parent scope (n times)
-
-    syntax:
-    loader:[path:][@key.path]
-
-    a path can be specified with or without the .yaml extension.
-
-    @key.path is optional and is used to specify a subpath within the included dictionary.
-    in a keypath, dot notation is used to specify the path to the key within the dictionary.
-
-    When an include references another included item, we build a tree of dependencies and resolve them in topological order (bottom-up).
-
-    In theory, even though it's most likely a bad idea, nothing prevents you from defining anchors that have ambiguous names (names that look like loader paths, that start with '/', '.' or '@' or contain ':' ).
-    Existing regular anchors will take precedence over the special loader paths.
-
-    ## examples:
-
-    ```
-    default_settings:
-        setting1: default_value1
-        dict2: &alias
-            subkey1: value1
-        from_pkg: &pkgalias
-            <<: *pkg:dracon:tests/configs/params # using the merge syntax (would be the same to directly include as value)
-        from_file: *file:./configs/params.yaml@subkey1 # include the value of subkey1 from the file (uses a relative path to the current file)
-        from_file: *file:use_executable_path:./configs/params.yaml@subkey1 # include the value of subkey1 from the file (uses a relative path to the executing script)
-
-    settings:
-
-        # @ and leading . mean local parent scope. Both can be omitted (but be careful with name collisions if you have aliases that use these characters)
-        # / means root of the current document
-        # extra dots mean going up in the hierarchy
-
-        - */default_settings.setting1 # will include default_value1
-        - */.@.@.default_settings.setting1 # same
-        - *..default_settings.setting1 # same
-
-
-        - *@0 # will repeat the first item of this list (scope of @ is the current obj) (first dot is implicit)
-        - *.0 # same
-
-        - *.1 # will repeat the second item of this list after it is resolved, i.e it'll be default_value1
-
-        - *env:HOME # include the value of the HOME environment variable
-
-        - *alias # dumps the entire dict2 (the "vanilla" alias behavior)
-        - *alias@ # same
-        - *alias@subkey1 # dumps value1
-        - *alias@.subkey1 # same
-        # !!!! - *alias.subkey1 WON'T WORK as you expect. It'll just be interpreted as an anchor name. You need to use @ to specify a subpath.
-
-        - *alias@/default_settings.setting1 # dumps default_value1. Syntaxically valid but not very useful
-        - *alias@..setting1 # same but using relative path to &alias
-
-        - *pkgalias # dumps the entire dict from the package
-        - ${1 + 1} # Interpolable value. Will be interpolated to 2
-
-    ```
-
-"""
-
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
@@ -114,17 +47,17 @@ DEFAULT_MODULES_FOR_TYPES = [
     'numpy',
 ]
 
+
+
+
+
 DEFAULT_CONTEXT = {
     # some SAFE os functions (not all of them are safe)
     # need no side effects, and no access to the filesystem
     'getenv': os.getenv,
-    # 'getenvb': os.getenvb,
     'environ': os.environ,
-    # 'environb': os.environb,
     'getcwd': os.getcwd,
     'listdir': os.listdir,
-    # 'getpid': os.getpid,
-    # 'getppid': os.getppid,
 }
 
 
@@ -259,8 +192,28 @@ class DraconLoader:
     def post_process_composed(self, comp: CompositionResult):
         comp = self.process_includes(comp)
         comp = process_merges(comp)
+        comp = self.process_ampersand_references(comp)
         comp = delete_unset_nodes(comp)
         return comp
+
+    def process_ampersand_references(self, comp_res: CompositionResult):
+        """
+        Find references in InterpolableNodes and replace them with copies of the target nodes.
+        """
+
+        def walk_node(node, current_path):
+            if isinstance(node, InterpolableNode):
+                node.preprosess_ampersand_references(comp_res, current_path)
+            elif isinstance(node, MappingNode):
+                for key_node, value_node in node.value:
+                    walk_node(key_node, current_path)
+                    walk_node(value_node, current_path + KeyPath(key_node.value))
+            elif isinstance(node, SequenceNode):
+                for idx, item_node in enumerate(node.value):
+                    walk_node(item_node, current_path + KeyPath(str(idx)))
+
+        walk_node(comp_res.root, ROOTPATH)
+        return comp_res
 
     def process_includes(self, comp_res: CompositionResult):
         while comp_res.include_nodes:

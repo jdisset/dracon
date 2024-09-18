@@ -18,8 +18,8 @@ from pydantic import (
 
 from dracon.interpolation import (
     outermost_interpolation_exprs,
-    find_keypaths,
-    resolve_keypath,
+    find_field_references,
+    resolve_field_references,
     resolve_eval_str,
     LazyInterpolable,
 )
@@ -32,8 +32,9 @@ from dracon.utils import DictLike, ListLike
 from asteval import Interpreter
 ##────────────────────────────────────────────────────────────────────────────}}}
 
+
 def test_dict():
-    kp = find_keypaths(
+    kp = find_field_references(
         "@/name.greeting..back+2 + / @path.to.list[2] = @haha./../p\[3{]"
     )  # -> [ @/name.greeting..back ,  @path.to.list , @haha./../p\[3 ]
 
@@ -77,7 +78,6 @@ def test_dict():
 
     KeyPath('/nested.inner/name').get_obj(obj)
 
-
     g = resolve_eval_str(obj['nested']['inner']['greeting'], '/nested.inner.other', obj)
     assert g == 'greetings, John!'
 
@@ -88,8 +88,8 @@ def test_dict():
     # ^^^ this won't work with a normal dict because there is a change of current path in the reference.
     # It should work with a Dracontainer because accessing the member should trigger resolution
 
-def test_lazy():
 
+def test_lazy():
     obj = {
         "name": "John",
         "n": 5,
@@ -106,7 +106,6 @@ def test_lazy():
 
     loader = DraconLoader(enable_interpolation=True)
     ymldump = loader.dump(obj)
-
 
     print(ymldump)
 
@@ -137,9 +136,49 @@ def test_lazy():
     loaded.nested.inner['new'] = newstr
     assert loaded.nested.inner.new == newstr
     loaded.nested.inner['new'] = LazyInterpolable(loaded.nested.inner['new'])
-    assert (loaded.nested.inner.new == 'John greetings, dear John!')
+    assert loaded.nested.inner.new == 'John greetings, dear John!'
 
 
+def test_ampersand_interpolation_simple():
+    yaml_content = """
+    base: &base_anchor
+      key1: value1
+      key2: value2
+
+    config:
+      key3: ${&/base}
+      key4: ${&/base.key1}
+      full: ${&base_anchor}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+    assert config['config']['key3'] == {'key1': 'value1', 'key2': 'value2'}
+    assert config['config']['full'] == {'key1': 'value1', 'key2': 'value2'}
+    assert config['config']['key4'] == 'value1'
 
 
+def test_ampersand_interpolation_complex():
+    yaml_content = """
+        __dracon__:
+          simple_obj: &smpl
+            index: ${i + 1}
+            name: "Name ${@index}"
 
+        all_objs: ${[&/__dracon__.simple_obj:i=j for j in range(5)]}
+        all_objs_by_anchor: ${[&smpl:i=i for i in range(5)]}
+    """
+
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+    config.resolve_all_lazy()
+    assert '__dracon__' not in config
+    print(f'{config=}')
+
+    assert config['all_objs'] == [
+        {'index': 1, 'name': 'Name 1'},
+        {'index': 2, 'name': 'Name 2'},
+        {'index': 3, 'name': 'Name 3'},
+        {'index': 4, 'name': 'Name 4'},
+        {'index': 5, 'name': 'Name 5'},
+    ]
+    assert config['all_objs_by_anchor'] == config['all_objs']

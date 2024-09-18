@@ -16,7 +16,7 @@ from typing import (
     ForwardRef,
     Annotated,
 )
-from typing import Generic, TypeVar, get_args
+from typing import Generic, TypeVar, get_args, get_origin, Literal
 from dracon.keypath import KeyPath, ROOTPATH
 from dracon.utils import DictLike, ListLike
 from pydantic.dataclasses import dataclass
@@ -29,34 +29,36 @@ class InterpolationError(Exception):
     pass
 
 
-## {{{                       --     find keypaths     --
+## {{{             --     find references [@,&](keypaths, anchors)     --
 
-# Find all keypaths in an expression string and replace them with a function call
+# Find all field references in an expression string and replace them with a function call
 
 
 @dataclass
-class KeypathMatch:
+class ReferenceMatch:
     start: int
     end: int
     expr: str
+    symbol: Literal['@', '&']
 
 
 NOT_ESCAPED_REGEX = r"(?<!\\)(?:\\\\)*"
-INVALID_KEYPATH_CHARS = r'[]() ,:=+-*%<>!&|^~@#$?;{}"\'`'
-KEYPATH_START_CHAR = "@"
+# INVALID_KEYPATH_CHARS = r'[]() ,:=+-*%<>!&|^~@#$?;{}"\'`'
+INVALID_KEYPATH_CHARS = r'[]() ,+-*%<>!&|^~@#$?;{}"\'`'
 SPECIAL_KEYPATH_CHARS = './\\'  # Added backslash to handle escaping of itself
 
 
-def find_keypaths(expr: str) -> List[KeypathMatch]:
+def find_field_references(expr: str) -> List[ReferenceMatch]:
     # Regex pattern to match keypaths
-    pattern = (
-        f"{NOT_ESCAPED_REGEX}{KEYPATH_START_CHAR}([^{re.escape(INVALID_KEYPATH_CHARS)}]|(?:\\\\.))*"
-    )
+    pattern = f"{NOT_ESCAPED_REGEX}[&@]([^{re.escape(INVALID_KEYPATH_CHARS)}]|(?:\\\\.))*"
 
     matches = []
     for match in re.finditer(pattern, expr):
         start, end = match.span()
-        keypath = match.group()
+        full_match = match.group()
+        keypath = full_match[1:]
+        symbol = full_match[0]
+        assert symbol in ('@', '&')
 
         # Clean up escaping, but keep backslashes for special keypath characters
         cleaned_keypath = ''
@@ -78,20 +80,27 @@ def find_keypaths(expr: str) -> List[KeypathMatch]:
             end -= 1
             cleaned_keypath = cleaned_keypath[:-1]
 
-        matches.append(KeypathMatch(start, end, cleaned_keypath[1:]))
+        matches.append(ReferenceMatch(start, end, cleaned_keypath, symbol))
 
     return matches
 
 
-def resolve_keypath(expr: str):
-    keypath_matches = find_keypaths(expr)
+def resolve_field_references(expr: str):
+    keypath_matches = find_field_references(expr)
     if not keypath_matches:
         return expr
-    PREPEND = "(__DRACON__PARENT_PATH + __dracon_KeyPath('"
-    APPEND = "')).get_obj(__DRACON__CURRENT_ROOT_OBJ)"
     offset = 0
     for match in keypath_matches:
-        newexpr = PREPEND + match.expr + APPEND
+        if match.symbol == '@':
+            newexpr = (
+                f"(__DRACON__PARENT_PATH + __dracon_KeyPath('{match.expr}'))"
+                f".get_obj(__DRACON__CURRENT_ROOT_OBJ)"
+            )
+        elif match.symbol == '&':
+            raise ValueError(f"Ampersand references in {expr} should have been handled earlier")
+        else:
+            raise ValueError(f"Invalid symbol {match.symbol} in {expr}")
+
         expr = expr[: match.start + offset] + newexpr + expr[match.end + offset :]
         original_len = match.end - match.start
         offset += len(newexpr) - original_len
@@ -148,6 +157,9 @@ class InterpolationMatch:
     end: int
     expr: str
 
+    def contains(self, pos: int) -> bool:
+        return self.start <= pos < self.end
+
 
 def fast_interpolation_exprs_check(  # about 1000x faster than the pyparsing version but can't handle nested expressions
     text: str, interpolation_start_char='$', interpolation_boundary_chars=('{}', '()')
@@ -203,7 +215,7 @@ BASE_DRACON_SYMBOLS: Dict[str, Any] = {}
 
 
 def preprocess_expr(expr: str, symbols: Optional[dict] = None):
-    expr = resolve_keypath(expr)
+    expr = resolve_field_references(expr)
     expr = resolve_interpolable_variables(expr, symbols or {})
     return expr
 

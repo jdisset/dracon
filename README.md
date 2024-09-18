@@ -4,11 +4,11 @@ built around sensible and natural-feeling YAML extensions.
 
 # Configuration Library for Extended YAML Parsing
 
-Dracon is a simple modular configuration system that extends YAML parsing in Python (leveraging some of the great work at `ruamel.yaml`). It provides advanced features for configuration files, including:
+Dracon is a modular configuration system for Python that extends YAML (leveraging the awesome `ruamel.yaml` YAML parser/emitter). It provides advanced features for configuration files, including:
 
 - 📂 Inclusion of other configuration files and variables.
 - 🔄 Extended merge syntax for complex data merging.
-- 🧮 Interpolation of simple Python expressions within the configuration.
+- 🧮 Interpolation of Python expressions within the configuration.
 - 🧩 Resolvable nodes for deferred construction and advanced manipulation.
 - 🛠️ Automatic construction and instantiation of python objects using Pydantic.
 - 🖥️ Command line programs configurable through files and command line arguments overrides.
@@ -162,6 +162,42 @@ last_name: "Doe"
 number: !${'int'} ${2.1 + 3.1}  # Evaluates to integer 5
 ```
 
+#### Referencing values and fields in interpolation expressions:
+
+Often, you may need to reference values from the final constructed object hierarchy. Sometimes, you also want to directly embed a node from the configuration tree. A useful example would be something like:
+
+```yaml
+__dracon__:
+  # this is a special namespace that will be ignored by dracon.
+  # Any top-level key starting with __dracon__* will be ignored.
+  # It's meant for you to store anything you may want to reference later.
+  # The loader will not attempt to construct them.
+  simple_obj: &simple_obj
+    index: ${i + 1} # this interpolation wouldn't properly work if the object was constructed before i was set
+    name: "Name ${@index}" # this will reference the index field of the object. a &reference would also work.
+
+# this will create a list of 5 objects, each one an instantiation of simple_obj with a different index:
+all_objs: ${[&simple_obj for i in range(5)]}
+```
+
+Dracon provides two special syntaxes for this purpose:
+
+##### @/path.to.value Symbol -> object reference
+
+- Purpose: Includes values from the final constructed object hierarchy.
+- Behavior: References may pull values that have been modified after the configuration is fully constructed, possibly even after modifications in Python code.
+  [!WARNING]
+  > If you want to lazy evaluate such a reference in a nested object hierarchy, your objects must implement the DraconLazy protocol (which will keep track of the root so that paths can be resolved later). Otherwise, the reference will consider the object it lives in as the root and you should probably only use relative paths.
+
+##### &/path.to.value -> node copy
+
+- Purpose: Includes and duplicates configuration nodes directly from the configuration tree before construction.
+- Behavior: The duplication happens during the composition phase, before construction. This ensures that the node reflects the configuration as written, without any modifications that might occur during or after construction.
+
+[!info]
+
+> For now, `@` only supports keypaths, while `&` references work with both keypaths and anchors (e.g., `&anchor`). In case of conflicts (a local field member with the same name as an anchor), the anchor takes precedence.
+
 ### 4. Resolvable Nodes
 
 Resolvable nodes allow deferred construction of objects, enabling advanced manipulation and custom processing before the final object is created.
@@ -279,7 +315,7 @@ print(config.service.name)
 
 ### 6. Command Line Programs
 
-Dracon provides utilities to generate command line programs from a simple Pydantic model. They fully leverage the configuration system and allow for easy configuration file overrides and command line argument parsing.
+Dracon provides utilities to generate command line programs from a simple Pydantic model. They fully leverage the configuration system and allow configuration file overrides and command line argument parsing.
 
 ```
 Arg annotation:
@@ -296,19 +332,21 @@ Arg annotation:
 ```
 
 ```yaml
-# base_config.yaml
+# my_package/configs/default.yaml
 database:
-    host: "remotehost"
-    port: 543
+  host: "remotehost"
+  port: 543
 ```
+
 ```yaml
-# partial_config_override.yaml
+# ./local_config.yaml
 database:
     port: 5432
     user: *env:DB_USER
     password: *env:DB_PASSWORD
 use_ssl: false
 ```
+
 ```python
 
 from typing import Annotated
@@ -327,26 +365,22 @@ class MyProgramModel(BaseModel):
         short='d',
         expand_help=True,
     )]
-    use_ssl: Annotated[bool, Arg(
-        help='Use SSL for connection',
-        short='s',
-    )]
+    use_ssl: Annotated[bool, Arg(help='Use SSL for connection')]
 
     def run(self):
-        # everything is already validated and filled in
+        # everything is already filled in (and validated by Pydantic)
         ...
 
-prog = dracon.make_program(
-    MyProgramModel, # Pydantic model
+prog = make_program(
+    MyProgramModel,
     name='my-program',
     description='Description of my program.',
 )
 program_model, args = prog.parse_args(sys.argv[1:])
 
-# program_model is an instance of MyProgramModel
-# with all its fields filled
-# example invocation:
-# python my_program.py +base_config.yaml +partial_config_override.yaml --database.host localhost --use_ssl
+# program_model is an instance of MyProgramModel with all its fields filled
+# example invocation (+path/to/file(.yaml)... syntax is used to load configuration files, merged in order)
+# python my_program.py +pkg:my_package:configs/default +local_config.yaml --database.host localhost --use_ssl
 
 assert program_model.database.host == 'localhost'
 assert program_model.use_ssl == True
@@ -354,6 +388,11 @@ assert program_model.database.port == 5432
 
 program_model.run() # call whatever method you want to run
 ```
+
+|[!TIP]
+
+> Sometimes you may need to have some member variable be parsed at a later stage (maybe because you need to define some context $variables that depend on other members first).
+> That's where resolvable fields are useful. They suspend their construction until you call their `resolve(context={...})` method.
 
 ## Misc Advanced Features
 

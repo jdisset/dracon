@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from pydantic_core import core_schema
 from dracon.utils import get_inner_type, node_print
 from dracon.merge import MergeKey
+from copy import deepcopy
 
 T = TypeVar("T")
 
@@ -83,10 +84,14 @@ class Resolvable(Generic[T]):
         """
         assert self.ctor is not None
         assert self.node is not None
-        self.ctor.context.update(context or {})
-        self.ctor.localns.update(localns or {})
-        self.ctor.interpolate_all = interpolate_all
-        return self.ctor.construct_object(self.node)
+        ctor = deepcopy(self.ctor)
+        ctor.context.update(context or {})
+        ctor.localns.update(localns or {})
+        ctor.interpolate_all = interpolate_all
+        return ctor.construct_object(self.node)
+
+    def copy(self):
+        return deepcopy(self)
 
     def empty(self):
         return self.node is None or not self.node.value
@@ -94,42 +99,39 @@ class Resolvable(Generic[T]):
     def __bool__(self):
         return not self.empty()
 
-    def merge_attrs(
-        self,
-        attr: str,
-        subattrs: List[str],
-        merge_key: str = '<<{+>}',
-    ) -> 'Resolvable[T]':
+    def merge_node(self, node, merge_key: str = '<<{+>}'):
         """
-        Merge some attributess of the object into another attribute.
-        For example, say we have a class MyClass with attributes attr1, attr2, subattr_1, subattr_2
-        If we want attr1 to contain subattr_1 and subattr_2, we can do this with this method like so:
-        new_resolvable = resolvable_obj.merge_attrs('attr1', ['subattr_1', 'subattr_2'])
+        Merge a node with the current node.
         """
-
         assert self.ctor is not None
         loader = self.ctor.drloader
 
         self.node = self.node or make_node({})
-        self._comp_res = CompositionResult(root=self.node)
+        res = CompositionResult(root=self.node)
+        assert isinstance(res.root, DraconMappingNode)
 
-        attrmap = make_node({attr: {subattr: IncludeNode(f'/{subattr}') for subattr in subattrs}})
-        assert isinstance(attrmap, DraconMappingNode)
+        res.root[MergeNode(merge_key)] = node
 
-        merge_node_path = ROOTPATH + KeyPath(escape_keypath_part(merge_key))
-        self._comp_res.root[MergeNode(merge_key)] = attrmap  # type: ignore
+        res.merge_nodes.extend([ROOTPATH + p for p in res.root.get_merge_nodes()])
+        res.include_nodes.extend([ROOTPATH + p for p in res.root.get_include_nodes()])
 
-        self._comp_res.merge_nodes.append(merge_node_path)
-        self._comp_res.include_nodes.extend(self._comp_res.root.get_include_nodes())
-
-        # Process includes and merges
-        new_comp_res = loader.post_process_composed(self._comp_res)
-
-        # Create a new Resolvable with the updated node
         new_resolvable = Resolvable(
-            node=new_comp_res.root,
+            node=loader.post_process_composed(res).root,
             ctor=self.ctor,
             inner_type=self.inner_type,  # type: ignore
         )
 
         return new_resolvable
+
+    def merge_with(self, other: 'Resolvable', merge_key: str = '<<{+>}'):
+        return self.merge_node(other.node, merge_key)
+
+    def merge_attrs(self, attr: str, subattrs: List[str], merge_key: str = '<<{+>}'):
+        """
+        Merge some attributes of the object into another attribute.
+        For example, say we have a class MyClass with attributes attr1, attr2, subattr_1, subattr_2
+        If we want attr1 to contain subattr_1 and subattr_2, we can do this with this method like so:
+        new_resolvable = resolvable_obj.merge_attrs('attr1', ['subattr_1', 'subattr_2'])
+        """
+        to_merge = make_node({attr: {subattr: IncludeNode(f'/{subattr}') for subattr in subattrs}})
+        return self.merge_node(to_merge, merge_key)

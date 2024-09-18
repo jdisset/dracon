@@ -140,6 +140,21 @@ class Dracontainer:
                 if isinstance(item, Dracontainer):
                     item.set_lazy_resolve(value, recursive=True)
 
+    def resolve_all_lazy(self):
+        resolve_all_lazy(self)
+
+
+def resolve_all_lazy(val):
+    if isinstance(val, DictLike):
+        for key in val.keys():
+            resolve_all_lazy(key)
+            resolve_all_lazy(val[key])
+    elif isinstance(val, ListLike):
+        for i in range(len(val)):
+            resolve_all_lazy(val[i])
+    elif isinstance(val, Lazy):
+        val.get(val, setval=True)
+
 
 class Mapping(Dracontainer, MutableMapping[K, V], Generic[K, V]):
     def __init__(self, data: Optional[DictLike[K, V]] = None):

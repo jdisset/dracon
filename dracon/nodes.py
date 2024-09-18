@@ -1,8 +1,10 @@
 from ruamel.yaml.nodes import Node, MappingNode, SequenceNode, ScalarNode
 from ruamel.yaml.tag import Tag
-from dracon.utils import dict_like, list_like
+from dracon.interpolation import find_field_references, outermost_interpolation_exprs
+from dracon.utils import dict_like, list_like, generate_unique_id
 from typing import Any, Hashable
 from dracon.keypath import KeyPath, ROOTPATH, escape_keypath_part
+from copy import deepcopy
 
 ## {{{                           --     utils     --
 
@@ -72,7 +74,7 @@ class UnsetNode(ScalarNode):
         )
 
 
-class LazyInterpolableNode(ScalarNode):
+class InterpolableNode(ScalarNode):
     def __init__(
         self,
         value,
@@ -85,6 +87,48 @@ class LazyInterpolableNode(ScalarNode):
     ):
         self.init_outermost_interpolations = init_outermost_interpolations
         ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
+        self.referenced_nodes = {}  # unique_id -> node (for later resolving ampersand references)
+
+    def preprosess_ampersand_references(self, comp_res, current_path):
+        if self.init_outermost_interpolations is None:
+            self.init_outermost_interpolations = outermost_interpolation_exprs(self.value)
+
+        assert self.init_outermost_interpolations is not None
+
+        interps = self.init_outermost_interpolations
+        available_anchors = comp_res.anchor_paths
+
+        references = find_field_references(self.value)
+
+        offset = 0
+        for match in references:
+            if match.symbol == '&' and any([i.contains(match.start) for i in interps]):
+                context_str = ''
+                # references can also have a list of variable definitions attached to them
+                # syntax is ${&unique_id:var1=expr1,var2=expr2}
+                if ':' in match.expr:
+                    match.expr, vardefs = match.expr.split(':')
+                    context_str = f'context=dict({vardefs})'
+                    print(f'{context_str=}')
+
+                if match.expr in available_anchors:  # we're matching an anchor
+                    keypath = available_anchors[match.expr]
+                else:  # we're trying to match a keypath
+                    keypath = current_path.parent.down(KeyPath(match.expr))
+
+                unique_id = generate_unique_id()
+                self.referenced_nodes[unique_id] = keypath.get_obj(comp_res.root)
+
+                newexpr = f'__DRACON_RESOLVABLES[{unique_id}].resolve({context_str})'
+                self.value = (
+                    self.value[: match.start + offset] + newexpr + self.value[match.end + offset :]
+                )
+                print(f'new value: {self.value}')
+
+                offset += len(newexpr) - match.end - match.start
+
+        if references:
+            self.init_outermost_interpolations = outermost_interpolation_exprs(self.value)
 
 
 class DraconMappingNode(MappingNode):
@@ -181,10 +225,21 @@ class DraconMappingNode(MappingNode):
         for key, value in self.value:
             curpath = KeyPath(escape_keypath_part(key.value))
             if isinstance(value, IncludeNode):
-                print(f'{value} is IncludeNode')
                 res.append(curpath)
             elif isinstance(value, DraconMappingNode):
                 res.extend([curpath + p for p in value.get_include_nodes()])
+
+        return res
+
+    def get_merge_nodes(self) -> list[KeyPath]:
+        res = []
+
+        for key, value in self.value:
+            curpath = KeyPath(escape_keypath_part(key.value))
+            if isinstance(key, MergeNode):
+                res.append(curpath)
+            if isinstance(value, DraconMappingNode):
+                res.extend([curpath + p for p in value.get_merge_nodes()])
 
         return res
 
