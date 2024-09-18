@@ -111,8 +111,10 @@ class InterpolableNode(ScalarNode):
                     context_str = f'context=dict({vardefs})'
                     print(f'{context_str=}')
 
-                if match.expr in available_anchors:  # we're matching an anchor
-                    keypath = available_anchors[match.expr]
+                match_parts = match.expr.split('.', 1)
+                if match_parts[0] in available_anchors:  # we're matching an anchor
+                    keypath = available_anchors[match_parts[0]]
+                    keypath = keypath.down(match_parts[1]) if len(match_parts) > 1 else keypath
                 else:  # we're trying to match a keypath
                     keypath = current_path.parent.down(KeyPath(match.expr))
 
@@ -123,7 +125,6 @@ class InterpolableNode(ScalarNode):
                 self.value = (
                     self.value[: match.start + offset] + newexpr + self.value[match.end + offset :]
                 )
-                print(f'new value: {self.value}')
 
                 offset += len(newexpr) - match.end - match.start
 
