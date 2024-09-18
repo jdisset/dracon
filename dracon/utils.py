@@ -6,9 +6,13 @@ from typing import runtime_checkable, get_args, get_origin
 import typing
 import importlib
 import inspect
+import uuid
 
 E = TypeVar('E')
 T = TypeVar('T')
+
+def generate_unique_id() -> int:
+    return uuid.uuid4().int
 
 ## {{{                      --     dict/list like     --
 K = TypeVar('K')

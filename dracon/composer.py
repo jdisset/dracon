@@ -5,7 +5,7 @@ from ruamel.yaml.nodes import Node, MappingNode, SequenceNode, ScalarNode
 from dracon.nodes import (
     DraconMappingNode,
     DraconSequenceNode,
-    LazyInterpolableNode,
+    InterpolableNode,
     IncludeNode,
     MergeNode,
     UnsetNode,
@@ -36,6 +36,7 @@ class CompositionResult(BaseModel):
     include_nodes: list[KeyPath] = []  # keypaths to include nodes
     anchor_paths: dict[str, KeyPath] = {}  # anchor name -> keypath to that anchor node
     merge_nodes: list[KeyPath] = []
+    resolvables: dict[int, Node] = {}  # store instanciable nodes referenced in interpolations
 
     def model_post_init(self, *args, **kwargs):
         super().model_post_init(*args, **kwargs)
@@ -290,7 +291,7 @@ class DraconComposer(Composer):
                     else None
                 )
                 if tag_iexpr or value_iexpr:
-                    return LazyInterpolableNode(
+                    return InterpolableNode(
                         value=node.value,
                         start_mark=node.start_mark,
                         end_mark=node.end_mark,

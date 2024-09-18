@@ -2,6 +2,7 @@ from ruamel.yaml.constructor import Constructor
 import sys
 import importlib
 from ruamel.yaml.nodes import MappingNode, SequenceNode
+from ruamel.yaml.constructor import ConstructorError
 from copy import deepcopy
 
 from pydantic import (
@@ -10,12 +11,13 @@ from pydantic import (
 )
 
 from dracon import dracontainer
-from dracon.nodes import LazyInterpolableNode
+from dracon.nodes import InterpolableNode
 from dracon.interpolation import LazyInterpolable, outermost_interpolation_exprs
 from dracon.resolvable import Resolvable, get_inner_type
 
 from typing import (
     Optional,
+    Hashable,
     Type,
     Any,
     ForwardRef,
@@ -117,56 +119,68 @@ class Draconstructor(Constructor):
         self.localns = localns or {}
         self.context = context or {}
         self.interpolate_all = interpolate_all
+        self._depth = 0
 
     def construct_object(self, node, deep=True):
-        # force deep construction so that obj is always fully constructed
-        tag = node.tag
+        # first, we ignore any mapping node that has a name starting with __dracon__
+        self._depth += 1
 
-        tag_type = resolve_type(tag, localns=self.localns)
+        try:
+            # force deep construction so that obj is always fully constructed
+            tag = node.tag
 
-        if issubclass(get_origin_type(tag_type), Resolvable):
-            inner_type = get_inner_type(tag_type)
-            if inner_type is Any:
-                inner_type = parse_resolvable_tag(tag)
-            if inner_type is Any:
-                self.reset_tag(node)
-            else:
-                # check if it's a string or a type:
-                if isinstance(inner_type, str):
-                    node.tag = f"!{inner_type}"
+            tag_type = resolve_type(tag, localns=self.localns)
+
+            if issubclass(get_origin_type(tag_type), Resolvable):
+                inner_type = get_inner_type(tag_type)
+                if inner_type is Any:
+                    inner_type = parse_resolvable_tag(tag)
+                if inner_type is Any:
+                    self.reset_tag(node)
                 else:
-                    node.tag = f"!{inner_type.__name__}"
-            res = Resolvable(node=node, ctor=self, inner_type=inner_type)
-            return res
+                    # check if it's a string or a type:
+                    if isinstance(inner_type, str):
+                        node.tag = f"!{inner_type}"
+                    else:
+                        node.tag = f"!{inner_type.__name__}"
+                res = Resolvable(node=node, ctor=self, inner_type=inner_type)
+                return res
 
-        if isinstance(node, LazyInterpolableNode):
-            node_value = node.value
-            init_outermost_interpolations = node.init_outermost_interpolations
-            validator = partial(pydantic_validate, tag, localns=self.localns)
-            tag_iexpr = outermost_interpolation_exprs(tag)
-            if tag_iexpr:  # tag is an interpolation itself
-                # we can make a combo interpolation that evaluates
-                # to a tuple of the resolved tag and value
-                node_value = "${('" + str(tag) + "', " + str(node.value) + ")}"
-                init_outermost_interpolations = outermost_interpolation_exprs(node_value)
+            if isinstance(node, InterpolableNode):
+                node_value = node.value
+                init_outermost_interpolations = node.init_outermost_interpolations
+                validator = partial(pydantic_validate, tag, localns=self.localns)
+                tag_iexpr = outermost_interpolation_exprs(tag)
+                if tag_iexpr:  # tag is an interpolation itself
+                    # we can make a combo interpolation that evaluates
+                    # to a tuple of the resolved tag and value
+                    node_value = "${('" + str(tag) + "', " + str(node.value) + ")}"
+                    init_outermost_interpolations = outermost_interpolation_exprs(node_value)
 
-                def validator_f(value, localns=self.localns):
-                    tag, value = value
-                    return pydantic_validate(tag, value, localns=localns)
+                    def validator_f(value, localns=self.localns):
+                        tag, value = value
+                        return pydantic_validate(tag, value, localns=localns)
 
-                validator = partial(validator_f)
+                    validator = partial(validator_f)
 
-            # TODO: current_path, root_obj
-            lzy = LazyInterpolable(
-                value=node_value,
-                init_outermost_interpolations=init_outermost_interpolations,
-                validator=validator,
-                extra_symbols=deepcopy(self.context),
-            )
-            if self.interpolate_all:
-                lzy = lzy.get(self)
+                extra_symbols = deepcopy(self.context)
+                extra_symbols['__DRACON_RESOLVABLES'] = {
+                    i: Resolvable(node=deepcopy(n), ctor=self)
+                    for i, n in node.referenced_nodes.items()
+                }
 
-            return lzy
+                lzy = LazyInterpolable(
+                    value=node_value,
+                    init_outermost_interpolations=init_outermost_interpolations,
+                    validator=validator,
+                    extra_symbols=extra_symbols,
+                )
+                if self.interpolate_all:
+                    lzy = lzy.get(self)
+
+                return lzy
+        finally:
+            self._depth -= 1
 
         if tag.startswith('!'):
             self.reset_tag(node)
@@ -182,6 +196,36 @@ class Draconstructor(Constructor):
             node.tag = tag
             new = super().construct_object(node)
             return new
+
+    def construct_mapping(self, node: Any, deep: bool = False) -> Any:
+        if not isinstance(node, MappingNode):
+            raise ConstructorError(
+                None,
+                None,
+                f"expected a mapping node, but found {node.id!s}",
+                node.start_mark,
+            )
+        mapping = self.yaml_base_dict_type()
+        for key_node, value_node in node.value:
+            key = self.construct_object(key_node, deep=True)
+            if not isinstance(key, Hashable):
+                if isinstance(key, list):
+                    key = tuple(key)
+            if not isinstance(key, Hashable):
+                raise ConstructorError(
+                    "while constructing a mapping",
+                    node.start_mark,
+                    "found unhashable key",
+                    key_node.start_mark,
+                )
+            if self._depth == 0:  # This is the root mapping node
+                if isinstance(key, str) and key.startswith('__dracon__'):
+                    continue
+
+            value = self.construct_object(value_node, deep=deep)
+            mapping[key] = value
+
+        return mapping
 
     def reset_tag(self, node):
         if isinstance(node, SequenceNode):
