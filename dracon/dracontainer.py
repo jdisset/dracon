@@ -54,6 +54,15 @@ class Dracontainer:
         new_obj._dracon_current_path = self._dracon_current_path
         new_obj._dracon_lazy_resolve = self._dracon_lazy_resolve
         new_obj._data = deepcopy(self._data)
+
+        if self._dracon_root_obj is self:
+            new_obj._dracon_root_obj = new_obj
+        recursive_update_lazy_container(
+            new_obj,
+            root_obj=new_obj._dracon_root_obj,
+            current_path=new_obj._dracon_current_path,
+        )
+
         return new_obj
 
     def __copy__(self):
@@ -66,6 +75,15 @@ class Dracontainer:
         new_obj._dracon_current_path = self._dracon_current_path
         new_obj._dracon_lazy_resolve = self._dracon_lazy_resolve
         new_obj._data = self._data
+
+        if self._dracon_root_obj is self:
+            new_obj._dracon_root_obj = new_obj
+        recursive_update_lazy_container(
+            new_obj,
+            root_obj=new_obj._dracon_root_obj,
+            current_path=new_obj._dracon_current_path,
+        )
+
         return new_obj
 
     def set_metadata(self, metadata):
