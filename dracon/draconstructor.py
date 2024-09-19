@@ -173,7 +173,6 @@ class Draconstructor(Constructor):
         return res
 
     def construct_interpolable(self, node):
-        print(f"Constructing interpolable {node}")
         node_value = node.value
         init_outermost_interpolations = node.init_outermost_interpolations
         validator = partial(pydantic_validate, node.tag, localns=self.localns)
@@ -192,7 +191,8 @@ class Draconstructor(Constructor):
 
         extra_symbols = deepcopy(self.context)
         extra_symbols['__DRACON_RESOLVABLES'] = {
-            i: Resolvable(node=deepcopy(n), ctor=deepcopy(self)) for i, n in node.referenced_nodes.items()
+            i: Resolvable(node=deepcopy(n), ctor=deepcopy(self))
+            for i, n in node.referenced_nodes.items()
         }
 
         lzy = LazyInterpolable(

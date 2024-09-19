@@ -24,14 +24,12 @@ def make_node(value: Any, tag=None, **kwargs):
         return value
 
     if dict_like(value):
-        print(f'{value=} is dict_like')
         return DraconMappingNode(
             tag or DEFAULT_MAP_TAG,
             value=[(make_node(k), make_node(v)) for k, v in value.items()],
             **kwargs,
         )
     elif list_like(value):
-        print(f'{value=} is list_like')
         return DraconSequenceNode(
             tag or DEFAULT_SEQ_TAG, value=[make_node(v) for v in value], **kwargs
         )
@@ -109,7 +107,6 @@ class InterpolableNode(ScalarNode):
                 if ':' in match.expr:
                     match.expr, vardefs = match.expr.split(':')
                     context_str = f'context=dict({vardefs})'
-                    print(f'{context_str=}')
 
                 match_parts = match.expr.split('.', 1)
                 if match_parts[0] in available_anchors:  # we're matching an anchor
@@ -151,7 +148,6 @@ class DraconMappingNode(MappingNode):
         self.map: dict[Hashable, int] = {}  # key -> index
 
         for idx, (key, _) in enumerate(self.value):
-            print(f'{key=}')
             if key.value in self.map:
                 raise ValueError(f'Duplicate key: {key.value}')
             self.map[key.value] = idx

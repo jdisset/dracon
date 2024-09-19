@@ -52,9 +52,8 @@ DEFAULT_CONTEXT = {
     # some SAFE os functions (not all of them are safe)
     # need no side effects, and no access to the filesystem
     'getenv': os.getenv,
-    'environ': os.environ,
     'getcwd': os.getcwd,
-    'listdir': os.listdir,
+    # 'listdir': os.listdir,
 }
 
 

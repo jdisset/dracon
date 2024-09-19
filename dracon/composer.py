@@ -280,7 +280,6 @@ class DraconComposer(Composer):
             )
         if isinstance(node, ScalarNode):
             if node.value == DRACON_UNSET_VALUE:
-                print(f'Unset node at {node.start_mark}: {node.value}')
                 return UnsetNode()
             if self.interpolation_enabled:
                 # check if tag can be interpolated
