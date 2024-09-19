@@ -74,7 +74,7 @@ class Resolvable(Generic[T]):
             ]
         )
 
-    def resolve(self, context=None, localns=None, interpolate_all=False):
+    def resolve(self, context=None, localns=None, interpolate_all=None):
         """
         Resolve the object from the stored node and constructor, adding context and localns if needed
         Note: it doesn't necessarily returns an object of inner_type. In theory yes,
@@ -87,7 +87,8 @@ class Resolvable(Generic[T]):
         ctor = deepcopy(self.ctor)
         ctor.context.update(context or {})
         ctor.localns.update(localns or {})
-        ctor.interpolate_all = interpolate_all
+        if interpolate_all is not None:
+            ctor.interpolate_all = interpolate_all
         return ctor.construct_object(self.node)
 
     def copy(self):

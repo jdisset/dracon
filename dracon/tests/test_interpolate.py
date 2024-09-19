@@ -149,12 +149,27 @@ def test_ampersand_interpolation_simple():
       key3: ${&/base}
       key4: ${&/base.key1}
       full: ${&base_anchor}
+      key1_amp: ${&base_anchor.key1}
+      key1_at: ${@/base.key1}
     """
+
     loader = DraconLoader(enable_interpolation=True)
     config = loader.loads(yaml_content)
+
+    config_copy = copy.deepcopy(config)
+
     assert config['config']['key3'] == {'key1': 'value1', 'key2': 'value2'}
     assert config['config']['full'] == {'key1': 'value1', 'key2': 'value2'}
     assert config['config']['key4'] == 'value1'
+    assert config['config']['key1_amp'] == 'value1'
+    assert config['config']['key1_at'] == 'value1'
+
+    config_copy.base.key1 = 'new_value1'
+    assert config_copy['config']['key3'] == {'key1': 'value1', 'key2': 'value2'}
+    assert config_copy['config']['full'] == {'key1': 'value1', 'key2': 'value2'}
+    assert config_copy['config']['key4'] == 'value1'
+    assert config_copy['config']['key1_amp'] == 'value1'
+    assert config_copy['config']['key1_at'] == 'new_value1'
 
 
 def test_ampersand_interpolation_complex():
