@@ -18,8 +18,6 @@ from pydantic import (
 
 from dracon.interpolation import (
     outermost_interpolation_exprs,
-    find_field_references,
-    resolve_field_references,
     resolve_eval_str,
     LazyInterpolable,
 )
@@ -28,7 +26,7 @@ from pydantic.dataclasses import dataclass
 from dracon.keypath import KeyPath
 from typing import Any, Dict, Callable, Optional, Tuple, List
 import copy
-from dracon.utils import DictLike, ListLike
+from dracon.utils import DictLike, ListLike, find_field_references
 from asteval import Interpreter
 ##────────────────────────────────────────────────────────────────────────────}}}
 
@@ -178,6 +176,9 @@ def test_nested_interpolation():
         key1: value1
         key2: ${@key1}
         key3: ${&key2}
+        key4: ${@key3}
+        key5: ${&key4}
+        key6: ${&key5}
     """
 
     loader = DraconLoader(enable_interpolation=True)
@@ -189,6 +190,9 @@ def test_nested_interpolation():
             'key1': 'value1',
             'key2': 'value1',
             'key3': 'value1',
+            'key4': 'value1',
+            'key5': 'value1',
+            'key6': 'value1',
         }
     }
 
@@ -198,7 +202,7 @@ def test_ampersand_interpolation_complex():
         __dracon__:
           simple_obj: &smpl
             index: ${i + 1}
-            name: "Name ${&index:i=i}"
+            name: "Name ${&index}"
 
         all_objs: ${[&/__dracon__.simple_obj:i=j for j in range(5)]}
         all_objs_by_anchor: ${[&smpl:i=i for i in range(5)]}

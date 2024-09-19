@@ -1,9 +1,6 @@
 import ast
-import regex
-import pyparsing as pp
 import collections.abc as cabc
 from asteval import Interpreter
-import re
 from typing import (
     Any,
     Dict,
@@ -18,192 +15,22 @@ from typing import (
 )
 from typing import Generic, TypeVar, get_args, get_origin, Literal
 from dracon.keypath import KeyPath, ROOTPATH
-from dracon.utils import DictLike, ListLike
 from pydantic.dataclasses import dataclass
 from pydantic import TypeAdapter, BaseModel, field_validator, ConfigDict, WrapValidator, Field
 from copy import copy
 from typing import Protocol, runtime_checkable, Optional
+from dracon.merge import merged, MergeKey
+from dracon.utils import (
+    outermost_interpolation_exprs,
+    InterpolationMatch,
+    resolve_field_references,
+    resolve_interpolable_variables,
+)
 
 
 class InterpolationError(Exception):
     pass
 
-
-## {{{             --     find references [@,&](keypaths, anchors)     --
-
-# Find all field references in an expression string and replace them with a function call
-
-
-@dataclass
-class ReferenceMatch:
-    start: int
-    end: int
-    expr: str
-    symbol: Literal['@', '&']
-
-
-NOT_ESCAPED_REGEX = r"(?<!\\)(?:\\\\)*"
-# INVALID_KEYPATH_CHARS = r'[]() ,:=+-*%<>!&|^~@#$?;{}"\'`'
-INVALID_KEYPATH_CHARS = r'[]() ,+-*%<>!&|^~@#$?;{}"\'`'
-SPECIAL_KEYPATH_CHARS = './\\'  # Added backslash to handle escaping of itself
-
-
-def find_field_references(expr: str) -> List[ReferenceMatch]:
-    # Regex pattern to match keypaths
-    pattern = f"{NOT_ESCAPED_REGEX}[&@]([^{re.escape(INVALID_KEYPATH_CHARS)}]|(?:\\\\.))*"
-
-    matches = []
-    for match in re.finditer(pattern, expr):
-        start, end = match.span()
-        full_match = match.group()
-        keypath = full_match[1:]
-        symbol = full_match[0]
-        assert symbol in ('@', '&')
-
-        # Clean up escaping, but keep backslashes for special keypath characters
-        cleaned_keypath = ''
-        i = 0
-        while i < len(keypath):
-            if keypath[i] == '\\' and i + 1 < len(keypath):
-                if keypath[i + 1] in SPECIAL_KEYPATH_CHARS:
-                    cleaned_keypath += keypath[i : i + 2]
-                    i += 2
-                else:
-                    cleaned_keypath += keypath[i + 1]
-                    i += 2
-            else:
-                cleaned_keypath += keypath[i]
-                i += 1
-
-        # Check if the keypath ends with an odd number of backslashes
-        if len(keypath) - len(keypath.rstrip('\\')) % 2 == 1:
-            end -= 1
-            cleaned_keypath = cleaned_keypath[:-1]
-
-        matches.append(ReferenceMatch(start, end, cleaned_keypath, symbol))
-
-    return matches
-
-
-def resolve_field_references(expr: str):
-    keypath_matches = find_field_references(expr)
-    if not keypath_matches:
-        return expr
-    offset = 0
-    for match in keypath_matches:
-        if match.symbol == '@':
-            newexpr = (
-                f"(__DRACON__PARENT_PATH + __dracon_KeyPath('{match.expr}'))"
-                f".get_obj(__DRACON__CURRENT_ROOT_OBJ)"
-            )
-        elif match.symbol == '&':
-            raise ValueError(f"Ampersand references in {expr} should have been handled earlier")
-        else:
-            raise ValueError(f"Invalid symbol {match.symbol} in {expr}")
-
-        expr = expr[: match.start + offset] + newexpr + expr[match.end + offset :]
-        original_len = match.end - match.start
-        offset += len(newexpr) - original_len
-    return expr
-
-
-##────────────────────────────────────────────────────────────────────────────}}}
-
-## {{{                --     find interpolable variables     --
-
-# an interpolable variable is a special $VARIABLE defined by dracon (or the user)
-# they are immmediately replaced by their value when found in the expression string
-# pattern is $ + CAPITAL_LETTER + [a-zA-Z0-9_]
-
-
-@dataclass
-class VarMatch:
-    start: int
-    end: int
-    varname: str
-
-
-def find_interpolable_variables(expr: str) -> List[VarMatch]:
-    matches = []
-    for match in re.finditer(rf"{NOT_ESCAPED_REGEX}\$[A-Z][a-zA-Z0-9_]*", expr):
-        start, end = match.span()
-        matches.append(VarMatch(start, end, match.group()))
-    return matches
-
-
-def resolve_interpolable_variables(expr: str, symbols: Dict[str, Any]) -> str:
-    var_matches = find_interpolable_variables(expr)
-    if not var_matches:
-        return expr
-    offset = 0
-    for match in var_matches:
-        if match.varname not in symbols:
-            raise InterpolationError(f"Variable {match.varname} not found in symbols")
-        newexpr = str(symbols[match.varname])
-        expr = expr[: match.start + offset] + newexpr + expr[match.end + offset :]
-        original_len = match.end - match.start
-        offset += len(newexpr) - original_len
-    return expr
-
-
-##────────────────────────────────────────────────────────────────────────────}}}
-
-## {{{                    --     interpolation exprs     --
-
-
-@dataclass
-class InterpolationMatch:
-    start: int
-    end: int
-    expr: str
-
-    def contains(self, pos: int) -> bool:
-        return self.start <= pos < self.end
-
-
-def fast_interpolation_exprs_check(  # about 1000x faster than the pyparsing version but can't handle nested expressions
-    text: str, interpolation_start_char='$', interpolation_boundary_chars=('{}', '()')
-) -> bool:
-    patterns = [
-        re.escape(interpolation_start_char) + re.escape(bound[0]) + r".*?" + re.escape(bound[1])
-        for bound in interpolation_boundary_chars
-    ]
-    matches = re.search("|".join(patterns), text)
-    return matches is not None
-
-
-def fast_prescreen_interpolation_exprs_check(  # 5000x but very simple and limited
-    text: str, interpolation_start_char='$', interpolation_boundary_chars=('{}', '()')
-) -> bool:
-    start_patterns = [interpolation_start_char + bound[0] for bound in interpolation_boundary_chars]
-    for start_pattern in start_patterns:
-        if start_pattern in text:
-            return True
-    return False
-
-
-def outermost_interpolation_exprs(
-    text: str, interpolation_start_char='$', interpolation_boundary_chars=('{}', '()')
-) -> List[InterpolationMatch]:
-    matches = []
-    if not fast_prescreen_interpolation_exprs_check(
-        text, interpolation_start_char, interpolation_boundary_chars
-    ):
-        return matches
-
-    scanner = pp.MatchFirst(
-        [
-            pp.originalTextFor(pp.nestedExpr(bounds[0], bounds[1]))
-            for bounds in interpolation_boundary_chars
-        ]
-    )
-    scanner = pp.Combine(interpolation_start_char + scanner)
-    for match, start, end in scanner.scanString(text):
-        matches.append(InterpolationMatch(start, end, match[0][2:-1]))
-    return sorted(matches, key=lambda m: m.start)
-
-
-##────────────────────────────────────────────────────────────────────────────}}}
 
 ## {{{                      --     base functions and symbols   --
 
@@ -234,7 +61,6 @@ def resolve_eval_str(
     init_outermost_interpolations: Optional[List[InterpolationMatch]] = None,
     extra_symbols: Optional[Dict[str, Any]] = None,
 ) -> Any:
-
     interpolations = init_outermost_interpolations
     if init_outermost_interpolations is None:
         interpolations = outermost_interpolation_exprs(expr)
@@ -255,6 +81,14 @@ def resolve_eval_str(
         }
     )
     symbols.update(extra_symbols or {})
+
+    def recurse_lazy_resolve(expr):
+        if isinstance(expr, Lazy):
+            expr.current_path = current_path
+            expr.root_obj = root_obj
+            expr.extra_symbols = merged(expr.extra_symbols, extra_symbols, MergeKey(raw='{<+}'))
+            expr = expr.resolve()
+        return expr
 
     endexpr = None
     if not interpolations:
@@ -278,23 +112,26 @@ def resolve_eval_str(
             ),
             symbols,
         )
+
+        endexpr = recurse_lazy_resolve(endexpr)
+
     else:
         offset = 0
         for match in interpolations:  # will be returned as a concatenation of strings
-            newexpr = str(
-                do_safe_eval(
-                    str(
-                        resolve_eval_str(
-                            match.expr,
-                            current_path,
-                            root_obj,
-                            allow_recurse=allow_recurse,
-                            extra_symbols=extra_symbols,
-                        )
-                    ),
-                    symbols,
-                )
+            newexpr = do_safe_eval(
+                str(
+                    resolve_eval_str(
+                        match.expr,
+                        current_path,
+                        root_obj,
+                        allow_recurse=allow_recurse,
+                        extra_symbols=extra_symbols,
+                    )
+                ),
+                symbols,
             )
+
+            newexpr = str(recurse_lazy_resolve(newexpr))
             expr = expr[: match.start + offset] + newexpr + expr[match.end + offset :]
             original_len = match.end - match.start
             offset += len(newexpr) - original_len
@@ -377,10 +214,6 @@ class LazyInterpolable(Lazy[T]):
     def __repr__(self):
         return f"LazyInterpolable({self.value})"
 
-    def __str__(self):
-        # resolve the value and return it as a string
-        return str(self.resolve())
-
     def resolve(self) -> T:
         if isinstance(self.value, str):
             self.value = resolve_eval_str(
@@ -390,12 +223,6 @@ class LazyInterpolable(Lazy[T]):
                 init_outermost_interpolations=self.init_outermost_interpolations,
                 extra_symbols=self.extra_symbols,
             )
-
-        if isinstance(self.value, Lazy):  # recurse
-            self.value.current_path = self.current_path
-            self.value.root_obj = self.root_obj
-            self.value.extra_symbols.update(self.extra_symbols or {})
-            self.value = self.value.resolve()
 
         return self.validate(self.value)
 
