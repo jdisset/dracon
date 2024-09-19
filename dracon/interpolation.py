@@ -223,17 +223,18 @@ def preprocess_expr(expr: str, symbols: Optional[dict] = None):
 def do_safe_eval(expr: str, symbols: Optional[dict] = None):
     expr = preprocess_expr(expr, symbols)
     safe_eval = Interpreter(user_symbols=symbols or {}, max_string_length=1000)
-    return safe_eval(expr)
+    return safe_eval.eval(expr, raise_errors=True)
 
 
 def resolve_eval_str(
     expr: str,
     current_path: str | KeyPath = '/',
     root_obj: Any = None,
-    allow_recurse: int = 2,
+    allow_recurse: int = 5,
     init_outermost_interpolations: Optional[List[InterpolationMatch]] = None,
     extra_symbols: Optional[Dict[str, Any]] = None,
 ) -> Any:
+
     interpolations = init_outermost_interpolations
     if init_outermost_interpolations is None:
         interpolations = outermost_interpolation_exprs(expr)
@@ -264,21 +265,31 @@ def resolve_eval_str(
         and interpolations[0].start == 0
         and interpolations[0].end == len(expr)
     ):
-        print(f"Match: {interpolations[0]}")
         expr = interpolations[0].expr
         endexpr = do_safe_eval(
-            str(resolve_eval_str(expr, current_path, root_obj, allow_recurse=allow_recurse)),
+            str(
+                resolve_eval_str(
+                    expr,
+                    current_path,
+                    root_obj,
+                    allow_recurse=allow_recurse,
+                    extra_symbols=extra_symbols,
+                )
+            ),
             symbols,
         )
     else:
         offset = 0
         for match in interpolations:  # will be returned as a concatenation of strings
-            print(f"Match: {match}")
             newexpr = str(
                 do_safe_eval(
                     str(
                         resolve_eval_str(
-                            match.expr, current_path, root_obj, allow_recurse=allow_recurse
+                            match.expr,
+                            current_path,
+                            root_obj,
+                            allow_recurse=allow_recurse,
+                            extra_symbols=extra_symbols,
                         )
                     ),
                     symbols,
@@ -363,6 +374,13 @@ class LazyInterpolable(Lazy[T]):
                 value, (str, tuple)
             ), f"LazyInterpolable expected string, got {type(value)}. Did you mean to contruct with permissive=True?"
 
+    def __repr__(self):
+        return f"LazyInterpolable({self.value})"
+
+    def __str__(self):
+        # resolve the value and return it as a string
+        return str(self.resolve())
+
     def resolve(self) -> T:
         if isinstance(self.value, str):
             self.value = resolve_eval_str(
@@ -372,6 +390,12 @@ class LazyInterpolable(Lazy[T]):
                 init_outermost_interpolations=self.init_outermost_interpolations,
                 extra_symbols=self.extra_symbols,
             )
+
+        if isinstance(self.value, Lazy):  # recurse
+            self.value.current_path = self.current_path
+            self.value.root_obj = self.root_obj
+            self.value.extra_symbols.update(self.extra_symbols or {})
+            self.value = self.value.resolve()
 
         return self.validate(self.value)
 
@@ -385,6 +409,7 @@ class LazyInterpolable(Lazy[T]):
             self.current_path = owner_instance._dracon_current_path + self.name
 
         newval = self.resolve()
+
         if setval:
             setattr(owner_instance, self.name, newval)
 

@@ -172,12 +172,33 @@ def test_ampersand_interpolation_simple():
     assert config_copy['config']['key1_at'] == 'new_value1'
 
 
+def test_nested_interpolation():
+    yaml_content = """
+    base: &base_anchor
+        key1: value1
+        key2: ${@key1}
+        key3: ${&key2}
+    """
+
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+    config.resolve_all_lazy()
+
+    assert config == {
+        'base': {
+            'key1': 'value1',
+            'key2': 'value1',
+            'key3': 'value1',
+        }
+    }
+
+
 def test_ampersand_interpolation_complex():
     yaml_content = """
         __dracon__:
           simple_obj: &smpl
             index: ${i + 1}
-            name: "Name ${@index}"
+            name: "Name ${&index:i=i}"
 
         all_objs: ${[&/__dracon__.simple_obj:i=j for j in range(5)]}
         all_objs_by_anchor: ${[&smpl:i=i for i in range(5)]}
@@ -187,7 +208,6 @@ def test_ampersand_interpolation_complex():
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
     assert '__dracon__' not in config
-    print(f'{config=}')
 
     assert config['all_objs'] == [
         {'index': 1, 'name': 'Name 1'},
