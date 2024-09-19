@@ -48,9 +48,6 @@ DEFAULT_MODULES_FOR_TYPES = [
 ]
 
 
-
-
-
 DEFAULT_CONTEXT = {
     # some SAFE os functions (not all of them are safe)
     # need no side effects, and no access to the filesystem
@@ -70,6 +67,7 @@ class DraconLoader:
         base_dict_type: Type[DictLike] = dracontainer.Mapping,
         base_list_type: Type[ListLike] = dracontainer.Sequence,
         enable_interpolation: bool = False,
+        interpolate_all: bool = False,
         context: Optional[Dict[str, Any]] = None,
     ):
         self.custom_loaders = DEFAULT_LOADERS
@@ -86,9 +84,13 @@ class DraconLoader:
 
         self.yaml.constructor.drloader = self
         self.yaml.constructor.context.update(self.context)
+        self.yaml.constructor.interpolate_all = interpolate_all
         self.yaml.composer.interpolation_enabled = enable_interpolation
 
-        localns = collect_all_types(DEFAULT_MODULES_FOR_TYPES, capture_globals=capture_globals)
+        localns = collect_all_types(
+            DEFAULT_MODULES_FOR_TYPES,
+            capture_globals=capture_globals,
+        )
         localns.update(self.custom_types)
         self.yaml.constructor.localns = localns
         self.yaml.constructor.yaml_base_dict_type = base_dict_type
