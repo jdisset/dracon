@@ -1,6 +1,6 @@
 from ruamel.yaml.nodes import Node, MappingNode, SequenceNode, ScalarNode
 from ruamel.yaml.tag import Tag
-from dracon.interpolation import find_field_references, outermost_interpolation_exprs
+from dracon.utils import find_field_references, outermost_interpolation_exprs
 from dracon.utils import dict_like, list_like, generate_unique_id
 from typing import Any, Hashable
 from dracon.keypath import KeyPath, ROOTPATH, escape_keypath_part

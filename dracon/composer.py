@@ -24,8 +24,7 @@ from .keypath import KeyPath, ROOTPATH, escape_keypath_part
 from typing import Any, Hashable
 from typing import Optional
 from copy import deepcopy
-from dracon.interpolation import outermost_interpolation_exprs
-
+from dracon.utils import outermost_interpolation_exprs
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 ## {{{                   --     CompositionResult    --
