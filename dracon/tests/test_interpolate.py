@@ -169,8 +169,9 @@ def test_ampersand_interpolation_simple():
     assert config_copy['config']['key1_amp'] == 'value1'
     assert config_copy['config']['key1_at'] == 'new_value1'
 
+# 6.4
 
-def test_nested_interpolation():
+def test_recursive_interpolation():
     yaml_content = """
     base: &base_anchor
         key1: value1
@@ -179,22 +180,36 @@ def test_nested_interpolation():
         key4: ${@key3}
         key5: ${&key4}
         key6: ${&key5}
+        key7: ${&base_anchor.key6}
+        key8: ${@/base.key7}
+
+    base2: ${&base_anchor}
+    base3: ${&base2}
+    base4: ${&/base3}
+    base5: ${@base4}
+    base6: ${@/base}
     """
 
     loader = DraconLoader(enable_interpolation=True)
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
 
-    assert config == {
-        'base': {
-            'key1': 'value1',
-            'key2': 'value1',
-            'key3': 'value1',
-            'key4': 'value1',
-            'key5': 'value1',
-            'key6': 'value1',
-        }
+    assert config['base'] == {
+        'key1': 'value1',
+        'key2': 'value1',
+        'key3': 'value1',
+        'key4': 'value1',
+        'key5': 'value1',
+        'key6': 'value1',
+        'key7': 'value1',
+        'key8': 'value1',
     }
+
+    assert config['base2'] == config['base']
+    assert config['base3'] == config['base']
+    assert config['base4'] == config['base']
+    assert config['base5'] == config['base']
+    assert config['base6'] == config['base']
 
 
 def test_ampersand_interpolation_complex():

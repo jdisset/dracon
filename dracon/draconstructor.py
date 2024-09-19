@@ -116,6 +116,7 @@ class Draconstructor(Constructor):
         interpolate_all=False,
     ):
         Constructor.__init__(self, preserve_quotes=preserve_quotes, loader=loader)
+        self.preserve_quotes = preserve_quotes
         self.drloader = drloader  # Store the loader
         self.yaml_base_dict_type = dracontainer.Mapping
         self.yaml_base_sequence_type = dracontainer.Sequence
@@ -191,8 +192,7 @@ class Draconstructor(Constructor):
 
         extra_symbols = deepcopy(self.context)
         extra_symbols['__DRACON_RESOLVABLES'] = {
-            i: Resolvable(node=deepcopy(n), ctor=deepcopy(self))
-            for i, n in node.referenced_nodes.items()
+            i: Resolvable(node=n, ctor=deepcopy(self)) for i, n in node.referenced_nodes.items()
         }
 
         lzy = LazyInterpolable(

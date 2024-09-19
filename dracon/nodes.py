@@ -110,7 +110,7 @@ class InterpolableNode(ScalarNode):
 
                 match_parts = match.expr.split('.', 1)
                 if match_parts[0] in available_anchors:  # we're matching an anchor
-                    keypath = available_anchors[match_parts[0]]
+                    keypath = available_anchors[match_parts[0]].copy()
                     keypath = keypath.down(match_parts[1]) if len(match_parts) > 1 else keypath
                 else:  # we're trying to match a keypath
                     keypath = current_path.parent.down(KeyPath(match.expr))

@@ -115,6 +115,7 @@ class CompositionResult(BaseModel):
             if anchor not in self.anchor_paths:
                 self.anchor_paths[anchor] = (at_path + anchor_path.rootless()).simplified()
 
+
         return self
 
     def sort_merge_nodes(self):
@@ -157,9 +158,9 @@ class DraconComposer(Composer):
 
         return CompositionResult(
             root=root_node,
-            include_nodes=deepcopy(self.include_nodes),
-            anchor_paths=deepcopy(self.anchor_paths),
-            merge_nodes=deepcopy(self.merge_nodes),
+            include_nodes=self.include_nodes,
+            anchor_paths=self.anchor_paths,
+            merge_nodes=self.merge_nodes,
         )
 
     def descend_path(self, parent, index):

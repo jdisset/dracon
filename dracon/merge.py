@@ -191,10 +191,8 @@ def merged(existing: Any, new: Any, k: MergeKey) -> DictLike:
     def merge_value(v1: Any, v2: Any, depth: int = 0) -> Any:
         if isinstance(v1, DictLike) and isinstance(v2, DictLike):
             return merge_dicts(v1, v2, depth + 1)
-        # If both values are lists, merge them
         elif isinstance(v1, ListLike) and isinstance(v2, ListLike):
             return merge_lists(v1, v2, depth + 1)
-        # For other types, return based on the priority
         else:
             return v1 if k.dict_priority == MergePriority.EXISTING else v2
 
@@ -206,30 +204,31 @@ def merged(existing: Any, new: Any, k: MergeKey) -> DictLike:
         if k.dict_depth is not None and depth > k.dict_depth:
             return pdict
 
-        result = deepcopy(pdict)
+        result = pdict.copy()
+        # result = deepcopy(pdict)
 
-        if hasattr(pdict, 'tag') and hasattr(other, 'tag'):  # we're dealing with nodes
+        if hasattr(pdict, 'tag') and hasattr(other, 'tag'):
+            # we're dealing with nodes
             if pdict.tag.startswith('!'):
                 result.tag = pdict.tag
             elif other.tag.startswith('!'):
                 result.tag = other.tag
 
         for key, value in other.items():
-            if key not in result:  # If the key doesn't exist in result, add it
+            if key not in result:
                 result[key] = value
             elif k.dict_mode == MergeMode.APPEND:
-                if k.dict_priority == MergePriority.EXISTING:
-                    result[key] = merge_value(result[key], value, depth + 1)
-                else:
-                    result[key] = merge_value(value, result[key], depth + 1)
+                result[key] = (
+                    merge_value(result[key], value, depth + 1)
+                    if k.dict_priority == MergePriority.EXISTING
+                    else merge_value(value, result[key], depth + 1)
+                )
         return result
 
     def merge_lists(list1: ListLike, list2: ListLike, depth: int = 0) -> ListLike:
         if (k.list_depth is not None and depth > k.list_depth) or k.list_mode == MergeMode.REPLACE:
             return list1 if k.list_priority == MergePriority.EXISTING else list2
-        if k.list_priority == MergePriority.EXISTING:
-            return list1 + list2
-        return list2 + list1
+        return list1 + list2 if k.list_priority == MergePriority.EXISTING else list2 + list1
 
     return merge_value(existing, new)
 
