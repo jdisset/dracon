@@ -191,8 +191,9 @@ class Draconstructor(Constructor):
             validator = partial(validator_f)
 
         extra_symbols = deepcopy(self.context)
+
         extra_symbols['__DRACON_RESOLVABLES'] = {
-            i: Resolvable(node=n, ctor=deepcopy(self)) for i, n in node.referenced_nodes.items()
+            i: Resolvable(node=n, ctor=self.copy()) for i, n in node.referenced_nodes.items()
         }
 
         lzy = LazyInterpolable(
@@ -205,6 +206,37 @@ class Draconstructor(Constructor):
             lzy = lzy.get(self)
 
         return lzy
+
+    
+
+    def copy(self):
+
+        def print_obj(obj):
+            print(f"Object of type {type(obj)}:")
+            for k, v in obj.__dict__.items():
+                print(f"{k}: {type(v)}")
+            print()
+
+        # print_obj(self.loader)
+
+
+        # print(f'{self.drloader.copy().yaml.constructor.yaml_constructors=}')
+        # newctor = self.drloader.copy().yaml.constructor.yaml_constructors[0]
+        # newctor.localns = self.localns
+        # newctor.context = deepcopy(self.context)
+        # print_obj(newctor)
+
+        # newctor = Draconstructor(
+            # preserve_quotes=self.preserve_quotes,
+            # drloader=self.drloader.copy(),
+            # localns=self.localns,
+            # context=deepcopy(self.context),
+            # interpolate_all=self.interpolate_all,
+        # )
+
+        newctor = deepcopy(self)
+
+        return newctor
 
     def construct_mapping(self, node: Any, deep: bool = False) -> Any:
         if not isinstance(node, MappingNode):

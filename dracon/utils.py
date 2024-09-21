@@ -332,28 +332,6 @@ def find_field_references(expr: str) -> list[ReferenceMatch]:
     return matches
 
 
-def resolve_field_references(expr: str):
-    keypath_matches = find_field_references(expr)
-    if not keypath_matches:
-        return expr
-    offset = 0
-    for match in keypath_matches:
-        if match.symbol == '@':
-            newexpr = (
-                f"(__DRACON__PARENT_PATH + __dracon_KeyPath('{match.expr}'))"
-                f".get_obj(__DRACON__CURRENT_ROOT_OBJ)"
-            )
-        elif match.symbol == '&':
-            raise ValueError(f"Ampersand references in {expr} should have been handled earlier")
-        else:
-            raise ValueError(f"Invalid symbol {match.symbol} in {expr}")
-
-        expr = expr[: match.start + offset] + newexpr + expr[match.end + offset :]
-        original_len = match.end - match.start
-        offset += len(newexpr) - original_len
-    return expr
-
-
 ##────────────────────────────────────────────────────────────────────────────}}}
 ## {{{                --     find interpolable variables     --
 

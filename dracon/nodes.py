@@ -87,43 +87,63 @@ class InterpolableNode(ScalarNode):
         ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
         self.referenced_nodes = {}  # unique_id -> node (for later resolving ampersand references)
 
-    def preprosess_ampersand_references(self, comp_res, current_path):
+    def preprocess_ampersand_references(self, match, comp_res, current_path):
+        available_anchors = comp_res.anchor_paths
+        context_str = ''
+        # references can also have a list of variable definitions attached to them
+        # syntax is ${&unique_id:var1=expr1,var2=expr2}
+        if ':' in match.expr:
+            match.expr, vardefs = match.expr.split(':')
+            context_str = f'context=dict({vardefs})'
+
+        match_parts = match.expr.split('.', 1)
+        if match_parts[0] in available_anchors:  # we're matching an anchor
+            keypath = available_anchors[match_parts[0]].copy()
+            keypath = keypath.down(match_parts[1]) if len(match_parts) > 1 else keypath
+        else:  # we're trying to match a keypath
+            keypath = current_path.parent.down(KeyPath(match.expr))
+
+        unique_id = generate_unique_id()
+        self.referenced_nodes[unique_id] = keypath.get_obj(comp_res.root)
+
+        newexpr = f'__DRACON_RESOLVABLES[{unique_id}].resolve({context_str})'
+        return newexpr
+
+    def preprocess_at_references(self, match, comp_res, current_path):
+        newexpr = (
+            f"(__DRACON__PARENT_PATH + __dracon_KeyPath('{match.expr}'))"
+            f".get_obj(__DRACON__CURRENT_ROOT_OBJ)"
+        )
+        return newexpr
+
+    def preprocess_references(self, comp_res, current_path):
         if self.init_outermost_interpolations is None:
             self.init_outermost_interpolations = outermost_interpolation_exprs(self.value)
 
         assert self.init_outermost_interpolations is not None
-
         interps = self.init_outermost_interpolations
-        available_anchors = comp_res.anchor_paths
-
         references = find_field_references(self.value)
 
         offset = 0
         for match in references:
+            newexpr = match.expr
             if match.symbol == '&' and any([i.contains(match.start) for i in interps]):
-                context_str = ''
-                # references can also have a list of variable definitions attached to them
-                # syntax is ${&unique_id:var1=expr1,var2=expr2}
-                if ':' in match.expr:
-                    match.expr, vardefs = match.expr.split(':')
-                    context_str = f'context=dict({vardefs})'
+                newexpr = self.preprocess_ampersand_references(match, comp_res, current_path)
 
-                match_parts = match.expr.split('.', 1)
-                if match_parts[0] in available_anchors:  # we're matching an anchor
-                    keypath = available_anchors[match_parts[0]].copy()
-                    keypath = keypath.down(match_parts[1]) if len(match_parts) > 1 else keypath
-                else:  # we're trying to match a keypath
-                    keypath = current_path.parent.down(KeyPath(match.expr))
-
-                unique_id = generate_unique_id()
-                self.referenced_nodes[unique_id] = keypath.get_obj(comp_res.root)
-
-                newexpr = f'__DRACON_RESOLVABLES[{unique_id}].resolve({context_str})'
                 self.value = (
                     self.value[: match.start + offset] + newexpr + self.value[match.end + offset :]
                 )
+                offset += len(newexpr) - match.end + match.start
 
-                offset += len(newexpr) - match.end - match.start
+            elif match.symbol == '@' and any([i.contains(match.start) for i in interps]):
+                ...
+                # newexpr = self.preprocess_at_references(match, comp_res, current_path)
+            else:
+                raise ValueError(f'Unknown interpolation symbol: {match.symbol}')
+
+
+            print(f'newexpr: {newexpr}')
+            print(f'newval: {self.value}')
 
         if references:
             self.init_outermost_interpolations = outermost_interpolation_exprs(self.value)

@@ -17,11 +17,9 @@ def make_default_empty_mapping_node():
 
 
 def process_merges(comp_res: CompositionResult):
-    comp_res.sort_merge_nodes()
+    comp_res.sort_special_nodes('merge')
 
-    while comp_res.merge_nodes:
-        merge_path = comp_res.merge_nodes.pop()
-
+    for merge_path in comp_res.pop_all_special('merge'):
         merge_node = merge_path.get_obj(comp_res.root)
         parent_path = merge_path.copy().up()
         node_key = merge_path[-1]

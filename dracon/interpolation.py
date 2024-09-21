@@ -23,7 +23,7 @@ from dracon.merge import merged, MergeKey
 from dracon.utils import (
     outermost_interpolation_exprs,
     InterpolationMatch,
-    resolve_field_references,
+    find_field_references,
     resolve_interpolable_variables,
 )
 
@@ -39,6 +39,27 @@ BASE_DRACON_SYMBOLS: Dict[str, Any] = {}
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 ## {{{                           --     eval     --
+
+def resolve_field_references(expr: str):
+    keypath_matches = find_field_references(expr)
+    if not keypath_matches:
+        return expr
+    offset = 0
+    for match in keypath_matches:
+        if match.symbol == '@':
+            newexpr = (
+                f"(__DRACON__PARENT_PATH + __dracon_KeyPath('{match.expr}'))"
+                f".get_obj(__DRACON__CURRENT_ROOT_OBJ)"
+            )
+        elif match.symbol == '&':
+            raise ValueError(f"Ampersand references in {expr} should have been handled earlier")
+        else:
+            raise ValueError(f"Invalid symbol {match.symbol} in {expr}")
+
+        expr = expr[: match.start + offset] + newexpr + expr[match.end + offset :]
+        original_len = match.end - match.start
+        offset += len(newexpr) - original_len
+    return expr
 
 
 def preprocess_expr(expr: str, symbols: Optional[dict] = None):

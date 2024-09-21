@@ -21,57 +21,55 @@ from ruamel.yaml.events import (
 
 from pydantic import BaseModel
 from .keypath import KeyPath, ROOTPATH, escape_keypath_part
-from typing import Any, Hashable
-from typing import Optional
+from typing import Any, Hashable, Callable
+from typing import Optional, List, Literal, Final
 from copy import deepcopy
 from dracon.utils import outermost_interpolation_exprs
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 ## {{{                   --     CompositionResult    --
 
+SpecialNodeCategory = Literal['include', 'merge']
+INCLUDENODE: Final = 'include'
+MERGENODE: Final = 'merge'
+
 
 class CompositionResult(BaseModel):
     root: Node
-    include_nodes: list[KeyPath] = []  # keypaths to include nodes
-    anchor_paths: dict[str, KeyPath] = {}  # anchor name -> keypath to that anchor node
-    merge_nodes: list[KeyPath] = []
-    resolvables: dict[int, Node] = {}  # store instanciable nodes referenced in interpolations
+    special_nodes: dict[Literal['include', 'merge'], list[KeyPath]] = {}
+    anchor_paths: dict[str, KeyPath] = {}
 
     def model_post_init(self, *args, **kwargs):
         super().model_post_init(*args, **kwargs)
-
-    class Config:
-        arbitrary_types_allowed = True
+        # Ensure special_nodes has default lists for known categories
+        self.special_nodes.setdefault(INCLUDENODE, [])
+        self.special_nodes.setdefault(MERGENODE, [])
 
     def rerooted(self, new_root: KeyPath):
         new_root = new_root.simplified()
         new_root_node = new_root.get_obj(self.root)
-
         assert new_root_node is not None, f'Invalid new root: {new_root}'
 
-        new_include_nodes = [
-            (ROOTPATH + include_node[len(new_root) :]).simplified()
-            for include_node in self.include_nodes
-            if include_node.startswith(new_root)
-        ]
-
-        new_merge_nodes = [
-            (ROOTPATH + merge_node[len(new_root) :]).simplified()
-            for merge_node in self.merge_nodes
-            if merge_node.startswith(new_root)
-        ]
+        new_special_nodes = {}
+        for category, paths in self.special_nodes.items():
+            new_paths = [
+                (ROOTPATH + path[len(new_root) :]).simplified()
+                for path in paths
+                if path.startswith(new_root)
+            ]
+            if new_paths:
+                new_special_nodes[category] = new_paths
 
         new_anchor_paths = {
-            anchor: (ROOTPATH + anchor_path[len(new_root) :]).simplified()
-            for anchor, anchor_path in self.anchor_paths.items()
-            if anchor_path.startswith(new_root)
+            anchor: (ROOTPATH + path[len(new_root) :]).simplified()
+            for anchor, path in self.anchor_paths.items()
+            if path.startswith(new_root)
         }
 
         return CompositionResult(
             root=new_root_node,
-            include_nodes=new_include_nodes,
+            special_nodes=new_special_nodes,
             anchor_paths=new_anchor_paths,
-            merge_nodes=new_merge_nodes,
         )
 
     def replace_node_at(self, at_path: KeyPath, new_node: Node):
@@ -96,39 +94,45 @@ class CompositionResult(BaseModel):
 
         self.replace_node_at(at_path, new_root.root)
 
-        self.include_nodes.extend(
-            [
-                (at_path + include_node.rootless()).simplified()
-                for include_node in new_root.include_nodes
-            ]
-        )
-        # make unique
-        self.include_nodes = list(set(self.include_nodes))
-
-        self.merge_nodes.extend(
-            [(at_path + merge_node.rootless()).simplified() for merge_node in new_root.merge_nodes]
-        )
-        # make unique
-        self.merge_nodes = list(set(self.merge_nodes))
+        for category, paths in new_root.special_nodes.items():
+            existing_paths = self.special_nodes.setdefault(category, [])
+            existing_paths.extend([(at_path + path.rootless()).simplified() for path in paths])
+            # Remove duplicates
+            self.special_nodes[category] = list(set(existing_paths))
 
         for anchor, anchor_path in new_root.anchor_paths.items():
             if anchor not in self.anchor_paths:
                 self.anchor_paths[anchor] = (at_path + anchor_path.rootless()).simplified()
 
-
         return self
 
-    def sort_merge_nodes(self):
-        # we sort them by innermost first but keep the order of the same level
-        lens = [len(m) for m in self.merge_nodes]
-        self.merge_nodes = [
-            m
-            for _, m in sorted(
-                zip(lens, self.merge_nodes),
-                key=lambda x: x[0],
-            )
-        ]
+    def pop_all_special(self, category: SpecialNodeCategory):
+        while self.special_nodes.get(category):
+            yield self.special_nodes[category].pop()
 
+    def sort_special_nodes(self, category: SpecialNodeCategory):
+        nodes = self.special_nodes.get(category, [])
+        self.special_nodes[category] = sorted(nodes, key=len)
+
+    def walk(
+        self,
+        callback: Callable[[Node, KeyPath], None],
+        start_path: KeyPath = ROOTPATH,
+    ):
+        def walk_node(node, path):
+            callback(node, path)
+            if isinstance(node, DraconMappingNode):
+                for k_node, v_node in node.value:
+                    walk_node(k_node, path)
+                    walk_node(v_node, path + k_node.value)
+            elif isinstance(node, DraconSequenceNode):
+                for i, v in enumerate(node.value):
+                    walk_node(v, path + str(i))
+
+        walk_node(self.root, start_path)
+
+    class Config:
+        arbitrary_types_allowed = True
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
@@ -139,9 +143,8 @@ class DraconComposer(Composer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.node_map: dict[KeyPath, Node] = {}  # keypath -> node
-        self.include_nodes: list[KeyPath] = []  # keypaths to include nodes
-        self.merge_nodes: list[KeyPath] = []  # keypaths to merge nodes
-        self.anchor_paths: dict[str, KeyPath] = {}  # anchor name -> keypath to that anchor node
+        self.special_nodes: dict[str, list[KeyPath]] = {}
+        self.anchor_paths: dict[str, KeyPath] = {}
         self.curr_path = ROOTPATH
         self.interpolation_enabled = True
         self.merging_enabled = True
@@ -151,34 +154,18 @@ class DraconComposer(Composer):
             root_node = self.node_map[ROOTPATH]
         else:
             # create an empty root node
-            root_node = DraconMappingNode(
-                value=[],
-                tag='',
-            )
+            root_node = DraconMappingNode(value=[], tag='')
 
         return CompositionResult(
             root=root_node,
-            include_nodes=self.include_nodes,
+            special_nodes=self.special_nodes,
             anchor_paths=self.anchor_paths,
-            merge_nodes=self.merge_nodes,
         )
 
-    def descend_path(self, parent, index):
-        assert index is not None, f'Invalid index: {index}'
-        if parent is None:
-            self.curr_path = ROOTPATH
-        elif isinstance(parent, MappingNode):
-            if isinstance(index, ScalarNode):
-                self.curr_path.down(index.value)
-            else:
-                self.curr_path.down(str(index))
-        elif isinstance(parent, SequenceNode):
-            self.curr_path.down(str(index))
-
-    def ascend_path(self, node):
-        if self.curr_path:
-            self.node_map[self.curr_path.copy()] = node
-            self.curr_path.up()
+    def add_special_node(self, category: str, path: KeyPath):
+        if category not in self.special_nodes:
+            self.special_nodes[category] = []
+        self.special_nodes[category].append(path.copy())
 
     def compose_node(self, parent, index):
         if index is not None:
@@ -191,7 +178,7 @@ class DraconComposer(Composer):
                 start_mark=event.start_mark,
                 end_mark=event.end_mark,
             )
-            self.include_nodes.append(self.curr_path.copy())
+            self.add_special_node(INCLUDENODE, self.curr_path.copy())
         else:
             event = self.parser.peek_event()
             anchor = event.anchor
@@ -210,10 +197,8 @@ class DraconComposer(Composer):
                         comment=event.comment,
                         anchor=anchor,
                     )
-                    self.include_nodes.append(self.curr_path.copy())
+                    self.add_special_node(INCLUDENODE, self.curr_path.copy())
                 else:
-                    # would probably be more idiomatic to write
-                    # my own MergeEvent but this works the same...
                     if event.style is None and is_merge_key(event.value) and self.merging_enabled:
                         node = self.compose_merge_node(anchor)
                     else:
@@ -227,6 +212,7 @@ class DraconComposer(Composer):
             self.resolver.ascend_resolver()
 
         node = self.wrapped_node(node)
+
         if index is not None:
             self.ascend_path(node)
 
@@ -235,6 +221,24 @@ class DraconComposer(Composer):
             self.node_map[self.curr_path.copy()] = node
 
         return node
+
+    # Rest of the class remains the same
+    def descend_path(self, parent, index):
+        assert index is not None, f'Invalid index: {index}'
+        if parent is None:
+            self.curr_path = ROOTPATH
+        elif isinstance(parent, MappingNode):
+            if isinstance(index, ScalarNode):
+                self.curr_path.down(index.value)
+            else:
+                self.curr_path.down(str(index))
+        elif isinstance(parent, SequenceNode):
+            self.curr_path.down(str(index))
+
+    def ascend_path(self, node):
+        if self.curr_path:
+            self.node_map[self.curr_path.copy()] = node
+            self.curr_path.up()
 
     def compose_merge_node(self, anchor: Any) -> Any:
         event = self.parser.get_event()
@@ -254,7 +258,7 @@ class DraconComposer(Composer):
         if anchor is not None:
             self.anchors[anchor] = node
         mpath = self.curr_path.copy() + KeyPath(escape_keypath_part(event.value))
-        self.merge_nodes.append(mpath)
+        self.add_special_node(MERGENODE, mpath)
         return node
 
     def wrapped_node(self, node: Node) -> Node:
