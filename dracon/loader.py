@@ -110,9 +110,8 @@ class DraconLoader:
             enable_interpolation=self.yaml.composer.interpolation_enabled,
             context=deepcopy(self.context),
         )
-        new_loader.yaml.constructor.yaml_constructors = copy.deepcopy(
-            self.yaml.constructor.yaml_constructors
-        )
+        new_loader.yaml.constructor.yaml_constructors = self.yaml.constructor.yaml_constructors
+
         return new_loader
 
     def compose_from_include_str(
@@ -198,27 +197,18 @@ class DraconLoader:
         Find references in InterpolableNodes and replace them with copies of the target nodes.
         """
 
-        def walk_node(node, current_path):
+        def callback(node, path):
             if isinstance(node, InterpolableNode):
-                node.preprosess_ampersand_references(comp_res, current_path)
-            elif isinstance(node, MappingNode):
-                for key_node, value_node in node.value:
-                    walk_node(key_node, current_path)
-                    walk_node(value_node, current_path + KeyPath(key_node.value))
-            elif isinstance(node, SequenceNode):
-                for idx, item_node in enumerate(node.value):
-                    walk_node(item_node, current_path + KeyPath(str(idx)))
+                node.preprocess_references(comp_res, path)
 
-        walk_node(comp_res.root, ROOTPATH)
+        comp_res.walk(callback)
         return comp_res
 
     def process_includes(self, comp_res: CompositionResult):
-        while comp_res.include_nodes:
-            inode_path = comp_res.include_nodes.pop()
+        for inode_path in comp_res.pop_all_special('include'):
             inode = inode_path.get_obj(comp_res.root)
             assert isinstance(inode, IncludeNode), f"Invalid node type: {type(inode)}"
-            include_str = inode.value
-            include_str = resolve_interpolable_variables(include_str, self.context)
+            include_str = resolve_interpolable_variables(inode.value, self.context)
             new_loader = self.copy()
             include_composed = new_loader.compose_from_include_str(
                 include_str, inode_path, comp_res
