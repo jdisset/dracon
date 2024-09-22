@@ -90,3 +90,5 @@ def test_merge_nested_dicts_with_lists():
     mk = MergeKey(raw="<<[+]{+<}")
     result = merged(d1, d2, mk)
     assert result == {"a": {"x": [1, 2, 3, 4], "y": 5}, "b": 3, "c": 6}
+
+

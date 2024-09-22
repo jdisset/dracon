@@ -31,6 +31,21 @@ from asteval import Interpreter
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
+class ClassA(BaseModel):
+    index: int
+    name: str
+
+    @property
+    def name_index(self):
+        return f"{self.index}: {self.name}"
+
+
+class ClassB(BaseModel):
+    attr1: str
+    attr2: int
+    attrA: ClassA
+
+
 def test_dict():
     kp = find_field_references(
         "@/name.greeting..back+2 + / @path.to.list[2] = @haha./../p\[3{]"
@@ -74,17 +89,16 @@ def test_dict():
         },
     }
 
-    KeyPath('/nested.inner/name').get_obj(obj)
+    dump = DraconLoader().dump(obj)
+    loader = DraconLoader(enable_interpolation=True)
+    loaded = loader.loads(dump)
+    loaded.resolve_all_lazy()
 
-    g = resolve_eval_str(obj['nested']['inner']['greeting'], '/nested.inner.other', obj)
-    assert g == 'greetings, John!'
-
-    l = resolve_eval_str(obj['nested']['inner']['list'], '/nested.inner.match', obj)
-    assert l == ['John_0', 'John_1', 'John_2', 'John_3', 'John_4']
-
-    # r = resolve_eval_str(obj['nested']['inner']['ref'], '/nested.inner.ref', obj)
-    # ^^^ this won't work with a normal dict because there is a change of current path in the reference.
-    # It should work with a Dracontainer because accessing the member should trigger resolution
+    assert loaded.name == 'John'
+    assert loaded.greetingroot == 'Hello, John!'
+    assert loaded.nested.inner.greeting == 'greetings, John!'
+    assert loaded.nested.inner.ref == 'Hello, John!'
+    assert loaded.nested.inner.list == ['John_0', 'John_1', 'John_2', 'John_3', 'John_4']
 
 
 def test_lazy():
@@ -169,7 +183,10 @@ def test_ampersand_interpolation_simple():
     assert config_copy['config']['key1_amp'] == 'value1'
     assert config_copy['config']['key1_at'] == 'new_value1'
 
-# 6.4
+
+# 6.5
+# removed deepcopy in merge -> 4.6
+
 
 def test_recursive_interpolation():
     yaml_content = """
@@ -236,3 +253,104 @@ def test_ampersand_interpolation_complex():
         {'index': 5, 'name': 'Name 5'},
     ]
     assert config['all_objs_by_anchor'] == config['all_objs']
+
+
+def test_obj_references():
+    yaml_content = """
+    __dracon__:
+        simple_obj: &smpl !ClassA
+            index: ${i + 1}
+            name: "Name ${@index}"
+
+    obj4: &o4 ${&smpl:i=3}
+    prop4: ${@obj4.name_index}
+
+    as_ampersand_anchor: ${[&smpl:i=i for i in range(5)]}
+    """
+
+    loader = DraconLoader(enable_interpolation=True)
+    loader.yaml.representer.full_module_path = False
+    config = loader.loads(yaml_content)
+    config.resolve_all_lazy()
+
+    assert '__dracon__' not in config
+    assert isinstance(config['obj4'], ClassA)
+    assert config['obj4'].index == 4
+    assert config['obj4'].name == 'Name 4'
+    assert config['prop4'] == '4: Name 4'
+
+    assert config['as_ampersand_anchor'] == [
+        {'index': 1, 'name': 'Name 1'},
+        {'index': 2, 'name': 'Name 2'},
+        {'index': 3, 'name': 'Name 3'},
+        {'index': 4, 'name': 'Name 4'},
+        {'index': 5, 'name': 'Name 5'},
+    ]
+
+
+# def test_instruction_for_simple():
+    # yaml_content = """
+    # ilist:
+        # !each(e) ${list(range(5))}:
+            # - ${e}
+    # """
+    # loader = DraconLoader(enable_interpolation=True)
+    # composed = loader.compose_config_from_str(yaml_content)
+
+    # config = loader.loads(yaml_content)
+
+    # assert '__dracon__' not in config
+    # assert len(config['multiple_objs']) == 5
+
+    # config.resolve_all_lazy()
+
+
+# class ClassC(BaseModel):
+# index: int
+# name: str
+# after_attr: Optional[str] = None
+
+# def model_post_init(self, *args, **kwargs):
+# super().model_post_init(*args, **kwargs)
+# self.after_attr = f"after_{self.name}"
+
+# @property
+# def name_index(self):
+# return f"{self.index}: {self.name}"
+
+
+# def test_roundtrip():
+# yaml_content = """
+# __dracon__private:
+# simple_obj: &smpl !ClassC
+# index: ${i + 1}
+# name: "Name ${@index}"
+
+# node4: !roundtrip &n4 ${&smpl:i=3}
+
+# # node_after: *n4@after_attr
+# # name_index4: ${@node_after.name_index}
+
+# node_modified: *n4
+# # <<{+<}@node_modified:
+# # name: "Modified ${@index}"
+
+# """
+
+# loader = DraconLoader(enable_interpolation=True)
+# loader.yaml.representer.full_module_path = False
+# config = loader.loads(yaml_content)
+# config.resolve_all_lazy()
+
+# assert '__dracon__private' not in config
+# assert isinstance(config['node4'], ClassC)
+# assert config['node4'].index == 4
+# assert config['node4'].name == 'Name 4'
+# assert config['node4'].name_index == '4: Name 4'
+# assert config['node_after'] == 'after_Name 4'
+# assert config['name_index4'] == '4: Name 4'
+
+# assert isinstance(config['node_modified'], ClassC)
+# assert config['node_modified'].index == 4
+# assert config['node_modified'].name == 'Modified 4'
+# assert config['node_modified'].name_index == '4: Modified 4'

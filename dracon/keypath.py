@@ -8,6 +8,10 @@ from dracon.utils import node_print, list_like, dict_like
 class KeyPathToken(Enum):
     ROOT = 0
     UP = 1
+    MAPPING_KEY = 2  # indicates that the path points to the key of a mapping, not the value
+
+
+MAPPING_KEY = KeyPathToken.MAPPING_KEY
 
 
 def escape_keypath_part(part: str) -> str:
@@ -16,6 +20,9 @@ def escape_keypath_part(part: str) -> str:
 
 def unescape_keypath_part(part: str) -> str:
     return part.replace('\\.', '.').replace('\\/', '/')
+
+
+# special symbols:
 
 
 class KeyPath:
@@ -89,6 +96,7 @@ class KeyPath:
             return self.simplify()
         return self
 
+    # unicode emoji for key:
     @property
     def parent(self) -> 'KeyPath':
         return self.copy().up()
@@ -99,9 +107,11 @@ class KeyPath:
     def front_pop(self) -> Union[Hashable, KeyPathToken]:
         return self.parts.pop(0)
 
-    def down(self, path: "str | KeyPath") -> 'KeyPath':
+    def down(self, path: "str | KeyPath | KeyPathToken") -> 'KeyPath':
         self.is_simple = False
-        if isinstance(path, KeyPath):
+        if isinstance(path, KeyPathToken):
+            self.parts.append(path)
+        elif isinstance(path, KeyPath):
             self.parts.extend(path.parts)
         elif isinstance(path, list):
             return self.down(KeyPath(path))
@@ -130,6 +140,8 @@ class KeyPath:
                 simplified = [KeyPathToken.ROOT]
             elif part == KeyPathToken.UP:
                 if simplified and simplified[-1] not in (KeyPathToken.ROOT, KeyPathToken.UP):
+                    if len(simplified) > 1 and simplified[-2] == KeyPathToken.MAPPING_KEY:
+                        simplified.pop()  # popping a mapping key
                     simplified.pop()
                 elif not simplified or simplified[-1] != KeyPathToken.ROOT:
                     simplified.append(KeyPathToken.UP)
@@ -152,15 +164,13 @@ class KeyPath:
             if part == KeyPathToken.ROOT:
                 result += '/'
             elif part == KeyPathToken.UP:
-                if prev == KeyPathToken.UP:
-                    result += '.'
-                else:
-                    result += '..'
+                result += '.' if prev == KeyPathToken.UP else '..'
+            elif part == MAPPING_KEY:
+                result += '🔑:' if prev in {KeyPathToken.ROOT, KeyPathToken.UP, None} else '.🔑:'
             else:
-                if prev == KeyPathToken.ROOT or prev == KeyPathToken.UP or prev is None:
-                    result += str(escape_keypath_part(str(part)))
-                else:
-                    result += '.' + str(escape_keypath_part(str(part)))
+                if prev not in {KeyPathToken.ROOT, KeyPathToken.UP, None, MAPPING_KEY}:
+                    result += '.'
+                result += escape_keypath_part(str(part))
             prev = part
         return result
 
@@ -168,6 +178,8 @@ class KeyPath:
         return f"KeyPath('{self}')"
 
     def __len__(self) -> int:
+        if self.is_mapping_key():
+            return len(self.parts) - 1
         return len(self.parts)
 
     def __eq__(self, other: object) -> bool:
@@ -189,23 +201,49 @@ class KeyPath:
             return False
         return self.parts[: len(other)] == other.parts
 
+    def check_correctness(self) -> None:
+        if self.parts and self.parts[-1] == KeyPathToken.MAPPING_KEY:
+            raise ValueError(f'KeyPath cannot end with a mapping key: {self}')
+
     def get_obj(
         self, obj: Any, create_path_if_not_exists=False, default_mapping_constructor=None
     ) -> Any:
+
         if not self.is_simple:
             simplified = self.simplified()
             return simplified.get_obj(obj, create_path_if_not_exists, default_mapping_constructor)
 
+        self.check_correctness()
+
         res = obj
-        for part in self.parts:
+        for i, part in enumerate(self.parts):
             if part == KeyPathToken.UP:
                 raise ValueError(f'Cannot get object from unsimplifiable path: {self}')
             if part == KeyPathToken.ROOT:
                 continue
+            if part == KeyPathToken.MAPPING_KEY:
+                if i != len(self.parts) - 2:
+                    raise ValueError(f'Invalid mapping key in path: {self}')
+                assert hasattr(res, 'get_key')
+                res = res.get_key(self.parts[-1])
+                return res
             res = self._get_obj_impl(
                 res, part, create_path_if_not_exists, default_mapping_constructor
             )
         return res
+
+    def is_mapping_key(self) -> bool:
+        if not self.is_simple:
+            simplified = self.simplified()
+            return simplified.is_mapping_key()
+        if len(self.parts) < 2:
+            return False
+        return self.parts[-2] == KeyPathToken.MAPPING_KEY
+
+    def removed_mapping_key(self) -> 'KeyPath':
+        if not self.is_mapping_key():
+            return self
+        return KeyPath(self.parts[:-2]) + self.parts[-1]
 
     @staticmethod
     def _get_obj_impl(

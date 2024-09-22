@@ -17,9 +17,11 @@ def make_default_empty_mapping_node():
 
 
 def process_merges(comp_res: CompositionResult):
+    comp_res.find_special_nodes('merge', lambda n: isinstance(n, MergeNode))
     comp_res.sort_special_nodes('merge')
 
     for merge_path in comp_res.pop_all_special('merge'):
+        merge_path = merge_path.removed_mapping_key()
         merge_node = merge_path.get_obj(comp_res.root)
         parent_path = merge_path.copy().up()
         node_key = merge_path[-1]
@@ -35,7 +37,7 @@ def process_merges(comp_res: CompositionResult):
 
         assert node_key in parent_node, f'Key {node_key} not found in parent node'
 
-        key_node = parent_node.get_key_node(
+        key_node = parent_node.get_key(
             node_key
         )  # the scalar node that contains the merge instruction
         assert isinstance(

@@ -167,9 +167,12 @@ class DraconLoader:
         res = self.yaml.composer.get_result()
         return self.post_process_composed(res)
 
-    def load_from_composition_result(self, compres: CompositionResult):
+    def load_from_node(self, node):
         self.yaml.constructor.context.update(self.context)
-        return self.yaml.constructor.construct_document(compres.root)
+        return self.yaml.constructor.construct_document(node)
+
+    def load_from_composition_result(self, compres: CompositionResult):
+        return self.load_from_node(compres.root)
 
     def load(self, config_path: str | Path):
         self.reset_context()
@@ -188,23 +191,25 @@ class DraconLoader:
     def post_process_composed(self, comp: CompositionResult):
         comp = self.process_includes(comp)
         comp = process_merges(comp)
-        comp = self.process_ampersand_references(comp)
+        comp = self.process_references_in_interpolables(comp)
         comp = delete_unset_nodes(comp)
         return comp
 
-    def process_ampersand_references(self, comp_res: CompositionResult):
-        """
-        Find references in InterpolableNodes and replace them with copies of the target nodes.
-        """
+    def process_references_in_interpolables(self, comp_res: CompositionResult):
+        comp_res.find_special_nodes('interpolable', lambda n: isinstance(n, InterpolableNode))
+        comp_res.sort_special_nodes('interpolable')
 
-        def callback(node, path):
-            if isinstance(node, InterpolableNode):
-                node.preprocess_references(comp_res, path)
+        for path in comp_res.pop_all_special('interpolable'):
+            node = path.get_obj(comp_res.root)
+            assert isinstance(node, InterpolableNode), f"Invalid node type: {type(node)}"
+            node.preprocess_references(comp_res, path)
 
-        comp_res.walk(callback)
         return comp_res
 
     def process_includes(self, comp_res: CompositionResult):
+        comp_res.find_special_nodes('include', lambda n: isinstance(n, IncludeNode))
+        comp_res.sort_special_nodes('include')
+
         for inode_path in comp_res.pop_all_special('include'):
             inode = inode_path.get_obj(comp_res.root)
             assert isinstance(inode, IncludeNode), f"Invalid node type: {type(inode)}"

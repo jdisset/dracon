@@ -1,5 +1,6 @@
 import pytest
 from dracon.keypath import KeyPath, KeyPathToken
+from dracon.nodes import DraconMappingNode
 
 
 # Tests for parsing without simplification
@@ -12,6 +13,7 @@ def test_parse_string_simple():
     kp = KeyPath("a.b.c", simplify=False)
     assert kp.parts == ["a", "b", "c"]
 
+
 def test_parse_int_simple():
     kp = KeyPath(1, simplify=False)
     assert kp.parts == ['1']
@@ -20,6 +22,7 @@ def test_parse_int_simple():
 def test_with_dots():
     kp = KeyPath("a.b\\.c.d", simplify=False)
     assert kp.parts == ["a", "b.c", "d"]
+
 
 def test_parse_string_with_root():
     kp = KeyPath("/a.b.c", simplify=False)
@@ -75,9 +78,11 @@ def test_simplify_root():
     kp = KeyPath("/")
     assert str(kp) == "/"
 
+
 def test_simplify_simple_0():
     kp = KeyPath("a")
     assert str(kp) == "a"
+
 
 def test_simplify_simple():
     kp = KeyPath("a.b.c")
@@ -189,23 +194,14 @@ def test_addition():
     assert str(croot.simplified()) == "/c.d"
 
 
-
-
 # test get on a dictionary
 D = {
-    "a": {
-        "b": {
-            "c": 1
-        }
-    },
+    "a": {"b": {"c": 1}},
     "d": 2,
     "e": 3,
-    "f": {
-        "g": {
-            "h": [4, 5, {"i": 6, "j": [7, 8, 9]}]
-        }
-    },
+    "f": {"g": {"h": [4, 5, {"i": 6, "j": [7, 8, 9]}]}},
 }
+
 
 def test_get():
     assert KeyPath("d").get_obj(D) == 2
@@ -216,6 +212,93 @@ def test_get():
     assert KeyPath("a.b.c....d").get_obj(D) == 2
 
 
+class DummyNode:
+    def __init__(self, value):
+        self.value = value
+
+    def __eq__(self, other):
+        return self.value == other.value
 
 
+B = DraconMappingNode(
+    tag='',
+    value=[(DummyNode('b'), DraconMappingNode(tag='', value=[(DummyNode('c'), 1)]))],
+)
+F = DraconMappingNode(
+    tag='',
+    value=[
+        (
+            DummyNode('g'),
+            DraconMappingNode(
+                tag='',
+                value=[
+                    (
+                        DummyNode('h'),
+                        [4, 5, DraconMappingNode(tag='', value=[(DummyNode('i'), 6)])],
+                    ),
+                ],
+            ),
+        )
+    ],
+)
 
+M = DraconMappingNode(
+    tag='',
+    value=[
+        (
+            DummyNode('a'),
+            B,
+        ),
+        (DummyNode('d'), 2),
+        (DummyNode('e'), 3),
+        (DummyNode('f'), F),
+    ],
+)
+
+
+def test_mappingkey():
+    # test normal value keypaths:
+    assert KeyPath("a.b.c").get_obj(M) == 1
+    assert KeyPath("d").get_obj(M) == 2
+    # test mapping key keypaths:
+    mk = KeyPath("a.b") + KeyPathToken.MAPPING_KEY + KeyPath("c")
+    assert mk.is_mapping_key()
+    assert mk.get_obj(M) == DummyNode('c')
+    mk = KeyPath("a.b") + KeyPathToken.MAPPING_KEY
+    with pytest.raises(ValueError):
+        mk.get_obj(M)
+
+    mk = KeyPath("a") + KeyPathToken.MAPPING_KEY + KeyPath("b")
+    assert mk.get_obj(M) == DummyNode('b')
+
+    newmk = mk.copy() + KeyPath("c")
+    with pytest.raises(ValueError):
+        newmk.get_obj(M)
+
+    newmk = mk.copy().up()
+    assert not newmk.is_mapping_key()
+    assert newmk.get_obj(M) == B
+
+    newmk = mk.copy() + [KeyPathToken.UP, KeyPathToken.UP]
+    assert newmk.get_obj(M) == M
+
+    newmk = mk.copy() + [
+        KeyPathToken.UP,
+        KeyPathToken.UP,
+        KeyPathToken.MAPPING_KEY,
+        "d",
+        KeyPathToken.UP,
+        KeyPathToken.MAPPING_KEY,
+        KeyPathToken.UP,
+        "f",
+        "g",
+        KeyPathToken.MAPPING_KEY,
+        "h",
+    ]
+    assert newmk.get_obj(M) == DummyNode('h')
+
+    assert newmk.is_mapping_key()
+    valuek = newmk.removed_mapping_key() + "1"
+    assert newmk.is_mapping_key()
+    assert not valuek.is_mapping_key()
+    assert valuek.get_obj(M) == 5
