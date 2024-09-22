@@ -38,7 +38,6 @@ def make_node(value: Any, tag=None, **kwargs):
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
-## {{{                        --     node types     --
 
 
 class DraconScalarNode(ScalarNode):
@@ -72,6 +71,22 @@ class UnsetNode(ScalarNode):
         )
 
 
+class InstructionNode(ScalarNode):
+    def __init__(
+        self,
+        value,
+        instruction,
+        start_mark=None,
+        end_mark=None,
+        tag=None,
+        anchor=None,
+        comment=None,
+    ):
+        ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
+        self.instruction = instruction
+
+
+## {{{                     --     InterpolableNode     --
 class InterpolableNode(ScalarNode):
     def __init__(
         self,
@@ -109,13 +124,6 @@ class InterpolableNode(ScalarNode):
         newexpr = f'__DRACON_RESOLVABLES[{unique_id}].resolve({context_str})'
         return newexpr
 
-    def preprocess_at_references(self, match, comp_res, current_path):
-        newexpr = (
-            f"(__DRACON__PARENT_PATH + __dracon_KeyPath('{match.expr}'))"
-            f".get_obj(__DRACON__CURRENT_ROOT_OBJ)"
-        )
-        return newexpr
-
     def preprocess_references(self, comp_res, current_path):
         if self.init_outermost_interpolations is None:
             self.init_outermost_interpolations = outermost_interpolation_exprs(self.value)
@@ -134,19 +142,18 @@ class InterpolableNode(ScalarNode):
                     self.value[: match.start + offset] + newexpr + self.value[match.end + offset :]
                 )
                 offset += len(newexpr) - match.end + match.start
-
             elif match.symbol == '@' and any([i.contains(match.start) for i in interps]):
-                ...
-                # newexpr = self.preprocess_at_references(match, comp_res, current_path)
+                ...  # handled in postproc
             else:
                 raise ValueError(f'Unknown interpolation symbol: {match.symbol}')
 
-
-            print(f'newexpr: {newexpr}')
-            print(f'newval: {self.value}')
-
         if references:
             self.init_outermost_interpolations = outermost_interpolation_exprs(self.value)
+
+
+##────────────────────────────────────────────────────────────────────────────}}}
+
+## {{{                        --     MappingNode     --
 
 
 class DraconMappingNode(MappingNode):
@@ -165,9 +172,10 @@ class DraconMappingNode(MappingNode):
         self._recompute_map()
 
     def _recompute_map(self):
-        self.map: dict[Hashable, int] = {}  # key -> index
+        self.map: dict[Hashable, int] = {}  # key value -> index
 
         for idx, (key, _) in enumerate(self.value):
+            assert hasattr(key, 'value'), f'Key {key} has no value attribute'
             if key.value in self.map:
                 raise ValueError(f'Duplicate key: {key.value}')
             self.map[key.value] = idx
@@ -212,13 +220,12 @@ class DraconMappingNode(MappingNode):
         return (value for _, value in self.value)
 
     def items(self):
-        # return ((key.value, value) for key, value in self.value)
         return self.value
 
     def get(self, key: Hashable, default=None):
         return self[key] if key in self else default
 
-    def get_key_node(self, key: Hashable):
+    def get_key(self, key: Hashable):
         idx = self.map[key]
         return self.value[idx][0]
 
@@ -261,6 +268,10 @@ class DraconMappingNode(MappingNode):
         return res
 
 
+##────────────────────────────────────────────────────────────────────────────}}}
+
+
+## {{{                       --     SequenceNode     --
 class DraconSequenceNode(SequenceNode):
     def __getitem__(self, index: int) -> Node:
         return self.value[index]

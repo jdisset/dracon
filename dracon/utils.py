@@ -233,18 +233,7 @@ class InterpolationMatch:
         return self.start <= pos < self.end
 
 
-def fast_interpolation_exprs_check(  # about 1000x faster than the pyparsing version but can't handle nested expressions
-    text: str, interpolation_start_char='$', interpolation_boundary_chars=('{}', '()')
-) -> bool:
-    patterns = [
-        re.escape(interpolation_start_char) + re.escape(bound[0]) + r".*?" + re.escape(bound[1])
-        for bound in interpolation_boundary_chars
-    ]
-    matches = re.search("|".join(patterns), text)
-    return matches is not None
-
-
-def fast_prescreen_interpolation_exprs_check(  # 5000x but very simple and limited
+def fast_prescreen_interpolation_exprs_check(  # 5000x faster prescreen but very simple and limited
     text: str, interpolation_start_char='$', interpolation_boundary_chars=('{}', '()')
 ) -> bool:
     start_patterns = [interpolation_start_char + bound[0] for bound in interpolation_boundary_chars]
@@ -273,6 +262,18 @@ def outermost_interpolation_exprs(
     for match, start, end in scanner.scanString(text):
         matches.append(InterpolationMatch(start, end, match[0][2:-1]))
     return sorted(matches, key=lambda m: m.start)
+
+
+def outermost_comptime_interpolations(text: str) -> list[InterpolationMatch]:
+    return outermost_interpolation_exprs(
+        text, interpolation_start_char='$', interpolation_boundary_chars=('()',)
+    )
+
+
+def outermost_lazy_interpolations(text: str) -> list[InterpolationMatch]:
+    return outermost_interpolation_exprs(
+        text, interpolation_start_char='$', interpolation_boundary_chars=('{}',)
+    )
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
