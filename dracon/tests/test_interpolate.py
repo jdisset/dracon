@@ -30,7 +30,7 @@ from asteval import Interpreter
 
 class ClassA(BaseModel):
     index: int
-    name: str
+    name: str = ''
 
     @property
     def name_index(self):
@@ -314,3 +314,84 @@ def test_instruction_each_simple():
     assert len(config['ilist']) == 5
 
     config.resolve_all_lazy()
+
+
+def test_obj_references_instruct():
+    yaml_content = """
+    __dracon__:
+        simple_obj: &smpl !ClassA
+            index: ${i + 1}
+            name: "Name ${@index}"
+
+    obj4: &o4 ${&smpl:i=3}
+    prop4: ${@obj4.name_index}
+
+    # using each + define
+    as_ampersand_anchor:
+        !each(i) ${range(5)}:
+            - ${&smpl:i=i}
+
+    """
+
+    loader = DraconLoader(enable_interpolation=True)
+    loader.yaml.representer.full_module_path = False
+    config = loader.loads(yaml_content)
+    config.resolve_all_lazy()
+
+    assert '__dracon__' not in config
+    assert isinstance(config['obj4'], ClassA)
+    assert config['obj4'].index == 4
+    assert config['obj4'].name == 'Name 4'
+    assert config['prop4'] == '4: Name 4'
+
+    manual_list = [ClassA(index=i + 1, name=f"Name {i+1}") for i in range(5)]
+    assert config['as_ampersand_anchor'] == manual_list
+
+
+def test_instruct_on_nodes():
+    yaml_content = """
+    a_list: &alist
+     - !ClassA
+       index: 42
+     - !ClassA
+       index: 43
+     - !ClassA
+       index: 44
+
+    !define i42 : 42
+
+    list42:
+        !each(elt) ${&alist}:
+            - <<: *$elt
+              <<{+}: {name: "new_name ${@index}"}
+              <<{<+}:
+                index: *$i42
+
+    other_list:
+        !each(elt) ${&alist}:
+            - <<: *$elt
+              <<{+}: {name: "new_name ${@index}"}
+              <<{<+}: 
+                index: !include $elt@index
+
+    """
+
+    loader = DraconLoader(enable_interpolation=True)
+    loader.yaml.representer.full_module_path = False
+    config = loader.loads(yaml_content)
+    config.resolve_all_lazy()
+    print(config)
+    print(f"{config['other_list']=}")
+
+    assert config['list42'] == [
+        ClassA(index=42, name='new_name 42'),
+        ClassA(index=42, name='new_name 42'),
+        ClassA(index=42, name='new_name 42'),
+    ]
+
+    assert config['other_list'] == [
+        ClassA(index=42, name='new_name 42'),
+        ClassA(index=43, name='new_name 43'),
+        ClassA(index=44, name='new_name 44'),
+    ]
+

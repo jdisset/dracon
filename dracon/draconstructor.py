@@ -44,6 +44,11 @@ DEFAULT_TYPES = {
 }
 
 
+def embed_construct_object(ctor):
+    new_ctor = ctor.copy()
+    return new_ctor.construct_object
+
+
 def resolve_type(
     type_str: str,
     localns: Optional[dict] = None,
@@ -194,12 +199,12 @@ class Draconstructor(Constructor):
 
         extra_symbols = deepcopy(self.context)
         extra_symbols = merged(extra_symbols, node.extra_symbols, MergeKey(raw='{<+}'))
-        # extra_symbols.update(node.extra_symbols)
 
         extra_symbols['__DRACON_RESOLVABLES'] = {
             i: Resolvable(node=n, ctor=self.copy()) for i, n in node.referenced_nodes.items()
         }
-        # print(f"EXTRA SYMBOLS: {extra_symbols}")
+
+        # extra_symbols['construct'] = embed_construct_object(self)
 
         lzy = LazyInterpolable(
             value=node_value,
