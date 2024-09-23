@@ -46,8 +46,18 @@ class DraconScalarNode(ScalarNode):
 
 
 class IncludeNode(ScalarNode):
-    def __init__(self, value, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
+    def __init__(
+        self,
+        value,
+        start_mark=None,
+        end_mark=None,
+        tag=None,
+        anchor=None,
+        comment=None,
+        extra_symbols=None,
+    ):
         ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
+        self.extra_symbols = extra_symbols or {}
 
 
 class MergeNode(ScalarNode):
@@ -265,11 +275,17 @@ class InterpolableNode(ScalarNode):
     def preprocess_ampersand_references(self, match, comp_res, current_path):
         available_anchors = comp_res.anchor_paths
         context_str = ''
+
         # references can also have a list of variable definitions attached to them
         # syntax is ${&unique_id:var1=expr1,var2=expr2}
+        # these come from the surrounding expression or context and should be passed
+        # to the resolve method. It's sort of a asteval-specific limitation becasue there's no
+        # locals() or globals() accessible from "inside" the expression...
+
         if ':' in match.expr:
             match.expr, vardefs = match.expr.split(':')
-            context_str = f'context=dict({vardefs})'
+            if vardefs:
+                context_str = ',' + vardefs
 
         match_parts = match.expr.split('.', 1)
         if match_parts[0] in available_anchors:  # we're matching an anchor
@@ -279,9 +295,17 @@ class InterpolableNode(ScalarNode):
             keypath = current_path.parent.down(KeyPath(match.expr))
 
         unique_id = generate_unique_id()
-        self.referenced_nodes[unique_id] = keypath.get_obj(comp_res.root)
 
-        newexpr = f'__DRACON_RESOLVABLES[{unique_id}].resolve({context_str})'
+        node = keypath.get_obj(comp_res.root)
+        self.referenced_nodes[unique_id] = node
+
+        newexpr = f'__DRACON_RESOLVE(__DRACON_RESOLVABLES[{unique_id}] {context_str})'
+
+        if '__DRACON_RESOLVABLES' not in self.extra_symbols:
+            self.extra_symbols['__DRACON_RESOLVABLES'] = {}
+        self.extra_symbols['__DRACON_RESOLVABLES'][unique_id] = node
+        print(f'Added {unique_id} to {self.extra_symbols["__DRACON_RESOLVABLES"]=}')
+
         return newexpr
 
     def preprocess_references(self, comp_res, current_path):
@@ -309,6 +333,11 @@ class InterpolableNode(ScalarNode):
 
         if references:
             self.init_outermost_interpolations = outermost_interpolation_exprs(self.value)
+
+        if current_path.is_mapping_key():
+            parent_node = current_path.parent.get_obj(comp_res.root)
+            assert isinstance(parent_node, DraconMappingNode)
+            parent_node._recompute_map()
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}

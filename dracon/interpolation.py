@@ -10,6 +10,7 @@ from copy import copy
 from typing import Protocol, runtime_checkable, Optional
 from dracon.merge import merged, MergeKey
 from dracon.utils import DictLike
+from dracon.resolvable import Resolvable
 
 from dracon.interpolation_utils import (
     outermost_interpolation_exprs,
@@ -72,6 +73,13 @@ def do_safe_eval(expr: str, symbols: Optional[dict] = None):
     return safe_eval.eval(expr, raise_errors=True)
 
 
+def dracon_resolve(obj, **ctx):
+    print(f"dracon_resolve with {ctx=}")
+    if isinstance(obj, Resolvable):
+        return obj.resolve(ctx)
+    return obj
+
+
 def prepare_symbols(current_path, root_obj, extra_symbols):
     symbols = copy(BASE_DRACON_SYMBOLS)
     symbols.update(
@@ -79,6 +87,7 @@ def prepare_symbols(current_path, root_obj, extra_symbols):
             "__DRACON__CURRENT_PATH": current_path,
             "__DRACON__PARENT_PATH": current_path.parent,
             "__DRACON__CURRENT_ROOT_OBJ": root_obj,
+            "__DRACON_RESOLVE": dracon_resolve,
             "__dracon_KeyPath": KeyPath,
         }
     )
@@ -113,17 +122,7 @@ def evaluate_expression(
     if isinstance(current_path, str):
         current_path = KeyPath(current_path)
 
-    # Prepare symbols for evaluation
-    symbols = copy(BASE_DRACON_SYMBOLS)
-    symbols.update(
-        {
-            "__DRACON__CURRENT_PATH": current_path,
-            "__DRACON__PARENT_PATH": current_path.parent,
-            "__DRACON__CURRENT_ROOT_OBJ": root_obj,
-            "__dracon_KeyPath": KeyPath,
-        }
-    )
-    symbols.update(extra_symbols or {})
+    symbols = prepare_symbols(current_path, root_obj, extra_symbols)
 
     # Helper function to resolve Lazy instances
     def recurse_lazy_resolve(expr):

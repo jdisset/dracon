@@ -1,5 +1,5 @@
 ## {{{                          --     imports     --
-from ruamel.yaml import YAML
+from ruamel.yaml import YAML, Node
 from typing import Type, Callable
 import os
 import copy
@@ -121,6 +121,7 @@ class DraconLoader:
         include_node_path: KeyPath = ROOTPATH,
         composition_result: Optional[CompositionResult] = None,
         custom_loaders: dict = DEFAULT_LOADERS,
+        node: Optional[IncludeNode] = None,
     ) -> Any:
         if '@' in include_str:
             # split at the first unescaped @
@@ -129,6 +130,21 @@ class DraconLoader:
             mainpath, keypath = include_str, ''
 
         if composition_result is not None:
+            if mainpath.startswith('$'): # it's an in-memory node
+                if not node:
+                    raise ValueError('Node not provided for in-memory include')
+                name = mainpath[1:]
+                if name in node.extra_symbols:
+                    incl_node = node.extra_symbols[name]
+                    incl_node = self.dump_to_node(incl_node)
+                    if keypath:
+                        print('keypath', keypath)
+                        incl_node = KeyPath(keypath).get_obj(incl_node)
+                        print('incl_node', incl_node)
+                    return CompositionResult(root=incl_node)
+
+                raise ValueError(f'Invalid in-memory include: {name} not found')
+
             # it's a path starting with the root of the document
             if include_str.startswith('/'):
                 return composition_result.rerooted(KeyPath(mainpath))
@@ -190,10 +206,10 @@ class DraconLoader:
         return self.load_from_composition_result(comp)
 
     def post_process_composed(self, comp: CompositionResult):
+        comp = self.process_references_in_interpolables(comp)
+        comp = process_instructions(comp)
         comp = self.process_includes(comp)
         comp = process_merges(comp)
-        comp = process_instructions(comp)
-        comp = self.process_references_in_interpolables(comp)
         comp = delete_unset_nodes(comp)
         return comp
 
@@ -218,7 +234,7 @@ class DraconLoader:
             include_str = resolve_interpolable_variables(inode.value, self.context)
             new_loader = self.copy()
             include_composed = new_loader.compose_from_include_str(
-                include_str, inode_path, comp_res
+                include_str, inode_path, comp_res, node=inode
             )
             comp_res = comp_res.replaced_at(inode_path, include_composed)
         return comp_res
@@ -234,6 +250,8 @@ class DraconLoader:
             return self.yaml.dump(data, stream)
 
     def dump_to_node(self, data):
+        if isinstance(data, Node):
+            return data
         return self.yaml.representer.represent_data(data)
 
 
