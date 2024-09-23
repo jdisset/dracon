@@ -7,12 +7,21 @@ from dracon.utils import dict_like, DictLike, ListLike
 from dracon.composer import (
     MergeNode,
     CompositionResult,
+    walk_node,
     DraconMappingNode,
     DraconSequenceNode,
     InterpolableNode,
 )
 from ruamel.yaml.nodes import Node
 from dracon.keypath import KeyPath
+from dracon.merge import merged, MergeKey
+from dracon.interpolation import evaluate_expression
+from functools import partial
+
+
+def add_to_interpolable_context(context, node: Node):
+    if isinstance(node, InterpolableNode):
+        node.extra_symbols = merged(node.extra_symbols, context, MergeKey(raw='{<+}'))
 
 
 class Instruction:
@@ -50,10 +59,33 @@ class Define(Instruction):
 
         key_node = path.get_obj(comp_res.root)
         value_node = path.removed_mapping_key().get_obj(comp_res.root)
+        parent_node = path.up().get_obj(comp_res.root)
+        assert isinstance(parent_node, DraconMappingNode)
+        assert key_node.tag == '!define', f"Expected tag '!define', but got {key_node.tag}"
 
-        if isinstance(key_node, InterpolableNode):
-            key_node = key_node.compose(comp_res.context)
-            
+        value = value_node.value
+        ctx = {}
+
+        if isinstance(value_node, InterpolableNode):
+            value = evaluate_expression(
+                value,
+                current_path=path,
+                root_obj=comp_res.root,
+                extra_symbols=value_node.extra_symbols,
+            )
+            ctx = merged(ctx, value_node.extra_symbols, MergeKey(raw='{<+}'))
+
+        var_name = key_node.value
+        assert var_name.isidentifier(), f"Invalid variable name in define instruction: {var_name}"
+
+        ctx = merged(ctx, {var_name: deepcopy(value)}, MergeKey(raw='{<+}'))
+        walk_node(
+            node=parent_node,
+            callback=partial(add_to_interpolable_context, ctx),
+        )
+
+        # remove the node
+        del parent_node[var_name]
 
 
 class Each(Instruction):
@@ -88,11 +120,52 @@ class Each(Instruction):
         if not path.is_mapping_key():
             raise ValueError(f"instruction 'each' must be a mapping key, but got {path}")
 
-        key_node = path.get_obj(comp_res.root)
-        value_node = path.removed_mapping_key().get_obj(comp_res.root)
+        key_node = deepcopy(path.get_obj(comp_res.root))
+        value_node = deepcopy(path.removed_mapping_key().get_obj(comp_res.root))
+        parent_path = path.copy().up()
 
-        # TODO: implement the actual processing. duplicate value_node for each item in key_node
-        ...
+        parent_node = parent_path.get_obj(comp_res.root)
+        assert isinstance(parent_node, DraconMappingNode)
+        assert isinstance(
+            key_node, InterpolableNode
+        ), f"Expected an interpolable node for 'each' instruction, but got {key_node}"
+
+        ctx = {}
+
+        list_like = evaluate_expression(
+            key_node.value,
+            current_path=path,
+            root_obj=comp_res.root,
+            extra_symbols=key_node.extra_symbols,
+        )
+        ctx = merged(ctx, key_node.extra_symbols, MergeKey(raw='{<+}'))
+
+        new_parent = deepcopy(parent_node)
+        del new_parent[key_node.value]
+
+        if isinstance(value_node, DraconSequenceNode):
+            assert len(parent_node) == 1, "Cannot use !each with a sequence node in a mapping"
+            new_parent = DraconSequenceNode.from_mapping(parent_node, empty=True)
+            new_nodes = value_node.value
+        elif isinstance(value_node, DraconMappingNode):
+            new_nodes = value_node.value
+        else:
+            new_nodes = [value_node]
+
+        for item in list_like:
+            for node in new_nodes:
+                new_node = deepcopy(node)
+                new_parent.append(new_node)
+                # ctx = {self.var_name: deepcopy(item)}
+                ctx = merged(ctx, {self.var_name: deepcopy(item)}, MergeKey(raw='{<+}'))
+                walk_node(
+                    node=new_node,
+                    callback=partial(add_to_interpolable_context, ctx),
+                )
+
+        comp_res.replace_node_at(parent_path, new_parent)
+
+        del parent_node[key_node.value]
 
 
 AVAILABLE_INSTRUCTIONS = [Define, Each]
@@ -112,9 +185,9 @@ def process_instructions(comp_res: CompositionResult):
     def find_instruction_nodes(node: Node, path: KeyPath):
         if inst := match_instruct(node.tag):
             instruction_nodes.append((inst, path))
-            node.tag = ''
 
     comp_res.walk(find_instruction_nodes)
+    instruction_nodes = sorted(instruction_nodes, key=lambda x: len(x[1]))
 
     for inst, path in instruction_nodes:
         inst.process(comp_res, path.copy())

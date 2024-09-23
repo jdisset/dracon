@@ -9,6 +9,8 @@ from dracon.keypath import KeyPath
 from copy import copy
 from typing import Protocol, runtime_checkable, Optional
 from dracon.merge import merged, MergeKey
+from dracon.utils import DictLike
+
 from dracon.interpolation_utils import (
     outermost_interpolation_exprs,
     InterpolationMatch,
@@ -30,12 +32,10 @@ BASE_DRACON_SYMBOLS: Dict[str, Any] = {}
 class LazyProtocol(Protocol):
     def resolve(self) -> Any: ...
 
-    def get(self, owner_instance, setval=False) -> Any: ...
-
     name: str
     current_path: KeyPath
     root_obj: Any
-    extra_symbols: Dict[str, Any]
+    extra_symbols: DictLike
 
 
 def resolve_field_references(expr: str):
