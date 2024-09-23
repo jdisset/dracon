@@ -6,9 +6,7 @@ from ruamel.yaml.nodes import Node, MappingNode, SequenceNode, ScalarNode
 from dracon.nodes import (
     DraconMappingNode,
     DraconSequenceNode,
-    InterpolableNode,
     IncludeNode,
-    InstructionNode,
     MergeNode,
     UnsetNode,
     DRACON_UNSET_VALUE,
@@ -22,13 +20,14 @@ from ruamel.yaml.events import (
     MappingStartEvent,
     MappingEndEvent,
 )
+from dracon.nodes import InterpolableNode
 
 from pydantic import BaseModel
 from .keypath import KeyPath, ROOTPATH, escape_keypath_part, MAPPING_KEY
 from typing import Any, Hashable, Callable
 from typing import Optional, List, Literal, Final
 from copy import deepcopy
-from dracon.utils import outermost_interpolation_exprs
+from dracon.interpolation_utils import outermost_interpolation_exprs
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 ## {{{                   --     CompositionResult    --
@@ -39,7 +38,6 @@ MERGENODE: Final = 'merge'
 INTERPOLABLE: Final = 'interpolable'
 INSTRUCTION: Final = 'instruction'
 
-AVAILABLE_INSTRUCTIONS = [r"!each\(([a-zA-Z_]\w*)\)"]
 INCLUDE_TAG = '!include'
 
 
@@ -154,7 +152,6 @@ class CompositionResult(BaseModel):
 
         self.walk(_find_anchors)
 
-
     class Config:
         arbitrary_types_allowed = True
 
@@ -196,14 +193,11 @@ class DraconComposer(Composer):
             node = self.compose_alias_event()
         else:
             event = self.parser.peek_event()
-            print(f'Event anchor: {event.anchor}')
             self.resolver.descend_resolver(parent, index)
 
             if self.parser.check_event(ScalarEvent):
                 if event.ctag == INCLUDE_TAG:
                     node = self.compose_include_node()
-                elif event.ctag in AVAILABLE_INSTRUCTIONS:
-                    node = self.compose_instruction_node(event)
                 elif event.style is None and is_merge_key(event.value) and self.merging_enabled:
                     node = self.compose_merge_node()
                 else:

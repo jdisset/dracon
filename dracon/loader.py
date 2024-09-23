@@ -15,11 +15,12 @@ from dracon.utils import (
     DictLike,
     MetadataDictLike,
     ListLike,
-    resolve_interpolable_variables,
 )
+from dracon.interpolation_utils import resolve_interpolable_variables
 from dracon.merge import process_merges
+from dracon.instructions import process_instructions
 from dracon.loaders.file import read_from_file
-from dracon.nodes import InterpolableNode, MappingNode, SequenceNode
+from dracon.nodes import MappingNode, SequenceNode, InterpolableNode
 from dracon.loaders.pkg import read_from_pkg
 from dracon.loaders.env import read_from_env
 from dracon.representer import DraconRepresenter
@@ -191,6 +192,7 @@ class DraconLoader:
     def post_process_composed(self, comp: CompositionResult):
         comp = self.process_includes(comp)
         comp = process_merges(comp)
+        comp = process_instructions(comp)
         comp = self.process_references_in_interpolables(comp)
         comp = delete_unset_nodes(comp)
         return comp

@@ -11,9 +11,10 @@ from pydantic import (
 )
 
 from dracon import dracontainer
-from dracon.nodes import InterpolableNode
-from dracon.interpolation import LazyInterpolable, outermost_interpolation_exprs
+from dracon.interpolation import outermost_interpolation_exprs
+from dracon.lazy import LazyInterpolable
 from dracon.resolvable import Resolvable, get_inner_type
+from dracon.nodes import InterpolableNode
 
 from typing import (
     Optional,
@@ -207,10 +208,7 @@ class Draconstructor(Constructor):
 
         return lzy
 
-    
-
     def copy(self):
-
         def print_obj(obj):
             print(f"Object of type {type(obj)}:")
             for k, v in obj.__dict__.items():
@@ -219,7 +217,6 @@ class Draconstructor(Constructor):
 
         # print_obj(self.loader)
 
-
         # print(f'{self.drloader.copy().yaml.constructor.yaml_constructors=}')
         # newctor = self.drloader.copy().yaml.constructor.yaml_constructors[0]
         # newctor.localns = self.localns
@@ -227,11 +224,11 @@ class Draconstructor(Constructor):
         # print_obj(newctor)
 
         # newctor = Draconstructor(
-            # preserve_quotes=self.preserve_quotes,
-            # drloader=self.drloader.copy(),
-            # localns=self.localns,
-            # context=deepcopy(self.context),
-            # interpolate_all=self.interpolate_all,
+        # preserve_quotes=self.preserve_quotes,
+        # drloader=self.drloader.copy(),
+        # localns=self.localns,
+        # context=deepcopy(self.context),
+        # interpolate_all=self.interpolate_all,
         # )
 
         newctor = deepcopy(self)
