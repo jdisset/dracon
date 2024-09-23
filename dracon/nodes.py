@@ -185,6 +185,17 @@ class DraconMappingNode(MappingNode):
 
         return res
 
+    def append(self, newvalue: tuple[Node, Node]):
+        key, _ = newvalue
+        self.value.append(newvalue)
+        if key.value in self.map:
+            raise ValueError(f'Duplicate key: {key.value}')
+        self.map[key.value] = len(self.value) - 1
+
+    def clear(self):
+        self.value = []
+        self.map = {}
+
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
@@ -211,6 +222,24 @@ class DraconSequenceNode(SequenceNode):
             anchor=self.anchor,
         )
 
+    def append(self, value: Node):
+        self.value.append(value)
+
+    @classmethod
+    def from_mapping(cls, mapping: DraconMappingNode, empty=False):
+        tag = mapping.tag
+        if tag == DEFAULT_MAP_TAG:
+            tag = DEFAULT_SEQ_TAG
+        return cls(
+            tag=tag,
+            value=[v for _, v in mapping.value] if not empty else [],
+            start_mark=mapping.start_mark,
+            end_mark=mapping.end_mark,
+            flow_style=mapping.flow_style,
+            comment=mapping.comment,
+            anchor=mapping.anchor,
+        )
+
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
@@ -226,10 +255,12 @@ class InterpolableNode(ScalarNode):
         anchor=None,
         comment=None,
         init_outermost_interpolations=None,
+        extra_symbols=None,
     ):
         self.init_outermost_interpolations = init_outermost_interpolations
         ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
         self.referenced_nodes = {}  # unique_id -> node (for later resolving ampersand references)
+        self.extra_symbols = extra_symbols or {}
 
     def preprocess_ampersand_references(self, match, comp_res, current_path):
         available_anchors = comp_res.anchor_paths

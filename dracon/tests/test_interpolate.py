@@ -287,14 +287,16 @@ def test_obj_references():
 
 def test_instruction_define():
     yaml_content = """
-    !define v : 4 
-    value: ${v}
+    !define i : ${4}
+
+    a: ${i + 2}
     """
     loader = DraconLoader(enable_interpolation=True)
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
 
-    assert config['value'] == 4
+    print(config)
+    assert config.a == 6
 
 
 def test_instruction_each_simple():
@@ -312,54 +314,3 @@ def test_instruction_each_simple():
     assert len(config['ilist']) == 5
 
     config.resolve_all_lazy()
-
-
-# class ClassC(BaseModel):
-# index: int
-# name: str
-# after_attr: Optional[str] = None
-
-# def model_post_init(self, *args, **kwargs):
-# super().model_post_init(*args, **kwargs)
-# self.after_attr = f"after_{self.name}"
-
-# @property
-# def name_index(self):
-# return f"{self.index}: {self.name}"
-
-
-# def test_roundtrip():
-# yaml_content = """
-# __dracon__private:
-# simple_obj: &smpl !ClassC
-# index: ${i + 1}
-# name: "Name ${@index}"
-
-# node4: !roundtrip &n4 ${&smpl:i=3}
-
-# # node_after: *n4@after_attr
-# # name_index4: ${@node_after.name_index}
-
-# node_modified: *n4
-# # <<{+<}@node_modified:
-# # name: "Modified ${@index}"
-
-# """
-
-# loader = DraconLoader(enable_interpolation=True)
-# loader.yaml.representer.full_module_path = False
-# config = loader.loads(yaml_content)
-# config.resolve_all_lazy()
-
-# assert '__dracon__private' not in config
-# assert isinstance(config['node4'], ClassC)
-# assert config['node4'].index == 4
-# assert config['node4'].name == 'Name 4'
-# assert config['node4'].name_index == '4: Name 4'
-# assert config['node_after'] == 'after_Name 4'
-# assert config['name_index4'] == '4: Name 4'
-
-# assert isinstance(config['node_modified'], ClassC)
-# assert config['node_modified'].index == 4
-# assert config['node_modified'].name == 'Modified 4'
-# assert config['node_modified'].name_index == '4: Modified 4'

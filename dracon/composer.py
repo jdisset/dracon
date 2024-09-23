@@ -126,20 +126,13 @@ class CompositionResult(BaseModel):
         callback: Callable[[Node, KeyPath], None],
         start_path: KeyPath = ROOTPATH,
     ):
-        def walk_node(node, path):
-            callback(node, path)
-            path = path.removed_mapping_key()
-            if isinstance(node, DraconMappingNode):
-                for k_node, v_node in node.value:
-                    walk_node(k_node, path + MAPPING_KEY + k_node.value)
-                    walk_node(v_node, path + k_node.value)
-            elif isinstance(node, DraconSequenceNode):
-                for i, v in enumerate(node.value):
-                    walk_node(v, path + str(i))
+        walk_node(start_path.get_obj(self.root), callback, start_path=start_path)
 
-        walk_node(self.root, start_path)
-
-    def find_special_nodes(self, category: SpecialNodeCategory, is_special: Callable[[Node], bool]):
+    def find_special_nodes(
+        self,
+        category: SpecialNodeCategory,
+        is_special: Callable[[Node], bool],
+    ):
         special_nodes = []
         self.walk(lambda node, path: special_nodes.append(path) if is_special(node) else None)
         self.special_nodes[category] = special_nodes
@@ -157,6 +150,7 @@ class CompositionResult(BaseModel):
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
+
 
 ## {{{                      --     DraconComposer     --
 
@@ -345,6 +339,34 @@ class DraconComposer(Composer):
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 ## {{{                           --     utils     --
+
+
+def walk_node(node, callback, start_path=None):
+    def __walk_node_no_path(node):
+        callback(node)
+        if isinstance(node, DraconMappingNode):
+            for k_node, v_node in node.value:
+                __walk_node_no_path(k_node)
+                __walk_node_no_path(v_node)
+        elif isinstance(node, DraconSequenceNode):
+            for v in node.value:
+                __walk_node_no_path(v)
+
+    def __walk_node(node, path):
+        callback(node, path)
+        path = path.removed_mapping_key()
+        if isinstance(node, DraconMappingNode):
+            for k_node, v_node in node.value:
+                __walk_node(k_node, path + MAPPING_KEY + k_node.value)
+                __walk_node(v_node, path + k_node.value)
+        elif isinstance(node, DraconSequenceNode):
+            for i, v in enumerate(node.value):
+                __walk_node(v, path + str(i))
+
+    if start_path is not None:
+        __walk_node(node, start_path)
+    else:
+        __walk_node_no_path(node)
 
 
 def is_merge_key(value: str) -> bool:

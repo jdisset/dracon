@@ -7,12 +7,9 @@ from typing import (
     Type,
     Tuple,
     Generic,
-    Annotated,
-    Union,
     Dict,
     Any,
     Protocol,
-    Literal,
 )
 from typing import runtime_checkable, get_args, get_origin
 import typing
@@ -95,7 +92,6 @@ def list_like(obj) -> bool:
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
-
 
 ## {{{                      --     type collection     --
 def get_all_types(items):

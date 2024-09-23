@@ -106,11 +106,6 @@ class Dracontainer:
     def __iter__(self):
         raise NotImplementedError
 
-    def __getattr__(self, key):
-        if key in self:
-            return self[key]
-        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{key}'")
-
     def __setattr__(self, key, value):
         if key.startswith('_'):
             super().__setattr__(key, value)
@@ -181,6 +176,11 @@ class Mapping(Dracontainer, MutableMapping[K, V], Generic[K, V]):
             for key, value in data.items():
                 self[key] = value
 
+    def __getattr__(self, key):
+        if key in self:
+            return self[key]
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{key}'")
+
     def __getitem__(self, key):
         element = self._data[key]
         return self._handle_lazy(key, element)
@@ -228,6 +228,7 @@ class Sequence(Dracontainer, MutableSequence[V]):
                 self.append(item)
 
     def __setitem__(self, index, value):
+        index = int(index)
         self._data[index] = self._to_dracontainer(value, index)
 
     def __delitem__(self, index):
@@ -236,6 +237,7 @@ class Sequence(Dracontainer, MutableSequence[V]):
             del self._per_item_metadata[index]
 
     def __getitem__(self, index):
+        index = int(index)
         element = self._data[index]
         return self._handle_lazy(str(index), element)
 
