@@ -1,0 +1,222 @@
+import ast
+import collections.abc as cabc
+from asteval import Interpreter
+from typing import (
+    Any,
+    Dict,
+    Callable,
+    Optional,
+    Tuple,
+    List,
+    TypeVar,
+    Generic,
+    ForwardRef,
+    Annotated,
+)
+from typing import Generic, TypeVar, get_args, get_origin, Literal
+from dracon.keypath import KeyPath, ROOTPATH
+from pydantic.dataclasses import dataclass
+from pydantic import TypeAdapter, BaseModel, field_validator, ConfigDict, WrapValidator, Field
+from copy import copy
+from typing import Protocol, runtime_checkable, Optional
+from dracon.merge import merged, MergeKey
+from dracon.interpolation_utils import (
+    InterpolationMatch,
+)
+from dracon.interpolation import evaluate_expression
+
+
+class InterpolationError(Exception):
+    pass
+
+
+## {{{                     --     LazyInterpolable     --
+
+T = TypeVar('T')
+
+
+class Lazy(Generic[T]):
+    def __init__(
+        self, value: Any = None, validator: Optional[Callable[[Any], Any]] = None, name=None
+    ):
+        self.value = value
+        self.validator = validator
+        self.name = name
+
+    def validate(self, value):
+        if self.validator is not None:
+            try:
+                return self.validator(value)
+            except Exception as e:
+                quoted_name = f' "{self.name}"' if self.name else ''
+                raise InterpolationError(f"Failed to lazyly validate attribute{quoted_name}") from e
+        return value
+
+    def resolve(self) -> T:
+        return self.validate(self.value)
+
+    def get(self, owner_instance, setval=False):
+        newval = self.resolve()
+        if setval:
+            setattr(owner_instance, self.name, newval)
+        return newval
+
+    def __set_name__(self, owner, name):
+        self.name = name
+
+
+class LazyInterpolable(Lazy[T]):
+    """
+    A lazy object that can be resolved (i.e. interpolated) to a value when needed.
+
+    """
+
+    def __init__(
+        self,
+        value: Any,
+        validator: Optional[Callable[[Any], Any]] = None,
+        name=None,
+        current_path: KeyPath = ROOTPATH,
+        root_obj: Any = None,
+        init_outermost_interpolations: Optional[List[InterpolationMatch]] = None,
+        permissive: bool = False,
+        extra_symbols: Optional[Dict[str, Any]] = None,
+    ):
+        super().__init__(value, validator, name)
+
+        self.extra_symbols = extra_symbols
+        self.current_path = current_path
+        self.root_obj = root_obj
+        self.init_outermost_interpolations = (
+            init_outermost_interpolations  # to cache the result of the first parsing
+        )
+        self.permissive = permissive
+        if not self.permissive:
+            assert isinstance(
+                value, (str, tuple)
+            ), f"LazyInterpolable expected string, got {type(value)}. Did you mean to contruct with permissive=True?"
+
+    def __repr__(self):
+        return f"LazyInterpolable({self.value})"
+
+    def resolve(self) -> T:
+        if isinstance(self.value, str):
+            self.value = evaluate_expression(
+                self.value,
+                self.current_path,
+                self.root_obj,
+                init_outermost_interpolations=self.init_outermost_interpolations,
+                extra_symbols=self.extra_symbols,
+            )
+
+        return self.validate(self.value)
+
+    def get(self, owner_instance, setval=False):
+        """Get the value of the lazy object, and optionally set it as an attribute of the owner instance."""
+        if hasattr(owner_instance, '_dracon_root_obj'):
+            self.root_obj = owner_instance._dracon_root_obj
+            assert hasattr(
+                owner_instance, '_dracon_current_path'
+            ), f"Instance {owner_instance} has no current path"
+            self.current_path = owner_instance._dracon_current_path + self.name
+
+        newval = self.resolve()
+
+        if setval:
+            setattr(owner_instance, self.name, newval)
+
+        return newval
+
+
+##────────────────────────────────────────────────────────────────────────────}}}
+
+
+def recursive_update_lazy_container(obj, root_obj, current_path):
+    if is_lazy_compatible(obj):
+        obj._dracon_root_obj = root_obj
+        obj._dracon_current_path = current_path
+
+    if isinstance(obj, cabc.Mapping):  # also handles pydantic models
+        for key, value in obj.items():
+            new_path = current_path + KeyPath(str(key))
+            recursive_update_lazy_container(value, root_obj, new_path)
+
+    elif isinstance(obj, cabc.Iterable) and not isinstance(obj, (str, bytes)):
+        for i, item in enumerate(obj):
+            new_path = current_path + KeyPath(str(i))
+            recursive_update_lazy_container(item, root_obj, new_path)
+
+
+@runtime_checkable
+class LazyCapable(Protocol):
+    """
+    A protocol for objects that can hold lazy values and resolve them
+    even if they have relative and absolute keypath references.
+
+    For example, a field like "${.name}" should be resolved to the value of the
+    "name" field of the current object, while "${/sub.name}" should be resolved
+    to the value of root_obj["sub"]["name"].
+
+    For that to work, the object must have the following attributes:
+
+    """
+
+    _dracon_root_obj: Any  # The root object from which to resolve absolute keypaths
+    _dracon_current_path: str  # The current path of the object in the root object
+
+
+def is_lazy_compatible(v: Any) -> bool:
+    return isinstance(v, LazyCapable)
+
+
+def wrap_lazy_validator(v: Any, handler, info) -> Any:
+    return Lazy(v, validator=handler, name=info.field_name)
+
+
+LazyVal = Annotated[
+    T | Lazy[T],
+    WrapValidator(wrap_lazy_validator),
+    Field(validate_default=True),
+]
+
+
+class LazyDraconModel(BaseModel):
+    _dracon_root_obj: Optional[Any] = None
+    _dracon_current_path: KeyPath = ROOTPATH
+
+    def _update_lazy_container_attributes(self, root_obj, current_path, recurse=True):
+        """
+        Update the lazy attributes of the model with the root object and current path.
+        """
+        self._dracon_root_obj = root_obj
+        self._dracon_current_path = current_path
+        if recurse:
+            for key, value in self.__dict__.items():
+                if is_lazy_compatible(value):
+                    new_path = current_path + KeyPath(str(key))
+                    value._update_lazy_container_attributes(root_obj, new_path, recurse=True)
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, validate_default=True)
+
+    @field_validator("*", mode="wrap")
+    @classmethod
+    def ignore_lazy(cls, v, handler, info):
+        if isinstance(v, Lazy):
+            if v.validator is None:
+                v.validator = handler
+            return v
+        return handler(v, info)
+
+    def __getattribute__(self, name):
+        attr = super().__getattribute__(name)
+        if isinstance(attr, Lazy):
+            attr.__set_name__(self, name)
+            return attr.__get__(self)
+        # if it's a list or tuple of Lazy, resolve them
+        if isinstance(attr, (list, tuple)):
+            for i, item in enumerate(attr):
+                if isinstance(item, Lazy):
+                    item.name = f'{name}.{i}'
+                    attr[i] = item.resolve()
+            setattr(self, name, attr)
+        return attr

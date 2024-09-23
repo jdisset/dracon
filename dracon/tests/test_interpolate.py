@@ -16,17 +16,14 @@ from pydantic import (
     Field,
 )
 
-from dracon.interpolation import (
-    outermost_interpolation_exprs,
-    resolve_eval_str,
-    LazyInterpolable,
-)
+from dracon.interpolation import outermost_interpolation_exprs
+from dracon.lazy import LazyInterpolable
 
 from pydantic.dataclasses import dataclass
 from dracon.keypath import KeyPath
 from typing import Any, Dict, Callable, Optional, Tuple, List
 import copy
-from dracon.utils import DictLike, ListLike, find_field_references
+from dracon.interpolation_utils import find_field_references
 from asteval import Interpreter
 ##────────────────────────────────────────────────────────────────────────────}}}
 
@@ -288,21 +285,33 @@ def test_obj_references():
     ]
 
 
-# def test_instruction_for_simple():
-    # yaml_content = """
-    # ilist:
-        # !each(e) ${list(range(5))}:
-            # - ${e}
-    # """
-    # loader = DraconLoader(enable_interpolation=True)
-    # composed = loader.compose_config_from_str(yaml_content)
+def test_instruction_define():
+    yaml_content = """
+    !define v : 4 
+    value: ${v}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+    config.resolve_all_lazy()
 
-    # config = loader.loads(yaml_content)
+    assert config['value'] == 4
 
-    # assert '__dracon__' not in config
-    # assert len(config['multiple_objs']) == 5
 
-    # config.resolve_all_lazy()
+def test_instruction_each_simple():
+    yaml_content = """
+    ilist:
+        !each(e) ${list(range(5))}:
+            - ${e}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    composed = loader.compose_config_from_str(yaml_content)
+
+    config = loader.loads(yaml_content)
+
+    assert '__dracon__' not in config
+    assert len(config['ilist']) == 5
+
+    config.resolve_all_lazy()
 
 
 # class ClassC(BaseModel):

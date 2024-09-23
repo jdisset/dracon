@@ -3,9 +3,8 @@ from collections.abc import MutableMapping, MutableSequence
 from copy import deepcopy
 from dracon.keypath import ROOTPATH, KeyPath
 from dracon.utils import DictLike, ListLike
-from dracon.interpolation import (
+from dracon.lazy import (
     Lazy,
-    is_lazy_compatible,
     recursive_update_lazy_container,
 )
 
