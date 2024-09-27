@@ -8,12 +8,6 @@ from typing import (
     List,
 )
 
-from dracon.composer import (
-    CompositionResult,
-    KeyPath,
-    ROOTPATH,
-    escape_keypath_part,
-)
 
 from dracon.nodes import (
     make_node,
@@ -22,10 +16,8 @@ from dracon.nodes import (
     DraconMappingNode,
 )
 
-from pydantic import BaseModel
 from pydantic_core import core_schema
-from dracon.utils import get_inner_type, node_print
-from dracon.merge import MergeKey
+from dracon.utils import get_inner_type
 from copy import deepcopy
 
 T = TypeVar("T")
@@ -100,12 +92,17 @@ class Resolvable(Generic[T]):
     def __bool__(self):
         return not self.empty()
 
-    def merge_node(self, node, merge_key: str = '<<{+>}'):
+    def merge_node(self, node, merge_key: str = '<<{+>}', loader=None):
+        from dracon.keypath import ROOTPATH
+        from dracon.composer import CompositionResult
+        from dracon.loader import DraconLoader
+
         """
         Merge a node with the current node.
         """
         assert self.ctor is not None
-        loader = self.ctor.drloader
+        if loader is None:
+            loader = DraconLoader()
 
         self.node = self.node or make_node({})
         res = CompositionResult(root=self.node)

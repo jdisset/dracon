@@ -11,11 +11,11 @@ from pydantic import (
     PydanticSchemaGenerationError,
 )
 
+from dracon.utils import ShallowDict
 from dracon import dracontainer
-from dracon.interpolation import outermost_interpolation_exprs
+from dracon.interpolation import outermost_interpolation_exprs, InterpolableNode
 from dracon.lazy import LazyInterpolable
 from dracon.resolvable import Resolvable, get_inner_type
-from dracon.nodes import InterpolableNode
 
 from typing import (
     Optional,
@@ -117,23 +117,24 @@ class Draconstructor(Constructor):
         self,
         preserve_quotes=None,
         loader=None,
-        drloader=None,
         localns=None,
         context=None,
+        reference_nodes=None,
         interpolate_all=False,
     ):
         Constructor.__init__(self, preserve_quotes=preserve_quotes, loader=loader)
         self.preserve_quotes = preserve_quotes
-        self.drloader = drloader  # Store the loader
         self.yaml_base_dict_type = dracontainer.Mapping
         self.yaml_base_sequence_type = dracontainer.Sequence
         self.localns = localns or {}
         self.context = context or {}
         self.interpolate_all = interpolate_all
+        self.referenced_nodes = reference_nodes or {}
         self._depth = 0
 
     def construct_object(self, node, deep=True):
         # force deep construction so that obj is always fully constructed
+        print(f"Constructing node {node}")
         self._depth += 1
         tag = node.tag
         try:
@@ -197,15 +198,12 @@ class Draconstructor(Constructor):
 
             validator = partial(validator_f)
 
-        extra_symbols = deepcopy(self.context)
-        extra_symbols = merged(extra_symbols, node.extra_symbols, MergeKey(raw='{<+}'))
-
-        extra_symbols['__DRACON_RESOLVABLES'] = {
-            i: Resolvable(node=n, ctor=self.copy()) for i, n in node.referenced_nodes.items()
+        extra_symbols = merged(self.context, node.extra_symbols, MergeKey(raw='{<+}'))
+        extra_symbols['__DR_NODES'] = {
+            i: Resolvable(node=n, ctor=self.copy()) for i, n in self.referenced_nodes.items()
         }
 
-        # extra_symbols['construct'] = embed_construct_object(self)
-
+        print(f"Constructing lazy interpolable with {node_value}")
         lzy = LazyInterpolable(
             value=node_value,
             init_outermost_interpolations=init_outermost_interpolations,
@@ -218,7 +216,15 @@ class Draconstructor(Constructor):
         return lzy
 
     def copy(self):
-        return deepcopy(self)
+        # return deepcopy(self)
+        return Draconstructor(
+            preserve_quotes=self.preserve_quotes,
+            loader=self.loader,
+            localns=self.localns,
+            context=self.context,
+            reference_nodes=self.referenced_nodes,
+            interpolate_all=self.interpolate_all,
+        )
 
     def construct_mapping(self, node: Any, deep: bool = False) -> Any:
         if not isinstance(node, MappingNode):
@@ -251,9 +257,12 @@ class Draconstructor(Constructor):
         return mapping
 
     def reset_tag(self, node):
+        og_tag = node.tag
         if isinstance(node, SequenceNode):
             node.tag = self.resolver.DEFAULT_SEQUENCE_TAG
         elif isinstance(node, MappingNode):
             node.tag = self.resolver.DEFAULT_MAPPING_TAG
         else:
             node.tag = self.resolver.DEFAULT_SCALAR_TAG
+
+        print(f"Reset tag from {og_tag} to {node.tag}")

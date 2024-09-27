@@ -7,7 +7,13 @@ import re
 from pathlib import Path
 from typing import Optional, Dict, Any, Annotated, TypeVar
 from pydantic import BeforeValidator, Field, PlainSerializer
-from dracon.composer import IncludeNode, CompositionResult, DraconComposer, delete_unset_nodes
+from dracon.composer import (
+    IncludeNode,
+    CompositionResult,
+    DraconComposer,
+    delete_unset_nodes,
+    walk_node,
+)
 from dracon.draconstructor import Draconstructor
 from dracon.keypath import KeyPath, ROOTPATH
 from dracon.utils import (
@@ -15,17 +21,20 @@ from dracon.utils import (
     DictLike,
     MetadataDictLike,
     ListLike,
+    ShallowDict,
 )
 from dracon.interpolation_utils import resolve_interpolable_variables
+from dracon.interpolation import InterpolableNode
 from dracon.merge import process_merges
-from dracon.instructions import process_instructions
+from dracon.instructions import process_instructions, add_to_context
 from dracon.loaders.file import read_from_file
-from dracon.nodes import MappingNode, SequenceNode, InterpolableNode
 from dracon.loaders.pkg import read_from_pkg
 from dracon.loaders.env import read_from_env
 from dracon.representer import DraconRepresenter
 from dracon import dracontainer
 from copy import deepcopy
+from functools import partial
+
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
@@ -54,6 +63,12 @@ DEFAULT_CONTEXT = {
 }
 
 
+def construct(node_or_val, **kwargs):
+    if isinstance(node_or_val, Node):
+        return load_node(deepcopy(node_or_val), **kwargs)
+    return node_or_val
+
+
 class DraconLoader:
     def __init__(
         self,
@@ -69,17 +84,15 @@ class DraconLoader:
         self.custom_loaders = DEFAULT_LOADERS
         self.custom_loaders.update(custom_loaders or {})
         self.custom_types = custom_types or {}
+        self._context = context
+        self._interpolate_all = interpolate_all
+        self._enable_interpolation = enable_interpolation
 
         self.yaml = YAML()
         self.yaml.Composer = DraconComposer
         self.yaml.Constructor = Draconstructor
         self.yaml.Representer = DraconRepresenter
 
-        self.reset_context()
-        self.update_context(context or {})
-
-        self.yaml.constructor.drloader = self
-        self.yaml.constructor.context.update(self.context)
         self.yaml.constructor.interpolate_all = interpolate_all
         self.yaml.composer.interpolation_enabled = enable_interpolation
 
@@ -90,16 +103,27 @@ class DraconLoader:
         localns.update(self.custom_types)
         self.yaml.constructor.localns = localns
         self.yaml.constructor.yaml_base_dict_type = base_dict_type
+        self.reset_context()
+        self.update_context(context or {})
+        self.referenced_nodes = {}
 
     def reset_context(self):
         self.context: Dict[str, Any] = {
             **DEFAULT_CONTEXT,
-            'load': self.load,
+            'load': load,  # from string or path to obj
+            'construct': partial(  # from node to obj
+                construct,
+                custom_types=self.yaml.constructor.localns,
+                context=self._context,
+                interpolate_all=self._interpolate_all,
+                enable_interpolation=self._enable_interpolation,
+            ),
         }
 
     def update_context(self, kwargs):
         # make sure it's created if it doesn't exist
         self.context.update(kwargs)
+        self.yaml.constructor.context.update(self.context)
 
     def copy(self):
         new_loader = DraconLoader(
@@ -109,7 +133,7 @@ class DraconLoader:
             base_dict_type=self.yaml.constructor.yaml_base_dict_type,
             base_list_type=self.yaml.constructor.yaml_base_list_type,
             enable_interpolation=self.yaml.composer.interpolation_enabled,
-            context=deepcopy(self.context),
+            context=self.context.copy(),
         )
         new_loader.yaml.constructor.yaml_constructors = self.yaml.constructor.yaml_constructors
 
@@ -123,6 +147,19 @@ class DraconLoader:
         custom_loaders: dict = DEFAULT_LOADERS,
         node: Optional[IncludeNode] = None,
     ) -> Any:
+        # TODO [medium priority]:
+        # this resolve_interpolable_variables business is hacky and ugly.
+        # It's just a find + replace of $VAR with the value of VAR
+        # from the loader context (i.e. "./$FILE_STEM.png").
+        # It's weirdly independent from the rest of the interpolation system,
+        # and not even using the node.extra_symbols.
+        # It's conflicting with the node include syntax (!include $var)
+        # which does use the node.extra_symbols...
+        # Need to clean this up, merge both (probably use comptime interpolation)
+        # and make it consistent.
+
+        include_str = resolve_interpolable_variables(include_str, self.context)
+
         if '@' in include_str:
             # split at the first unescaped @
             mainpath, keypath = re.split(r'(?<!\\)@', include_str, maxsplit=1)
@@ -130,7 +167,7 @@ class DraconLoader:
             mainpath, keypath = include_str, ''
 
         if composition_result is not None:
-            if mainpath.startswith('$'): # it's an in-memory node
+            if mainpath.startswith('$'):  # it's an in-memory node
                 if not node:
                     raise ValueError('Node not provided for in-memory include')
                 name = mainpath[1:]
@@ -201,19 +238,24 @@ class DraconLoader:
         return self.load_from_composition_result(comp)
 
     def loads(self, content: str):
-        self.reset_context()
         comp = self.compose_config_from_str(content)
         return self.load_from_composition_result(comp)
 
     def post_process_composed(self, comp: CompositionResult):
-        comp = self.process_references_in_interpolables(comp)
+        walk_node(
+            node=comp.root,
+            callback=partial(add_to_context, self.context),
+        )
+        comp = self.preprocess_references(comp)
         comp = process_instructions(comp)
         comp = self.process_includes(comp)
         comp = process_merges(comp)
         comp = delete_unset_nodes(comp)
+        comp = self.save_references(comp)
+
         return comp
 
-    def process_references_in_interpolables(self, comp_res: CompositionResult):
+    def preprocess_references(self, comp_res: CompositionResult):
         comp_res.find_special_nodes('interpolable', lambda n: isinstance(n, InterpolableNode))
         comp_res.sort_special_nodes('interpolable')
 
@@ -224,6 +266,28 @@ class DraconLoader:
 
         return comp_res
 
+    def save_references(self, comp_res: CompositionResult):
+        # the preprocessed refernces are stored as paths that point to refered nodes
+        # however, after all the merging and including is done, we need to save
+        # the nodes themselves so that they can't be affected by further changes (e.g. construction)
+        comp_res.find_special_nodes('interpolable', lambda n: isinstance(n, InterpolableNode))
+
+        referenced_nodes = {}
+
+        for path in comp_res.pop_all_special('interpolable'):
+            node = path.get_obj(comp_res.root)
+            assert isinstance(node, InterpolableNode), f"Invalid node type: {type(node)}"
+            node.flush_references()
+            for i, n in node.referenced_nodes.items():
+                if i not in referenced_nodes:
+                    referenced_nodes[i] = deepcopy(n)
+
+        self.referenced_nodes = ShallowDict(referenced_nodes)
+        # set the referenced nodes of the constructor:
+        self.yaml.constructor.referenced_nodes = self.referenced_nodes
+
+        return comp_res
+
     def process_includes(self, comp_res: CompositionResult):
         comp_res.find_special_nodes('include', lambda n: isinstance(n, IncludeNode))
         comp_res.sort_special_nodes('include')
@@ -231,12 +295,11 @@ class DraconLoader:
         for inode_path in comp_res.pop_all_special('include'):
             inode = inode_path.get_obj(comp_res.root)
             assert isinstance(inode, IncludeNode), f"Invalid node type: {type(inode)}"
-            include_str = resolve_interpolable_variables(inode.value, self.context)
             new_loader = self.copy()
             include_composed = new_loader.compose_from_include_str(
-                include_str, inode_path, comp_res, node=inode
+                inode.value, inode_path, comp_res, node=inode
             )
-            comp_res = comp_res.replaced_at(inode_path, include_composed)
+            comp_res.replace_node_at(inode_path, include_composed.root)
         return comp_res
 
     def dump(self, data, stream=None):
@@ -265,8 +328,12 @@ def load(config_path: str | Path, raw_dict=False, **kwargs):
     return loader.load(config_path)
 
 
+def load_node(node: Node, **kwargs):
+    loader = DraconLoader(**kwargs)
+    return loader.load_from_node(node)
+
+
 def load_file(config_path: str | Path, raw_dict=True, **kwargs):
-    # just prepend 'file:' to the path
     return load(f'file:{config_path}', raw_dict, **kwargs)
 
 

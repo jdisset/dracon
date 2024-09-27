@@ -6,24 +6,20 @@ from pydantic import BaseModel
 from enum import Enum
 from dracon.utils import dict_like, DictLike, ListLike
 from dracon.composer import (
-    MergeNode,
     CompositionResult,
     walk_node,
     DraconMappingNode,
     DraconSequenceNode,
     IncludeNode,
-    InterpolableNode,
 )
 from ruamel.yaml.nodes import Node
 from dracon.keypath import KeyPath
 from dracon.merge import merged, MergeKey
-from dracon.interpolation import evaluate_expression
+from dracon.interpolation import evaluate_expression, InterpolableNode
 from functools import partial
 ##────────────────────────────────────────────────────────────────────────────}}}
 
-
 ## {{{                      --     instruct utils     --
-
 
 class Instruction:
     @staticmethod
@@ -35,33 +31,9 @@ class Instruction:
 
 
 def add_to_context(context, node: Node):
-    if isinstance(node, InterpolableNode):
+    if isinstance(node, (InterpolableNode, IncludeNode)):
+        # node.extra_symbols.update(deepcopy(context))
         node.extra_symbols = merged(node.extra_symbols, context, MergeKey(raw='{<+}'))
-    elif isinstance(node, IncludeNode):
-        node.extra_symbols = merged(node.extra_symbols, context, MergeKey(raw='{<+}'))
-
-
-def preprocess_comptime_ampreferences(self, match, comp_res, current_path):
-    available_anchors = comp_res.anchor_paths
-    context_str = ''
-    # references can also have a list of variable definitions attached to them
-    # syntax is ${&unique_id:var1=expr1,var2=expr2}
-    if ':' in match.expr:
-        match.expr, vardefs = match.expr.split(':')
-        context_str = f'context=dict({vardefs})'
-
-    match_parts = match.expr.split('.', 1)
-    if match_parts[0] in available_anchors:  # we're matching an anchor
-        keypath = available_anchors[match_parts[0]].copy()
-        keypath = keypath.down(match_parts[1]) if len(match_parts) > 1 else keypath
-    else:  # we're trying to match a keypath
-        keypath = current_path.parent.down(KeyPath(match.expr))
-
-    node = keypath.get_obj(comp_res.root)
-
-    # newexpr = f'__DRACON_RESOLVABLES[{unique_id}].resolve({context_str})'
-
-    return newexpr
 
 
 def process_instructions(comp_res: CompositionResult):
@@ -116,6 +88,7 @@ class Define(Instruction):
         ctx = {}
 
         if isinstance(value_node, InterpolableNode):
+            print(f"Processing !define at {path}. Value is an interpolable node: {value_node.value}")
             value = evaluate_expression(
                 value,
                 current_path=path,
@@ -128,6 +101,7 @@ class Define(Instruction):
         assert var_name.isidentifier(), f"Invalid variable name in define instruction: {var_name}"
 
         ctx = merged(ctx, {var_name: deepcopy(value)}, MergeKey(raw='{<+}'))
+
         walk_node(
             node=parent_node,
             callback=partial(add_to_context, ctx),
@@ -189,6 +163,7 @@ class Each(Instruction):
             root_obj=comp_res.root,
             extra_symbols=key_node.extra_symbols,
         )
+
         ctx = merged(ctx, key_node.extra_symbols, MergeKey(raw='{<+}'))
 
         new_parent = deepcopy(parent_node)
@@ -220,9 +195,7 @@ class Each(Instruction):
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
-
 AVAILABLE_INSTRUCTIONS = [Define, Each]
-
 
 def match_instruct(value: str) -> Optional[Instruction]:
     matches = [inst.match(value) for inst in AVAILABLE_INSTRUCTIONS]

@@ -1,3 +1,4 @@
+## {{{                          --     imports     --
 from asteval import Interpreter
 from typing import (
     Any,
@@ -7,10 +8,19 @@ from typing import (
 )
 from dracon.keypath import KeyPath
 from copy import copy
-from typing import Protocol, runtime_checkable, Optional
-from dracon.merge import merged, MergeKey
-from dracon.utils import DictLike
-from dracon.resolvable import Resolvable
+from typing import (
+    Protocol,
+    runtime_checkable,
+    Optional,
+    Any,
+    Generic,
+    TypeVar,
+    MutableMapping,
+    MutableSequence,
+)
+from ruamel.yaml.nodes import ScalarNode
+from dracon.utils import DictLike, generate_unique_id, ShallowDict
+from dracon.nodes import DraconMappingNode
 
 from dracon.interpolation_utils import (
     outermost_interpolation_exprs,
@@ -19,12 +29,68 @@ from dracon.interpolation_utils import (
     resolve_interpolable_variables,
 )
 
+from copy import deepcopy
+from dracon.resolvable import Resolvable
+
+##────────────────────────────────────────────────────────────────────────────}}}
+
 
 class InterpolationError(Exception):
     pass
 
 
 BASE_DRACON_SYMBOLS: Dict[str, Any] = {}
+
+
+## {{{                        --     NodeLookup     --
+
+
+class NodeLookup:
+    """a DictLike that allows for keypaths to be used as keys"""
+
+    def __init__(self, root_node=None):
+        self.root_node = root_node
+        self.available_paths: set[str] = set()
+
+    def __getitem__(self, keypathstr: str):
+        print(
+            f'NodeLookup {id(self)} getitem: {keypathstr}. available_paths: {self.available_paths}. root_obj: {id(self.root_node)}'
+        )
+        if keypathstr not in self.available_paths:
+            raise KeyError(
+                f"KeyPath {keypathstr} not found in NodeLookup. Available paths: {self.available_paths}"
+            )
+        keypath = KeyPath(keypathstr)
+        obj = keypath.get_obj(self.root_node)
+        return deepcopy(obj)
+
+    def items(self):
+        for keypathstr in self.available_paths:
+            yield keypathstr, self[keypathstr]
+
+    def __repr__(self):
+        return f"NodeLookup(root_obj={self.root_node}, available_paths={self.available_paths})"
+
+    def merged_with(
+        self,
+        other,
+        *_,
+        **__,
+    ):
+        assert self.root_node == other.root_node, 'Root object mismatch'
+        new = NodeLookup(self.root_node)
+        new.available_paths = self.available_paths.union(other.available_paths)
+        return new
+
+    def __deepcopy__(self, memo):
+        # don't deepcopy the root node!
+        new = NodeLookup(self.root_node)
+        new.available_paths = self.available_paths.copy()
+        return new
+
+
+##────────────────────────────────────────────────────────────────────────────}}}
+
 
 ## {{{                           --     eval utils    --
 
@@ -74,9 +140,13 @@ def do_safe_eval(expr: str, symbols: Optional[dict] = None):
 
 
 def dracon_resolve(obj, **ctx):
-    print(f"dracon_resolve with {ctx=}")
+    from dracon.resolvable import Resolvable
+
+    print(f'dracon_resolve: {obj} of type {type(obj)}')
     if isinstance(obj, Resolvable):
-        return obj.resolve(ctx)
+        newobj = deepcopy(obj).resolve(ctx, interpolate_all=True)
+        return newobj
+    print('Not a resolvable')
     return obj
 
 
@@ -108,6 +178,10 @@ def evaluate_expression(
     init_outermost_interpolations: Optional[List[InterpolationMatch]] = None,
     extra_symbols: Optional[Dict[str, Any]] = None,
 ) -> Any:
+    from dracon.merge import merged, MergeKey
+
+    print(f'evaluate_expression: {expr}. current_path: {current_path}. root_obj: {root_obj}')
+
     # Initialize interpolations
     if init_outermost_interpolations is None:
         interpolations = outermost_interpolation_exprs(expr)
@@ -174,3 +248,121 @@ def evaluate_expression(
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
+
+
+## {{{                     --     InterpolableNode     --
+class InterpolableNode(ScalarNode):
+    def __init__(
+        self,
+        value,
+        start_mark=None,
+        end_mark=None,
+        tag=None,
+        anchor=None,
+        comment=None,
+        init_outermost_interpolations=None,
+        extra_symbols=None,
+    ):
+        self.init_outermost_interpolations = init_outermost_interpolations
+        ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
+        self.referenced_nodes = NodeLookup()
+        self.saved_references = {}
+        self.extra_symbols = extra_symbols or {}
+
+    def evaluate(self, path='/', root_obj=None, extra_symbols=None):
+        extra_symbols = extra_symbols or {}
+        extra_symbols = {**self.extra_symbols, **extra_symbols}
+        newval = evaluate_expression(
+            self.value,
+            current_path=path,
+            root_obj=root_obj,
+            extra_symbols=extra_symbols,  # type: ignore
+        )
+        return newval
+
+    def preprocess_ampersand_references(self, match, comp_res, current_path):
+        available_anchors = comp_res.anchor_paths
+        context_str = ''
+
+        # references can also have a list of variable definitions attached to them
+        # syntax is ${&unique_id:var1=expr1,var2=expr2}
+        # these come from the surrounding expression or context and should be passed
+        # to the resolve method. It's sort of a asteval-specific limitation becasue there's no
+        # locals() or globals() accessible from "inside" the expression...
+
+        print(f'preprocess_ampersand_references: {match.expr}')
+
+        if ':' in match.expr:
+            match.expr, vardefs = match.expr.split(':')
+            if vardefs:
+                context_str = ',' + vardefs
+
+        match_parts = match.expr.split('.', 1)
+        if match_parts[0] in available_anchors:  # we're matching an anchor
+            keypath = available_anchors[match_parts[0]].copy()
+            keypath = keypath.down(match_parts[1]) if len(match_parts) > 1 else keypath
+        else:  # we're trying to match a keypath
+            keypath = current_path.parent.down(KeyPath(match.expr))
+
+        # node = keypath.get_obj(comp_res.root)
+
+        if self.referenced_nodes.root_node is not None:
+            assert self.referenced_nodes.root_node == comp_res.root, 'Root object mismatch'
+        else:
+            self.referenced_nodes.root_node = comp_res.root
+
+        keypathstr = str(keypath.simplified())
+        self.referenced_nodes.available_paths.add(keypathstr)
+        newexpr = f'__DRACON_RESOLVE(__DR_NODES["{keypathstr}"] {context_str})'
+        print(
+            f'newexpr: {newexpr}. keypath: {keypathstr}. available_paths: {self.referenced_nodes.available_paths}'
+        )
+
+        if '__DR_NODES' not in self.extra_symbols:
+            self.extra_symbols['__DR_NODES'] = self.referenced_nodes
+
+        return newexpr
+
+    def preprocess_references(self, comp_res, current_path):
+        if self.init_outermost_interpolations is None:
+            self.init_outermost_interpolations = outermost_interpolation_exprs(self.value)
+
+        assert self.init_outermost_interpolations is not None
+        interps = self.init_outermost_interpolations
+        references = find_field_references(self.value)
+
+        offset = 0
+        for match in references:
+            newexpr = match.expr
+            if match.symbol == '&' and any([i.contains(match.start) for i in interps]):
+                newexpr = self.preprocess_ampersand_references(match, comp_res, current_path)
+
+                self.value = (
+                    self.value[: match.start + offset] + newexpr + self.value[match.end + offset :]
+                )
+                offset += len(newexpr) - match.end + match.start
+            elif match.symbol == '@' and any([i.contains(match.start) for i in interps]):
+                ...  # handled in postproc
+            else:
+                raise ValueError(f'Unknown interpolation symbol: {match.symbol}')
+
+        if references:
+            self.init_outermost_interpolations = outermost_interpolation_exprs(self.value)
+
+        if current_path.is_mapping_key():
+            parent_node = current_path.parent.get_obj(comp_res.root)
+            assert isinstance(parent_node, DraconMappingNode)
+            parent_node._recompute_map()
+
+    def flush_references(self):
+        if '__DR_NODES' in self.extra_symbols:
+            del self.extra_symbols['__DR_NODES']
+
+    def save_references(self, comp_res, current_path):
+        self.flush_references()
+        # self.saved_references = ShallowDict(
+        # {i: deepcopy(n) for i, n in self.referenced_nodes.items()}
+        # )
+
+
+##───────────────────────────────────────────────────────────────────────────}}}

@@ -10,12 +10,15 @@ from typing import (
     Dict,
     Any,
     Protocol,
+    runtime_checkable,
+    Iterator,
 )
 from typing import runtime_checkable, get_args, get_origin
 import typing
 import importlib
 import inspect
 import uuid
+from collections.abc import MutableMapping, MutableSequence
 
 E = TypeVar('E')
 T = TypeVar('T')
@@ -93,6 +96,7 @@ def list_like(obj) -> bool:
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
+
 ## {{{                      --     type collection     --
 def get_all_types(items):
     return {
@@ -162,34 +166,123 @@ def get_hash(data: str) -> str:
     return base64.b32encode(hash_value).decode('utf-8').rstrip('=')
 
 
-def node_print(node: Node, indent_lvl=0, indent=2) -> str:
-    out = ''
-    if isinstance(node, MappingNode):
-        if node.merge:
-            out += f'{type(node)}' + ' { MERGE=' + str(node.merge) + '\n'
-        else:
-            out += f'{type(node)}' + ' {\n'
-        for key, value in node.value:
-            if hasattr(key, 'value'):
-                out += with_indent(
-                    f'{key.tag} - {key.value}: {node_print(value, indent_lvl+indent)}', indent_lvl
-                )
-            else:
-                out += with_indent(
-                    f'noval(<{type(key)}>{key}): {node_print(value, indent_lvl+indent)}', indent_lvl
-                )
-        out += '},\n'
-    elif isinstance(node, SequenceNode):
-        indent_lvl += indent
-        out += f'{type(node)}' + ' [\n'
-        for value in node.value:
-            out += with_indent(node_print(value, indent_lvl + indent), indent_lvl)
-        out += '],\n'
-    elif isinstance(node, ScalarNode):
-        out += f'{node.tag} - {node.value},\n'
+def node_repr(node, prefix='', is_last=True, is_root=True, enable_colors=True):
+    if enable_colors:
+        BLUE = '\033[94m'
+        GREEN = '\033[92m'
+        YELLOW = '\033[93m'
+        MAGENTA = '\033[95m'
+        GREY = '\033[90m'
+        DARK_BLUE = '\033[34m'
+        DARK_GREEN = '\033[32m'
+        WHITE = '\033[97m'
+        RESET = '\033[0m'
     else:
-        out += f'<{type(node)}> {node.value},\n'
-    return out
+        BLUE = ''
+        GREEN = ''
+        YELLOW = ''
+        MAGENTA = ''
+        GREY = ''
+        DARK_BLUE = ''
+        DARK_GREEN = ''
+        WHITE = ''
+        RESET = ''
+
+    TAG_COLOR = DARK_BLUE
+    YAML_TAG_COLOR = GREY
+    VAL_COLOR = WHITE
+    TYPE_COLOR = YELLOW
+    KEY_COLOR = MAGENTA
+    TREE_COLOR = GREY
+
+    VERTICAL = TREE_COLOR + '│   ' + RESET
+    ELBOW = TREE_COLOR + '├─ ' + RESET
+    ELBOW_END = TREE_COLOR + '└─ ' + RESET
+    EMPTY = TREE_COLOR + '    ' + RESET
+
+    SHORT_TAGS = {
+        'tag:yaml.org,2002:int': 'int',
+        'tag:yaml.org,2002:str': 'str',
+        'tag:yaml.org,2002:float': 'float',
+        'tag:yaml.org,2002:bool': 'bool',
+        'tag:yaml.org,2002:null': 'null',
+        'tag:yaml.org,2002:map': 'map',
+        'tag:yaml.org,2002:seq': 'seq',
+    }
+    for k, v in SHORT_TAGS.items():
+        SHORT_TAGS[k] = YAML_TAG_COLOR + v + RESET
+
+    NODE_TYPES = {
+        'ScalarNode': '',
+        'MappingNode': '',
+        'SequenceNode': '',
+        'InterpolableNode': '[INTRP]',
+        'MergeNode': '[MERGE]',
+    }
+
+    def get_node_repr(node):
+        tag = SHORT_TAGS.get(node.tag, node.tag)
+        tstring = f'{TYPE_COLOR}{NODE_TYPES.get(type(node).__name__, "")}{RESET}'
+
+        if isinstance(node, (MappingNode, SequenceNode)):
+            return f'{TAG_COLOR}{tag}{RESET} {tstring}'
+
+        return f'{TAG_COLOR}{tag}{RESET} {VAL_COLOR}{node.value}{RESET} {tstring}'
+
+    output = ''
+
+    if is_root:
+        output += f'\n{TREE_COLOR}/{RESET}\n'
+    else:
+        connector = ELBOW_END if is_last else ELBOW
+        line_prefix = prefix + connector
+        output += line_prefix + get_node_repr(node) + '\n'
+
+    if isinstance(node, MappingNode):
+        child_prefix = prefix + ('' if is_root else (EMPTY if is_last else VERTICAL))
+        items = node.value
+        n = len(items)
+
+        for i, (key, value) in enumerate(items):
+            is_last_item = i == n - 1
+
+            # Print the key
+            key_connector = ELBOW_END if is_last_item else ELBOW
+            key_line_prefix = child_prefix + key_connector
+
+            if hasattr(key, 'value'):
+                key_repr = f'{TAG_COLOR}{SHORT_TAGS.get(key.tag, key.tag)}{RESET} {KEY_COLOR}{key.value} 󰌆{RESET}'
+            else:
+                key_repr = f'noval(<{type(key)}>{key}) [KEY]'
+            output += key_line_prefix + key_repr + '\n'
+
+            # Recursively print the value
+            child_output = node_repr(
+                value,
+                prefix=child_prefix + (EMPTY if is_last_item else VERTICAL),
+                is_last=True,
+                is_root=False,
+                enable_colors=enable_colors,
+            )
+            output += child_output
+
+    elif isinstance(node, SequenceNode):
+        child_prefix = prefix + (EMPTY if is_last else VERTICAL)
+        items = node.value
+        n = len(items)
+
+        for i, value in enumerate(items):
+            is_last_item = i == n - 1
+            child_output = node_repr(
+                value,
+                prefix=child_prefix,
+                is_last=is_last_item,
+                is_root=False,
+                enable_colors=enable_colors,
+            )
+            output += child_output
+
+    return output
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
@@ -212,3 +305,40 @@ def get_inner_type(resolvable_type: Type):
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
+
+
+K = TypeVar('K')
+V = TypeVar('V')
+
+
+# a dict that doesnt't allow deep copying (it always returns a shallow copy)
+class ShallowDict(MutableMapping, Generic[K, V]):
+    def __init__(self, *args, **kwargs):
+        self._dict = dict(*args, **kwargs)
+
+    def __getitem__(self, key: K) -> V:
+        return self._dict[key]
+
+    def __setitem__(self, key: K, value: V) -> None:
+        self._dict[key] = value
+
+    def __delitem__(self, key: K) -> None:
+        del self._dict[key]
+
+    def __iter__(self) -> Iterator[K]:
+        return iter(self._dict)
+
+    def __len__(self) -> int:
+        return len(self._dict)
+
+    def __copy__(self):
+        # Always return a shallow copy
+        return ShallowDict(self._dict)
+
+    def __deepcopy__(self, memo):
+        # Force deep copy to behave as a shallow copy
+        return self.__copy__()
+
+    def copy(self):
+        # Provide a custom copy method for explicit shallow copying
+        return self.__copy__()

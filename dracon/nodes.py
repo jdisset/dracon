@@ -1,10 +1,10 @@
+## {{{                          --     imports     --
 from ruamel.yaml.nodes import Node, MappingNode, SequenceNode, ScalarNode
 from ruamel.yaml.tag import Tag
-from dracon.interpolation_utils import find_field_references, outermost_interpolation_exprs
-from dracon.utils import dict_like, list_like, generate_unique_id
+from dracon.utils import dict_like, list_like, generate_unique_id, node_repr
 from typing import Any, Hashable
-from dracon.keypath import KeyPath, ROOTPATH, escape_keypath_part
-from copy import deepcopy
+from dracon.keypath import KeyPath, escape_keypath_part
+##────────────────────────────────────────────────────────────────────────────}}}
 
 ## {{{                           --     utils     --
 
@@ -43,6 +43,7 @@ def make_node(value: Any, tag=None, **kwargs):
 class DraconScalarNode(ScalarNode):
     def __init__(self, value, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
         ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
+
 
 
 class IncludeNode(ScalarNode):
@@ -207,6 +208,13 @@ class DraconMappingNode(MappingNode):
         self.map = {}
 
 
+    def __str__(self):
+        return node_repr(self)
+
+    def __repr__(self):
+        return node_repr(self)
+
+
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
@@ -249,95 +257,6 @@ class DraconSequenceNode(SequenceNode):
             comment=mapping.comment,
             anchor=mapping.anchor,
         )
-
-
-##────────────────────────────────────────────────────────────────────────────}}}
-
-
-## {{{                     --     InterpolableNode     --
-class InterpolableNode(ScalarNode):
-    def __init__(
-        self,
-        value,
-        start_mark=None,
-        end_mark=None,
-        tag=None,
-        anchor=None,
-        comment=None,
-        init_outermost_interpolations=None,
-        extra_symbols=None,
-    ):
-        self.init_outermost_interpolations = init_outermost_interpolations
-        ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
-        self.referenced_nodes = {}  # unique_id -> node (for later resolving ampersand references)
-        self.extra_symbols = extra_symbols or {}
-
-    def preprocess_ampersand_references(self, match, comp_res, current_path):
-        available_anchors = comp_res.anchor_paths
-        context_str = ''
-
-        # references can also have a list of variable definitions attached to them
-        # syntax is ${&unique_id:var1=expr1,var2=expr2}
-        # these come from the surrounding expression or context and should be passed
-        # to the resolve method. It's sort of a asteval-specific limitation becasue there's no
-        # locals() or globals() accessible from "inside" the expression...
-
-        if ':' in match.expr:
-            match.expr, vardefs = match.expr.split(':')
-            if vardefs:
-                context_str = ',' + vardefs
-
-        match_parts = match.expr.split('.', 1)
-        if match_parts[0] in available_anchors:  # we're matching an anchor
-            keypath = available_anchors[match_parts[0]].copy()
-            keypath = keypath.down(match_parts[1]) if len(match_parts) > 1 else keypath
-        else:  # we're trying to match a keypath
-            keypath = current_path.parent.down(KeyPath(match.expr))
-
-        unique_id = generate_unique_id()
-
-        node = keypath.get_obj(comp_res.root)
-        self.referenced_nodes[unique_id] = node
-
-        newexpr = f'__DRACON_RESOLVE(__DRACON_RESOLVABLES[{unique_id}] {context_str})'
-
-        if '__DRACON_RESOLVABLES' not in self.extra_symbols:
-            self.extra_symbols['__DRACON_RESOLVABLES'] = {}
-        self.extra_symbols['__DRACON_RESOLVABLES'][unique_id] = node
-        print(f'Added {unique_id} to {self.extra_symbols["__DRACON_RESOLVABLES"]=}')
-
-        return newexpr
-
-    def preprocess_references(self, comp_res, current_path):
-        if self.init_outermost_interpolations is None:
-            self.init_outermost_interpolations = outermost_interpolation_exprs(self.value)
-
-        assert self.init_outermost_interpolations is not None
-        interps = self.init_outermost_interpolations
-        references = find_field_references(self.value)
-
-        offset = 0
-        for match in references:
-            newexpr = match.expr
-            if match.symbol == '&' and any([i.contains(match.start) for i in interps]):
-                newexpr = self.preprocess_ampersand_references(match, comp_res, current_path)
-
-                self.value = (
-                    self.value[: match.start + offset] + newexpr + self.value[match.end + offset :]
-                )
-                offset += len(newexpr) - match.end + match.start
-            elif match.symbol == '@' and any([i.contains(match.start) for i in interps]):
-                ...  # handled in postproc
-            else:
-                raise ValueError(f'Unknown interpolation symbol: {match.symbol}')
-
-        if references:
-            self.init_outermost_interpolations = outermost_interpolation_exprs(self.value)
-
-        if current_path.is_mapping_key():
-            parent_node = current_path.parent.get_obj(comp_res.root)
-            assert isinstance(parent_node, DraconMappingNode)
-            parent_node._recompute_map()
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
