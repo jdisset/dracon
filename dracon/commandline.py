@@ -1,9 +1,9 @@
 import argparse
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, ConfigDict
 from typing import List, Dict, Any
 from dracon import DraconLoader, with_indent
 from dracon.composer import DRACON_UNSET_VALUE
-from dracon.utils import node_print
+from dracon.utils import node_repr
 from typing import Optional, Annotated, Any, TypeVar, Generic, Callable, ForwardRef
 from dracon.resolvable import Resolvable, get_inner_type
 from dracon.keypath import KeyPath
@@ -108,9 +108,7 @@ class Program(BaseModel, Generic[T]):
     version: Optional[str] = None
     description: Optional[str] = None
 
-    class Config:
-        extra = "allow"
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
 
     def model_post_init(self, *args, **kwargs):
         super().model_post_init(*args, **kwargs)
@@ -259,7 +257,7 @@ class Program(BaseModel, Generic[T]):
             loader.reset_context()
             loader.update_context(defined_vars)
             comp = loader.compose_config_from_str(dmp)
-            logger.debug(f"Composition result: {node_print(comp.root)}")
+            logger.debug(f"Composition result: {node_repr(comp.root)}")
 
             real_name_map = {arg.real_name: arg for arg in self._args}
             # then we wrap all resolvable args in a !Resolvable[...] tag

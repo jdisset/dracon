@@ -2,7 +2,6 @@
 from ruamel.yaml.composer import Composer
 from ruamel.yaml.nodes import Node, MappingNode, SequenceNode, ScalarNode
 
-
 from dracon.nodes import (
     DraconMappingNode,
     DraconSequenceNode,
@@ -16,17 +15,15 @@ from ruamel.yaml.events import (
     AliasEvent,
     ScalarEvent,
     SequenceStartEvent,
-    SequenceEndEvent,
     MappingStartEvent,
-    MappingEndEvent,
 )
-from dracon.nodes import InterpolableNode
 
-from pydantic import BaseModel
-from .keypath import KeyPath, ROOTPATH, escape_keypath_part, MAPPING_KEY
+from dracon.keypath import KeyPath, ROOTPATH, MAPPING_KEY
+from pydantic import BaseModel, ConfigDict
 from typing import Any, Hashable, Callable
 from typing import Optional, List, Literal, Final
-from copy import deepcopy
+
+from dracon.interpolation import InterpolableNode
 from dracon.interpolation_utils import outermost_interpolation_exprs
 ##────────────────────────────────────────────────────────────────────────────}}}
 
@@ -52,39 +49,14 @@ class CompositionResult(BaseModel):
             self.special_nodes.setdefault(category, [])
         self.find_anchors()
 
-    def rerooted(self, new_root: KeyPath):
-        new_root = new_root.simplified()
-        new_root_node = new_root.get_obj(self.root)
-        assert new_root_node is not None, f'Invalid new root: {new_root}'
-
-        new_special_nodes = {}
-        for category, paths in self.special_nodes.items():
-            new_paths = [
-                (ROOTPATH + path[len(new_root) :]).simplified()
-                for path in paths
-                if path.startswith(new_root)
-            ]
-            if new_paths:
-                new_special_nodes[category] = new_paths
-
-        new_anchor_paths = {
-            anchor: (ROOTPATH + path[len(new_root) :]).simplified()
-            for anchor, path in self.anchor_paths.items()
-            if path.startswith(new_root)
-        }
-
-        return CompositionResult(
-            root=new_root_node,
-            special_nodes=new_special_nodes,
-            anchor_paths=new_anchor_paths,
-        )
+    def rerooted(self, new_root_path: KeyPath):
+        return CompositionResult(root=new_root_path.get_obj(self.root))
 
     def replace_node_at(self, at_path: KeyPath, new_node: Node):
         if at_path == ROOTPATH:
             self.root = new_node
         else:
-            parent_path = at_path.copy().up()
-            parent_node = parent_path.get_obj(self.root)
+            parent_node = at_path.parent.get_obj(self.root)
 
             if isinstance(parent_node, DraconMappingNode):
                 key = at_path[-1]
@@ -94,24 +66,6 @@ class CompositionResult(BaseModel):
                 parent_node[idx] = new_node
             else:
                 raise ValueError(f'Invalid parent node type: {type(parent_node)}')
-
-    def replaced_at(self, at_path: KeyPath, new_root: 'CompositionResult'):
-        if at_path == ROOTPATH:
-            return new_root.model_copy()
-
-        self.replace_node_at(at_path, new_root.root)
-
-        for category, paths in new_root.special_nodes.items():
-            existing_paths = self.special_nodes.setdefault(category, [])
-            existing_paths.extend([(at_path + path.rootless()).simplified() for path in paths])
-            # Remove duplicates
-            self.special_nodes[category] = list(set(existing_paths))
-
-        for anchor, anchor_path in new_root.anchor_paths.items():
-            if anchor not in self.anchor_paths:
-                self.anchor_paths[anchor] = (at_path + anchor_path.rootless()).simplified()
-
-        return self
 
     def pop_all_special(self, category: SpecialNodeCategory):
         while self.special_nodes.get(category):
@@ -145,12 +99,10 @@ class CompositionResult(BaseModel):
 
         self.walk(_find_anchors)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
-
 
 ## {{{                      --     DraconComposer     --
 
@@ -305,18 +257,6 @@ class DraconComposer(Composer):
         )
         return node
 
-    def compose_instruction_node(self, event) -> Node:
-        assert event.ctag in AVAILABLE_INSTRUCTIONS, f'Invalid instruction: {event.ctag}'
-        normal_node = self.compose_scalar_node()
-        return InstructionNode(
-            value=normal_node.value,
-            instruction=str(event.ctag).lstrip('!'),
-            tag=normal_node.ctag,
-            start_mark=normal_node.start_mark,
-            end_mark=normal_node.end_mark,
-            comment=normal_node.comment,
-            anchor=normal_node.anchor,
-        )
 
     def compose_merge_node(self) -> Any:
         event = self.parser.get_event()

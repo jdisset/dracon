@@ -4,7 +4,7 @@ import re
 from pydantic import BaseModel
 from enum import Enum
 from dracon.utils import dict_like, DictLike, ListLike
-from dracon.composer import MergeNode, CompositionResult, DraconMappingNode, DraconSequenceNode
+from dracon.nodes import MergeNode, DraconMappingNode
 from ruamel.yaml.nodes import Node
 from dracon.keypath import KeyPath
 
@@ -16,7 +16,7 @@ def make_default_empty_mapping_node():
     )
 
 
-def process_merges(comp_res: CompositionResult):
+def process_merges(comp_res):
     comp_res.find_special_nodes('merge', lambda n: isinstance(n, MergeNode))
     comp_res.sort_special_nodes('merge')
 
@@ -189,7 +189,9 @@ class MergeKey(BaseModel):
 
 def merged(existing: Any, new: Any, k: MergeKey) -> DictLike:
     def merge_value(v1: Any, v2: Any, depth: int = 0) -> Any:
-        if isinstance(v1, DictLike) and isinstance(v2, DictLike):
+        if type(v1) is type(v2) and hasattr(v1, 'merged_with') and hasattr(v2, 'merged_with'):
+            return v1.merged_with(v2, depth + 1)
+        elif isinstance(v1, DictLike) and isinstance(v2, DictLike):
             return merge_dicts(v1, v2, depth + 1)
         elif isinstance(v1, ListLike) and isinstance(v2, ListLike):
             return merge_lists(v1, v2, depth + 1)

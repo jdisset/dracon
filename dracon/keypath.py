@@ -2,7 +2,7 @@ from enum import Enum
 from copy import deepcopy
 from typing import List, Union, Hashable, Any
 from ruamel.yaml.nodes import Node
-from dracon.utils import node_print, list_like, dict_like
+from dracon.utils import node_repr, list_like, dict_like
 
 
 class KeyPathToken(Enum):
@@ -266,7 +266,7 @@ class KeyPath:
                     return obj[attr]
                 if isinstance(obj, Node):
                     raise AttributeError(
-                        f'Could not find attribute {attr} in node \n{node_print(obj)}'
+                        f'Could not find attribute {attr} in node \n{node_repr(obj)}'
                     )
                 else:
                     raise AttributeError(f'Could not find attribute {attr} in {obj}')
