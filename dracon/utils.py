@@ -1,3 +1,4 @@
+## {{{                          --     imports     --
 import xxhash
 from ruamel.yaml.nodes import MappingNode, SequenceNode, ScalarNode, Node
 import base64
@@ -19,6 +20,7 @@ import importlib
 import inspect
 import uuid
 from collections.abc import MutableMapping, MutableSequence
+##────────────────────────────────────────────────────────────────────────────}}}
 
 E = TypeVar('E')
 T = TypeVar('T')
@@ -31,6 +33,39 @@ def generate_unique_id() -> int:
 ## {{{                      --     dict/list like     --
 K = TypeVar('K')
 V = TypeVar('V')
+
+
+# a dict that doesnt't allow deep copying (it always returns a shallow copy)
+class ShallowDict(MutableMapping, Generic[K, V]):
+    def __init__(self, *args, **kwargs):
+        self._dict = dict(*args, **kwargs)
+
+    def __getitem__(self, key: K) -> V:
+        return self._dict[key]
+
+    def __setitem__(self, key: K, value: V) -> None:
+        self._dict[key] = value
+
+    def __delitem__(self, key: K) -> None:
+        del self._dict[key]
+
+    def __iter__(self) -> Iterator[K]:
+        return iter(self._dict)
+
+    def __len__(self) -> int:
+        return len(self._dict)
+
+    def __copy__(self):
+        # Always return a shallow copy
+        return ShallowDict(self._dict)
+
+    def __deepcopy__(self, memo):
+        # Force deep copy to behave as a shallow copy
+        return self.__copy__()
+
+    def copy(self):
+        # Provide a custom copy method for explicit shallow copying
+        return self.__copy__()
 
 
 @runtime_checkable
@@ -188,17 +223,17 @@ def node_repr(node, prefix='', is_last=True, is_root=True, enable_colors=True):
         WHITE = ''
         RESET = ''
 
-    TAG_COLOR = DARK_BLUE
-    YAML_TAG_COLOR = GREY
-    VAL_COLOR = WHITE
-    TYPE_COLOR = YELLOW
-    KEY_COLOR = MAGENTA
-    TREE_COLOR = GREY
+    TAG_COLOR: str = DARK_BLUE
+    YAML_TAG_COLOR: str = GREY
+    VAL_COLOR: str = WHITE
+    TYPE_COLOR: str = YELLOW
+    KEY_COLOR: str = MAGENTA
+    TREE_COLOR: str = GREY
 
-    VERTICAL = TREE_COLOR + '│   ' + RESET
-    ELBOW = TREE_COLOR + '├─ ' + RESET
-    ELBOW_END = TREE_COLOR + '└─ ' + RESET
-    EMPTY = TREE_COLOR + '    ' + RESET
+    VERTICAL: str = TREE_COLOR + '│ ' + RESET
+    ELBOW: str = TREE_COLOR + '├─' + RESET
+    ELBOW_END: str = TREE_COLOR + '└─' + RESET
+    EMPTY: str = TREE_COLOR + '  ' + RESET
 
     SHORT_TAGS = {
         'tag:yaml.org,2002:int': 'int',
@@ -232,14 +267,16 @@ def node_repr(node, prefix='', is_last=True, is_root=True, enable_colors=True):
     output = ''
 
     if is_root:
-        output += f'\n{TREE_COLOR}/{RESET}\n'
+        output += TREE_COLOR + '●─' + get_node_repr(node) + ' '
     else:
-        connector = ELBOW_END if is_last else ELBOW
+        connector: str = ELBOW_END if is_last else ELBOW
         line_prefix = prefix + connector
         output += line_prefix + get_node_repr(node) + '\n'
 
     if isinstance(node, MappingNode):
-        child_prefix = prefix + ('' if is_root else (EMPTY if is_last else VERTICAL))
+        if is_root:
+            output = '\n' + output + '\n'
+        child_prefix = prefix + (EMPTY if is_last else VERTICAL)
         items = node.value
         n = len(items)
 
@@ -247,11 +284,11 @@ def node_repr(node, prefix='', is_last=True, is_root=True, enable_colors=True):
             is_last_item = i == n - 1
 
             # Print the key
-            key_connector = ELBOW_END if is_last_item else ELBOW
+            key_connector: str = ELBOW_END if is_last_item else ELBOW
             key_line_prefix = child_prefix + key_connector
 
             if hasattr(key, 'value'):
-                key_repr = f'{TAG_COLOR}{SHORT_TAGS.get(key.tag, key.tag)}{RESET} {KEY_COLOR}{key.value} 󰌆{RESET}'
+                key_repr = f'{TAG_COLOR}{SHORT_TAGS.get(key.tag, key.tag)}{RESET} {TREE_COLOR}󰌆{KEY_COLOR} {key.value} {RESET}'
             else:
                 key_repr = f'noval(<{type(key)}>{key}) [KEY]'
             output += key_line_prefix + key_repr + '\n'
@@ -305,40 +342,3 @@ def get_inner_type(resolvable_type: Type):
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
-
-
-K = TypeVar('K')
-V = TypeVar('V')
-
-
-# a dict that doesnt't allow deep copying (it always returns a shallow copy)
-class ShallowDict(MutableMapping, Generic[K, V]):
-    def __init__(self, *args, **kwargs):
-        self._dict = dict(*args, **kwargs)
-
-    def __getitem__(self, key: K) -> V:
-        return self._dict[key]
-
-    def __setitem__(self, key: K, value: V) -> None:
-        self._dict[key] = value
-
-    def __delitem__(self, key: K) -> None:
-        del self._dict[key]
-
-    def __iter__(self) -> Iterator[K]:
-        return iter(self._dict)
-
-    def __len__(self) -> int:
-        return len(self._dict)
-
-    def __copy__(self):
-        # Always return a shallow copy
-        return ShallowDict(self._dict)
-
-    def __deepcopy__(self, memo):
-        # Force deep copy to behave as a shallow copy
-        return self.__copy__()
-
-    def copy(self):
-        # Provide a custom copy method for explicit shallow copying
-        return self.__copy__()

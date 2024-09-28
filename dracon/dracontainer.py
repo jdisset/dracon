@@ -47,12 +47,12 @@ class Dracontainer:
         new_obj = self.__class__()
         new_obj._auto_interp = self._auto_interp
         new_obj._inplace_interp = self._inplace_interp
-        new_obj._metadata = deepcopy(self._metadata)
-        new_obj._per_item_metadata = deepcopy(self._per_item_metadata)
+        new_obj._metadata = deepcopy(self._metadata, memo)
+        new_obj._per_item_metadata = deepcopy(self._per_item_metadata, memo)
         new_obj._dracon_root_obj = self._dracon_root_obj
         new_obj._dracon_current_path = self._dracon_current_path
         new_obj._dracon_lazy_resolve = self._dracon_lazy_resolve
-        new_obj._data = deepcopy(self._data)
+        new_obj._data = deepcopy(self._data, memo)
 
         if self._dracon_root_obj is self:
             new_obj._dracon_root_obj = new_obj

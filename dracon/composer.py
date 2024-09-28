@@ -3,6 +3,7 @@ from ruamel.yaml.composer import Composer
 from ruamel.yaml.nodes import Node, MappingNode, SequenceNode, ScalarNode
 
 from dracon.nodes import (
+    DraconScalarNode,
     DraconMappingNode,
     DraconSequenceNode,
     IncludeNode,
@@ -184,12 +185,19 @@ class DraconComposer(Composer):
                 comment=node.comment,
                 anchor=node.anchor,
             )
+        elif isinstance(node, (IncludeNode, MergeNode, InterpolableNode)):
+            return node
         elif isinstance(node, ScalarNode):
             if node.value == DRACON_UNSET_VALUE:
                 return UnsetNode()
-            return node
-        elif isinstance(node, (IncludeNode, MergeNode)):
-            return node
+            return DraconScalarNode(
+                tag=node.tag,
+                value=node.value,
+                start_mark=node.start_mark,
+                end_mark=node.end_mark,
+                comment=node.comment,
+                anchor=node.anchor,
+            )
         else:
             raise NotImplementedError(f'Node type {type(node)} not supported')
 
@@ -256,7 +264,6 @@ class DraconComposer(Composer):
             anchor=normal_node.anchor,
         )
         return node
-
 
     def compose_merge_node(self) -> Any:
         event = self.parser.get_event()

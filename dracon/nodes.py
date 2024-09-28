@@ -41,12 +41,26 @@ def make_node(value: Any, tag=None, **kwargs):
 
 
 class DraconScalarNode(ScalarNode):
-    def __init__(self, value, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
+    def __init__(
+        self,
+        tag,
+        value,
+        start_mark=None,
+        end_mark=None,
+        style=None,
+        comment=None,
+        anchor=None,
+    ):
         ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
 
+    def __str__(self):
+        return node_repr(self)
+
+    def __repr__(self):
+        return node_repr(self)
 
 
-class IncludeNode(ScalarNode):
+class IncludeNode(DraconScalarNode):
     def __init__(
         self,
         value,
@@ -57,21 +71,35 @@ class IncludeNode(ScalarNode):
         comment=None,
         extra_symbols=None,
     ):
-        ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
+        DraconScalarNode.__init__(
+            self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor
+        )
         self.extra_symbols = extra_symbols or {}
 
+    def __str__(self):
+        return node_repr(self)
 
-class MergeNode(ScalarNode):
+    def __repr__(self):
+        return node_repr(self)
+
+
+class MergeNode(DraconScalarNode):
     def __init__(self, value, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
         self.merge_key_raw = value
-        ScalarNode.__init__(
+        DraconScalarNode.__init__(
             self, STR_TAG, value, start_mark, end_mark, comment=comment, anchor=anchor
         )
 
+    def __str__(self):
+        return node_repr(self)
 
-class UnsetNode(ScalarNode):
+    def __repr__(self):
+        return node_repr(self)
+
+
+class UnsetNode(DraconScalarNode):
     def __init__(self, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
-        ScalarNode.__init__(
+        DraconScalarNode.__init__(
             self,
             tag=STR_TAG,
             value=DRACON_UNSET_VALUE,
@@ -80,6 +108,12 @@ class UnsetNode(ScalarNode):
             comment=comment,
             anchor=anchor,
         )
+
+    def __str__(self):
+        return node_repr(self)
+
+    def __repr__(self):
+        return node_repr(self)
 
 
 ## {{{                        --     MappingNode     --
@@ -206,7 +240,6 @@ class DraconMappingNode(MappingNode):
     def clear(self):
         self.value = []
         self.map = {}
-
 
     def __str__(self):
         return node_repr(self)

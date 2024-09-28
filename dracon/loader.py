@@ -59,13 +59,17 @@ DEFAULT_CONTEXT = {
     # need no side effects, and no access to the filesystem
     'getenv': os.getenv,
     'getcwd': os.getcwd,
-    # 'listdir': os.listdir,
 }
 
 
 def construct(node_or_val, **kwargs):
+    print(f'construct() called with {node_or_val=}, {kwargs=}')
     if isinstance(node_or_val, Node):
-        return load_node(deepcopy(node_or_val), **kwargs)
+        print(f'node_or_val is a Node: {node_or_val}')
+        loader = DraconLoader(**kwargs)
+        compres = CompositionResult(root=deepcopy(node_or_val))
+        return loader.load_from_composition_result(compres, post_process=True)
+
     return node_or_val
 
 
@@ -93,7 +97,7 @@ class DraconLoader:
         self.yaml.Constructor = Draconstructor
         self.yaml.Representer = DraconRepresenter
 
-        self.yaml.constructor.interpolate_all = interpolate_all
+        self.yaml.constructor.resolve_interpolations = interpolate_all
         self.yaml.composer.interpolation_enabled = enable_interpolation
 
         localns = collect_all_types(
@@ -225,7 +229,9 @@ class DraconLoader:
         self.yaml.constructor.context.update(self.context)
         return self.yaml.constructor.construct_document(node)
 
-    def load_from_composition_result(self, compres: CompositionResult):
+    def load_from_composition_result(self, compres: CompositionResult, post_process=False):
+        if post_process:
+            compres = self.post_process_composed(compres)
         return self.load_from_node(compres.root)
 
     def load(self, config_path: str | Path):
@@ -242,6 +248,7 @@ class DraconLoader:
         return self.load_from_composition_result(comp)
 
     def post_process_composed(self, comp: CompositionResult):
+        print('Post processing composed')
         walk_node(
             node=comp.root,
             callback=partial(add_to_context, self.context),

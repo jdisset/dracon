@@ -45,7 +45,7 @@ class ClassB(BaseModel):
 
 def test_dict():
     kp = find_field_references(
-        "@/name.greeting..back+2 + / @path.to.list[2] = @haha./../p\[3{]"
+        r"@/name.greeting..back+2 + / @path.to.list[2] = @haha./../p\[3{]"
     )  # -> [ @/name.greeting..back ,  @path.to.list , @haha./../p\[3 ]
 
     assert len(kp) == 3
@@ -249,6 +249,7 @@ def test_ampersand_interpolation_complex():
         {'index': 4, 'name': 'Name 4'},
         {'index': 5, 'name': 'Name 5'},
     ]
+
     assert config['all_objs_by_anchor'] == config['all_objs']
 
 
@@ -277,11 +278,11 @@ def test_obj_references():
     assert config['prop4'] == '4: Name 4'
 
     assert config['as_ampersand_anchor'] == [
-        {'index': 1, 'name': 'Name 1'},
-        {'index': 2, 'name': 'Name 2'},
-        {'index': 3, 'name': 'Name 3'},
-        {'index': 4, 'name': 'Name 4'},
-        {'index': 5, 'name': 'Name 5'},
+        ClassA(index=1, name='Name 1'),
+        ClassA(index=2, name='Name 2'),
+        ClassA(index=3, name='Name 3'),
+        ClassA(index=4, name='Name 4'),
+        ClassA(index=5, name='Name 5'),
     ]
 
 
@@ -395,3 +396,62 @@ def test_instruct_on_nodes():
         ClassA(index=44, name='new_name 44'),
     ]
 
+
+def test_defines():
+    yaml_content = """
+    !define i42 : !int 42
+
+    expr42: !int ${i42}
+    inc42: *$i42
+
+    !define compint: ${4 + 4}
+    compint_expr: ${compint}
+    compint_inc: !include $compint
+
+    !define runtimeval : ${func(1,2)}
+    runtimeval_expr: ${runtimeval}
+
+    !define recursive_def: ${&runtimeval_expr}
+    recursive: ${recursive_def.evaluate()}
+
+    a_obj: !ClassA
+        index: &aid ${i42}
+        name: oldname
+        <<{<+}: 
+            name: "new_name ${&aid}"
+
+    nested:
+        !define aid: ${get_index(construct(&/a_obj))}
+        a_index: ${aid}
+        aname: ${&/a_obj.name}
+        # constructed_name: ${construct(&/a_obj).name}
+        # constructed_nameindex: ${construct(&/a_obj).name_index}
+
+    """
+
+    loader = DraconLoader(enable_interpolation=True, custom_types={'ClassA': ClassA})
+    loader.yaml.representer.full_module_path = False
+    loader.context['func'] = lambda x, y: x + y
+    loader.context['get_index'] = lambda obj: obj.index
+    config = loader.loads(yaml_content)
+    config.resolve_all_lazy()
+
+    print(f"{config=}")
+
+    assert config['expr42'] == 42
+    assert config['inc42'] == '42'
+    assert config['compint_expr'] == 8
+    assert config['compint_inc'] == 8
+    assert config['runtimeval_expr'] == 3
+
+    assert config['recursive'] == 3
+
+    assert isinstance(config.a_obj, ClassA)
+    assert config['a_obj'].index == 42
+    assert config['a_obj'].name == "new_name 42"
+
+    # assert config['nested']['a_index'] == config['a_obj'].index
+    assert config['nested']['aname'] == config['a_obj'].name
+
+    # assert config['nested']['constructed_name'] == config['a_obj'].name
+    # assert config['nested']['constructed_nameindex'] == config['a_obj'].name_index
