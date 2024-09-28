@@ -1,0 +1,6 @@
+__dracon__:
+  new_a: &newa !include pkg:dracon:tests/configs/complex_interp@a_obj # just need to include without interpolating
+
+nested:
+  !define a_id: ${get_index(construct(&newa:i=2))}
+  a_index: ${a_id}
