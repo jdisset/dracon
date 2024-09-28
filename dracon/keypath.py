@@ -124,6 +124,10 @@ class KeyPath:
     def append(self, part: Union[Hashable, KeyPathToken]) -> 'KeyPath':
         return self.down(part)
 
+    @property
+    def stem(self):
+        return self.parts[-1]
+
     # same as down but not in place
     def __add__(self, other) -> 'KeyPath':
         return self.copy().down(other)
@@ -208,7 +212,6 @@ class KeyPath:
     def get_obj(
         self, obj: Any, create_path_if_not_exists=False, default_mapping_constructor=None
     ) -> Any:
-
         if not self.is_simple:
             simplified = self.simplified()
             return simplified.get_obj(obj, create_path_if_not_exists, default_mapping_constructor)

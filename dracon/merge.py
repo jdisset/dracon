@@ -19,10 +19,12 @@ def make_default_empty_mapping_node():
 def process_merges(comp_res):
     comp_res.find_special_nodes('merge', lambda n: isinstance(n, MergeNode))
     comp_res.sort_special_nodes('merge')
+    print(f'Found {len(comp_res.special_nodes["merge"])} merge nodes')
 
     for merge_path in comp_res.pop_all_special('merge'):
         merge_path = merge_path.removed_mapping_key()
         merge_node = merge_path.get_obj(comp_res.root)
+        print(f'Processing merge node at {merge_path}: {merge_node}')
         parent_path = merge_path.copy().up()
         node_key = merge_path[-1]
         parent_node = parent_path.get_obj(comp_res.root)

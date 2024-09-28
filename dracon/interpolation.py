@@ -53,9 +53,6 @@ class NodeLookup:
         self.available_paths: set[str] = set()
 
     def __getitem__(self, keypathstr: str):
-        print(
-            f'NodeLookup {id(self)} getitem: {keypathstr}. available_paths: {self.available_paths}. root_obj: {id(self.root_node)}'
-        )
         if keypathstr not in self.available_paths:
             raise KeyError(
                 f"KeyPath {keypathstr} not found in NodeLookup. Available paths: {self.available_paths}"
@@ -142,9 +139,9 @@ def do_safe_eval(expr: str, symbols: Optional[dict] = None):
 def dracon_resolve(obj, **ctx):
     from dracon.resolvable import Resolvable
 
-    print(f'dracon_resolve: {obj} of type {type(obj)}')
+    print(f'dracon_resolve: {obj}')
     if isinstance(obj, Resolvable):
-        newobj = deepcopy(obj).resolve(ctx, interpolate_all=True)
+        newobj = deepcopy(obj).resolve(ctx)
         return newobj
     print('Not a resolvable')
     return obj
@@ -180,7 +177,7 @@ def evaluate_expression(
 ) -> Any:
     from dracon.merge import merged, MergeKey
 
-    print(f'evaluate_expression: {expr}. current_path: {current_path}. root_obj: {root_obj}')
+    # print(f'evaluate_expression: {expr}. current_path: {current_path}. root_obj: {root_obj}')
 
     # Initialize interpolations
     if init_outermost_interpolations is None:
@@ -290,7 +287,7 @@ class InterpolableNode(ScalarNode):
         # to the resolve method. It's sort of a asteval-specific limitation becasue there's no
         # locals() or globals() accessible from "inside" the expression...
 
-        print(f'preprocess_ampersand_references: {match.expr}')
+        # print(f'preprocess_ampersand_references: {match.expr}')
 
         if ':' in match.expr:
             match.expr, vardefs = match.expr.split(':')
@@ -314,9 +311,9 @@ class InterpolableNode(ScalarNode):
         keypathstr = str(keypath.simplified())
         self.referenced_nodes.available_paths.add(keypathstr)
         newexpr = f'__DRACON_RESOLVE(__DR_NODES["{keypathstr}"] {context_str})'
-        print(
-            f'newexpr: {newexpr}. keypath: {keypathstr}. available_paths: {self.referenced_nodes.available_paths}'
-        )
+        # print(
+        # f'newexpr: {newexpr}. keypath: {keypathstr}. available_paths: {self.referenced_nodes.available_paths}'
+        # )
 
         if '__DR_NODES' not in self.extra_symbols:
             self.extra_symbols['__DR_NODES'] = self.referenced_nodes
@@ -357,12 +354,6 @@ class InterpolableNode(ScalarNode):
     def flush_references(self):
         if '__DR_NODES' in self.extra_symbols:
             del self.extra_symbols['__DR_NODES']
-
-    def save_references(self, comp_res, current_path):
-        self.flush_references()
-        # self.saved_references = ShallowDict(
-        # {i: deepcopy(n) for i, n in self.referenced_nodes.items()}
-        # )
 
 
 ##───────────────────────────────────────────────────────────────────────────}}}

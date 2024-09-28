@@ -135,3 +135,6 @@ class Resolvable(Generic[T]):
         """
         to_merge = make_node({attr: {subattr: IncludeNode(f'/{subattr}') for subattr in subattrs}})
         return self.merge_node(to_merge, merge_key)
+
+    def __repr__(self):
+        return f"Resolvable(node={self.node}, inner_type={self.inner_type})"

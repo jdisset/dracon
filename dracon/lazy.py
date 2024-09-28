@@ -14,7 +14,7 @@ from typing import (
     Annotated,
 )
 from typing import Generic, TypeVar, get_args, get_origin, Literal
-from dracon.keypath import KeyPath, ROOTPATH
+from dracon.keypath import KeyPath, ROOTPATH, MAPPING_KEY
 from pydantic.dataclasses import dataclass
 from pydantic import TypeAdapter, BaseModel, field_validator, ConfigDict, WrapValidator, Field
 from copy import copy
@@ -68,6 +68,8 @@ class Lazy(Generic[T]):
 class LazyInterpolable(Lazy[T]):
     """
     A lazy object that can be resolved (i.e. interpolated) to a value when needed.
+
+    The usual way of doing that is by
 
     """
 
@@ -130,8 +132,64 @@ class LazyInterpolable(Lazy[T]):
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
+## {{{                     --     resolve all lazy     --
+
+
+def resolve_all_lazy(obj, root_obj=None, current_path=None):
+    """will do its best to resolve all lazy objects in the object"""
+
+    if root_obj is None:
+        if hasattr(obj, '_dracon_root_obj'):  # if the object has a root object, use that
+            root_obj = obj._dracon_root_obj
+        else:
+            root_obj = obj
+    if current_path is None:
+        if hasattr(obj, '_dracon_current_path'):
+            current_path = obj._dracon_current_path
+        else:
+            current_path = ROOTPATH
+
+    # recursively call resolve_all_lazy on all items in the object (including keys in mappings)
+    if isinstance(obj, BaseModel):
+        print(f"Resolving lazy in model {obj}")
+        for key, value in obj:
+            resolve_all_lazy(value, root_obj, current_path + KeyPath(str(key)))
+
+    elif isinstance(obj, cabc.Mapping):
+        print(f"Resolving lazy in mapping {obj}")
+        for key, value in obj.items():
+            resolve_all_lazy(key, root_obj, current_path + MAPPING_KEY + str(key))
+            resolve_all_lazy(value, root_obj, current_path + key)
+
+    elif isinstance(obj, cabc.Iterable) and not isinstance(obj, (str, bytes)):
+        print(f"Resolving lazy in iterable {obj}")
+        for i, item in enumerate(obj):
+            resolve_all_lazy(item, root_obj, current_path + KeyPath(str(i)))
+
+    # now check if we have a lazy interpolable object
+    elif isinstance(obj, LazyInterpolable):
+        print(f"Resolving lazy interpolable {obj}")
+        if current_path.is_mapping_key():
+            raise NotImplementedError("Lazy objects in key mappings are not supported")
+        obj.name = current_path.stem
+        obj.root_obj = root_obj
+        obj.current_path = current_path.parent
+        obj.get(obj, setval=True)
+
+    else:
+        print(f"Object {obj} is not lazy interpolable")
+
+
+##────────────────────────────────────────────────────────────────────────────}}}
+
+## {{{              --     recursive lazy container update     --
+
 
 def recursive_update_lazy_container(obj, root_obj, current_path):
+    """
+    Recursively update the root and current path of all nested lazy objects,
+    so that later they can be interpolated correctly.
+    """
     if is_lazy_compatible(obj):
         obj._dracon_root_obj = root_obj
         obj._dracon_current_path = current_path
@@ -145,6 +203,9 @@ def recursive_update_lazy_container(obj, root_obj, current_path):
         for i, item in enumerate(obj):
             new_path = current_path + KeyPath(str(i))
             recursive_update_lazy_container(item, root_obj, new_path)
+
+
+##────────────────────────────────────────────────────────────────────────────}}}
 
 
 @runtime_checkable
