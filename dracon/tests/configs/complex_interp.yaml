@@ -1,0 +1,7 @@
+a_obj: 
+    index: &aid 2
+    name: oldname
+    <<{<+}: 
+        name: "new_name ${&aid}"
+
+

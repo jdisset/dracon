@@ -229,7 +229,7 @@ class DraconLoader:
         self.yaml.constructor.context.update(self.context)
         return self.yaml.constructor.construct_document(node)
 
-    def load_from_composition_result(self, compres: CompositionResult, post_process=False):
+    def load_from_composition_result(self, compres: CompositionResult, post_process=True):
         if post_process:
             compres = self.post_process_composed(compres)
         return self.load_from_node(compres.root)

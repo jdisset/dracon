@@ -424,8 +424,8 @@ def test_defines():
         !define aid: ${get_index(construct(&/a_obj))}
         a_index: ${aid}
         aname: ${&/a_obj.name}
-        # constructed_name: ${construct(&/a_obj).name}
-        # constructed_nameindex: ${construct(&/a_obj).name_index}
+        constructed_name: ${construct(&/a_obj).name}
+        constructed_nameindex: ${construct(&/a_obj).name_index}
 
     """
 
@@ -453,5 +453,14 @@ def test_defines():
     # assert config['nested']['a_index'] == config['a_obj'].index
     assert config['nested']['aname'] == config['a_obj'].name
 
-    # assert config['nested']['constructed_name'] == config['a_obj'].name
-    # assert config['nested']['constructed_nameindex'] == config['a_obj'].name_index
+    assert config['nested']['constructed_name'] == config['a_obj'].name
+    assert config['nested']['constructed_nameindex'] == config['a_obj'].name_index
+
+
+def test_include():
+    loader = DraconLoader(enable_interpolation=True)
+    loader.context['get_index'] = lambda obj: obj.index
+    compres = loader.compose_from_include_str('pkg:dracon:tests/configs/interp_include.yaml')
+    config = loader.load_from_composition_result(compres)
+    config.resolve_all_lazy()
+    assert config.nested.a_index == 2
