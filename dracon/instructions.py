@@ -30,9 +30,7 @@ class Instruction:
     def process(self, comp_res: CompositionResult, path: KeyPath):
         raise NotImplementedError
 
-
-
-
+@ftrace(watch=[])
 def process_instructions(comp_res: CompositionResult):
     instruction_nodes = []
 
@@ -44,7 +42,6 @@ def process_instructions(comp_res: CompositionResult):
     instruction_nodes = sorted(instruction_nodes, key=lambda x: len(x[1]))
 
     for inst, path in instruction_nodes:
-        print(f"Processing instruction {inst} at {path}")
         inst.process(comp_res, path.copy())
 
     return comp_res
@@ -99,7 +96,6 @@ class Define(Instruction):
         assert var_name.isidentifier(), f"Invalid variable name in define instruction: {var_name}"
         ctx = merged(ctx, {var_name: deepcopy(value)}, MergeKey(raw='{<+}'))
 
-        print(f"Adding {var_name} to context with value {value}")
         walk_node(
             node=parent_node,
             callback=partial(add_to_context, ctx),
@@ -107,6 +103,8 @@ class Define(Instruction):
 
         # remove the node
         del parent_node[var_name]
+
+        return comp_res
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
@@ -139,6 +137,7 @@ class Each(Instruction):
             return Each(var_name)
         return None
 
+    @ftrace(inputs=False, watch=[])
     def process(self, comp_res: CompositionResult, path: KeyPath):
         if not path.is_mapping_key():
             raise ValueError(f"instruction 'each' must be a mapping key, but got {path}")
@@ -186,8 +185,9 @@ class Each(Instruction):
                 )
 
         comp_res.replace_node_at(path.parent, new_parent)
-
         del parent_node[key_node.value]
+
+        return comp_res
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}

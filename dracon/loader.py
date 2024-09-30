@@ -163,9 +163,7 @@ class DraconLoader:
         # Need to clean this up, merge both (probably use comptime interpolation)
         # and make it consistent.
 
-        print(f"Composing from include string: {include_str}")
         include_str = resolve_interpolable_variables(include_str, self.context)
-        print(f"Interpolated include string to {include_str}")
 
         res = None
 
@@ -178,16 +176,16 @@ class DraconLoader:
 
             if composition_result is not None:
                 if mainpath.startswith('$'):  # it's an in-memory node
-                    print(f"Processing in-memory include: {mainpath}")
                     if not node:
                         raise ValueError('Node not provided for in-memory include')
                     name = mainpath[1:]
                     if name in node.extra_symbols:
                         incl_node = node.extra_symbols[name]
-                        incl_node = deepcopy(self.dump_to_node(incl_node))
+                        incl_node = self.dump_to_node(incl_node)
                         if keypath:
                             incl_node = KeyPath(keypath).get_obj(incl_node)
                         res = CompositionResult(root=incl_node)
+                        res.root = deepcopy(res.root)
                         return res
 
                     raise ValueError(f'Invalid in-memory include: {name} not found')
@@ -195,6 +193,7 @@ class DraconLoader:
                 # it's a path starting with the root of the document
                 if include_str.startswith('/'):
                     res = composition_result.rerooted(KeyPath(mainpath))
+                    res.root = deepcopy(res.root)
                     return res
 
                 # it's a path relative to the current node
@@ -203,11 +202,13 @@ class DraconLoader:
                 ):  # means relative to parent
                     comb_path = include_node_path.parent.down(KeyPath(mainpath))
                     res = composition_result.rerooted(comb_path)
+                    res.root = deepcopy(res.root)
                     return res
 
                 anchors = composition_result.anchor_paths
                 if mainpath in anchors:
                     res = composition_result.rerooted(anchors[mainpath] + keypath)
+                    res.root = deepcopy(res.root)
                     return res
 
                 assert (
@@ -222,14 +223,15 @@ class DraconLoader:
 
             res = custom_loaders[loader](path, loader=self)
             if not isinstance(res, CompositionResult):
-                assert isinstance(res, str), f"Invalid loader result: {type(res)}"
+                if not isinstance(res, str):
+                    raise ValueError(f"Invalid result type from loader '{loader}': {type(res)}")
                 res = self.copy().compose_config_from_str(res)
             if keypath:
                 res = res.rerooted(KeyPath(keypath))
             return res
         finally:
             if isinstance(res, CompositionResult) and node is not None:
-                # we need to update the context of the composed document
+                # we need to update the context of the composed documdeepcopy(res)
                 # with the context of the loader that composed it
                 walk_node(
                     node=res.root,
@@ -282,7 +284,6 @@ class DraconLoader:
     def preprocess_references(self, comp_res: CompositionResult):
         comp_res.find_special_nodes('interpolable', lambda n: isinstance(n, InterpolableNode))
         comp_res.sort_special_nodes('interpolable')
-        print(f"Preprocessing {len(comp_res.special_nodes['interpolable'])} interpolable nodes")
 
         for path in comp_res.pop_all_special('interpolable'):
             node = path.get_obj(comp_res.root)
@@ -320,7 +321,6 @@ class DraconLoader:
                 break
 
             comp_res.sort_special_nodes('include')
-            print(f"Processing {len(comp_res.special_nodes['include'])} includes")
             for inode_path in comp_res.pop_all_special('include'):
                 inode = inode_path.get_obj(comp_res.root)
                 assert isinstance(inode, IncludeNode), f"Invalid node type: {type(inode)}"

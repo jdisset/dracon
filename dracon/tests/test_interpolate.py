@@ -450,7 +450,7 @@ def test_defines():
     assert config['a_obj'].index == 42
     assert config['a_obj'].name == "new_name 42"
 
-    # assert config['nested']['a_index'] == config['a_obj'].index
+    assert config['nested']['a_index'] == config['a_obj'].index
     assert config['nested']['aname'] == config['a_obj'].name
 
     assert config['nested']['constructed_name'] == config['a_obj'].name
@@ -474,3 +474,6 @@ def test_include():
 
     assert config.nested.nameindex == '3: oldname 3'
     assert config.nested.nameindex_2 == '3: oldname 3'
+
+    print(config.nested)
+    assert config.nested.alist == [ClassA(index=1, name='name 1'), ClassA(index=2, name='name 2')]

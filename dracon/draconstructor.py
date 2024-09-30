@@ -231,7 +231,6 @@ class Draconstructor(Constructor):
         return lzy
 
     def copy(self):
-        # return deepcopy(self)
         return Draconstructor(
             preserve_quotes=self.preserve_quotes,
             loader=self.loader,

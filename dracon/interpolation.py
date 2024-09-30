@@ -143,11 +143,9 @@ def dracon_resolve(obj, **ctx):
     from functools import partial
 
     if isinstance(obj, Resolvable):
-        print('It\'s a resolvable')
         newobj = deepcopy(obj).resolve(ctx)
         return newobj
 
-    print('Not a resolvable')
     assert isinstance(obj, Node), f'Expected a Node, got {type(obj)}'
     node = deepcopy(obj)
     walk_node(
