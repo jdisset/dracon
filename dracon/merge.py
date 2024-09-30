@@ -28,6 +28,7 @@ def add_to_context(context, node: Node):
         node.extra_symbols = merged(node.extra_symbols, context, MergeKey(raw='{<+}'))
 
 
+@ftrace(inputs=False, watch=[])
 def process_merges(comp_res):
     comp_res.find_special_nodes('merge', lambda n: isinstance(n, MergeNode))
     comp_res.sort_special_nodes('merge')

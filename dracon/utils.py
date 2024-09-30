@@ -259,11 +259,12 @@ def node_repr(node, prefix='', is_last=True, is_root=True, enable_colors=True):
         'SequenceNode': '',
         'InterpolableNode': '[INTRP]',
         'MergeNode': '[MERGE]',
+        'IncludeNode': '[INCL]',
     }
 
     def get_node_repr(node):
         tag = SHORT_TAGS.get(node.tag, node.tag)
-        tstring = f'{TYPE_COLOR}{NODE_TYPES.get(type(node).__name__, "")}{RESET}'
+        tstring = f'{TYPE_COLOR}{NODE_TYPES.get(type(node).__name__,"")}{RESET}'
 
         if isinstance(node, (MappingNode, SequenceNode)):
             return f'{TAG_COLOR}{tag}{RESET} {tstring}'
@@ -295,6 +296,8 @@ def node_repr(node, prefix='', is_last=True, is_root=True, enable_colors=True):
 
             if hasattr(key, 'value'):
                 key_repr = f'{TAG_COLOR}{SHORT_TAGS.get(key.tag, key.tag)}{RESET} {TREE_COLOR}󰌆{KEY_COLOR} {key.value} {RESET}'
+                keytypestr = f'{TYPE_COLOR}{NODE_TYPES.get(type(key).__name__,"")}{RESET}'
+                key_repr += f'{keytypestr}'
             else:
                 key_repr = f'noval(<{type(key)}>{key}) [KEY]'
             output += key_line_prefix + key_repr + '\n'
@@ -424,6 +427,7 @@ def ftrace(
     colors=None,
     glyphs=None,
     truncate_length=200,
+    name=None,
 ):
     """
     A function decorator to trace the execution of a function, displaying input arguments, output, and watched variables.
@@ -499,8 +503,11 @@ def ftrace(
 
         @pad_output(padding)
         def wrapper(*args, **kwargs):
-            func_module = func.__module__
-            func_name = func.__name__
+            # func_module = func.__module__
+            func_class = ''
+            if hasattr(func, '__qualname__') and '.' in func.__qualname__:
+                func_class = f'{func.__qualname__.split(".")[0]}.'
+            func_name = f"{func_class}{func.__name__}"
             filename = get_filename(func)
             line_info = get_line_info(inspect.currentframe(), preface_filename, filename=filename)
 
@@ -596,6 +603,7 @@ def ftrace(
 
             sys.settrace(global_trace)
             try:
+                result = 'ERROR'
                 result = func(*args, **kwargs)
             finally:
                 sys.settrace(None)
