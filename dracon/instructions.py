@@ -4,7 +4,7 @@ from copy import deepcopy
 import re
 from pydantic import BaseModel
 from enum import Enum
-from dracon.utils import dict_like, DictLike, ListLike
+from dracon.utils import dict_like, DictLike, ListLike, ftrace
 from dracon.composer import (
     CompositionResult,
     walk_node,
@@ -14,12 +14,13 @@ from dracon.composer import (
 )
 from ruamel.yaml.nodes import Node
 from dracon.keypath import KeyPath
-from dracon.merge import merged, MergeKey
+from dracon.merge import merged, MergeKey, add_to_context
 from dracon.interpolation import evaluate_expression, InterpolableNode
 from functools import partial
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 ## {{{                      --     instruct utils     --
+
 
 class Instruction:
     @staticmethod
@@ -30,10 +31,6 @@ class Instruction:
         raise NotImplementedError
 
 
-def add_to_context(context, node: Node):
-    if isinstance(node, (InterpolableNode, IncludeNode)):
-        # node.extra_symbols.update(deepcopy(context))
-        node.extra_symbols = merged(node.extra_symbols, context, MergeKey(raw='{<+}'))
 
 
 def process_instructions(comp_res: CompositionResult):
@@ -47,6 +44,7 @@ def process_instructions(comp_res: CompositionResult):
     instruction_nodes = sorted(instruction_nodes, key=lambda x: len(x[1]))
 
     for inst, path in instruction_nodes:
+        print(f"Processing instruction {inst} at {path}")
         inst.process(comp_res, path.copy())
 
     return comp_res
@@ -74,6 +72,7 @@ class Define(Instruction):
             return Define()
         return None
 
+    @ftrace(False, watch=[])
     def process(self, comp_res: CompositionResult, path: KeyPath):
         if not path.is_mapping_key():
             raise ValueError(f"instruction 'define' must be a mapping key, but got {path}")
@@ -88,7 +87,6 @@ class Define(Instruction):
         ctx = {}
 
         if isinstance(value_node, InterpolableNode):
-            print(f"Processing !define at {path}. Value is an interpolable node: {value_node.value}")
             value = evaluate_expression(
                 value,
                 current_path=path,
@@ -99,9 +97,9 @@ class Define(Instruction):
 
         var_name = key_node.value
         assert var_name.isidentifier(), f"Invalid variable name in define instruction: {var_name}"
-
         ctx = merged(ctx, {var_name: deepcopy(value)}, MergeKey(raw='{<+}'))
 
+        print(f"Adding {var_name} to context with value {value}")
         walk_node(
             node=parent_node,
             callback=partial(add_to_context, ctx),
@@ -145,7 +143,6 @@ class Each(Instruction):
         if not path.is_mapping_key():
             raise ValueError(f"instruction 'each' must be a mapping key, but got {path}")
 
-        print(f"Processing !each at {path}")
         key_node = deepcopy(path.get_obj(comp_res.root))
         value_node = deepcopy(path.removed_mapping_key().get_obj(comp_res.root))
 
@@ -196,6 +193,7 @@ class Each(Instruction):
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 AVAILABLE_INSTRUCTIONS = [Define, Each]
+
 
 def match_instruct(value: str) -> Optional[Instruction]:
     matches = [inst.match(value) for inst in AVAILABLE_INSTRUCTIONS]

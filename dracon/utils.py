@@ -19,6 +19,12 @@ import typing
 import importlib
 import inspect
 import uuid
+import sys
+import re
+import os
+from contextlib import ContextDecorator
+import threading
+
 from collections.abc import MutableMapping, MutableSequence
 ##────────────────────────────────────────────────────────────────────────────}}}
 
@@ -342,3 +348,272 @@ def get_inner_type(resolvable_type: Type):
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
+
+
+## {{{                          --     padded     --
+
+
+class pad_output(ContextDecorator):
+    def __init__(self, padding):
+        self.padding = padding
+
+    def __enter__(self):
+        self._old_stdout = sys.stdout
+        sys.stdout = PaddedStdout(sys.stdout, self.padding)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        sys.stdout = self._old_stdout
+
+
+class PaddedStdout:
+    def __init__(self, stream, padding):
+        if isinstance(stream, PaddedStdout):
+            self.base_stream = stream.base_stream
+            self.padding = stream.padding + padding
+        else:
+            self.base_stream = stream
+            self.padding = padding
+        self.buffer = ''
+
+    def write(self, data):
+        self.buffer += data
+        while '\n' in self.buffer:
+            line, self.buffer = self.buffer.split('\n', 1)
+            self.base_stream.write(self.padding + line + '\n')
+
+    def flush(self):
+        if self.buffer:
+            self.base_stream.write(self.padding + self.buffer)
+            self.buffer = ''
+        self.base_stream.flush()
+
+
+##────────────────────────────────────────────────────────────────────────────}}}
+## {{{                          --     ftrace     --
+
+import os
+import sys
+import re
+import inspect
+from contextlib import ContextDecorator
+
+
+def get_color_for_func(func_name):
+    colors_list = [
+        '\033[38;2;249;65;68m',
+        '\033[38;2;243;114;44m',
+        '\033[38;2;248;150;30m',
+        '\033[38;2;249;132;74m',
+        '\033[38;2;249;199;79m',
+        '\033[38;2;144;190;109m',
+        '\033[38;2;67;170;139m',
+        '\033[38;2;77;144;142m',
+        '\033[38;2;87;117;144m',
+        '\033[38;2;39;125;161m',
+    ]
+    hash_value = sum([ord(c) for c in func_name]) % len(colors_list)
+    color = colors_list[hash_value]
+    return color
+
+
+def ftrace(
+    inputs=True,
+    output=True,
+    watch=None,
+    preface_filename=True,
+    colors=None,
+    glyphs=None,
+    truncate_length=200,
+):
+    """
+    A function decorator to trace the execution of a function, displaying input arguments, output, and watched variables.
+    """
+    # Check if tracing is enabled via the environment variable
+    enable_ftrace = os.getenv('ENABLE_FTRACE')
+
+    if not enable_ftrace:
+        # Tracing is disabled; return a decorator that returns the function unmodified
+        def dec(func):
+            return func
+
+        return dec
+
+    default_colors = {
+        'line_number': '\033[90m',  # Grey
+        'input': '',  # Green
+        'input_name': '\033[38;2;144;190;109m',  # Green
+        'output': '',  # Blue
+        'reset': '\033[0m',
+    }
+    if colors:
+        default_colors.update(colors)
+
+    default_glyphs = {
+        'assign': '←',
+        'create': '=',
+        'return': '>',
+    }
+    if glyphs:
+        default_glyphs.update(glyphs)
+
+    def truncate(s, length=truncate_length):
+        # Truncate a string to a maximum length, showing half of the characters on each side
+        s = str(s)
+        lines = []
+        for line in s.split('\n'):
+            if len(line) > length:
+                half = (length - 3) // 2
+                out = line[:half] + '...' + line[-half:]
+                lines.append(out)
+            else:
+                lines.append(line)
+        out = '\n'.join(lines)
+        return out
+
+    def strip_ansi_codes(s):
+        ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
+        return ansi_escape.sub('', s)
+
+    def get_filename(func):
+        filename = inspect.getsourcefile(func)
+        if filename:
+            filename = filename.split("/")[-1]
+        else:
+            filename = "<unknown>"
+        return filename
+
+    def get_line_info(frame, preface_filename, filename=None):
+        lineno = frame.f_lineno
+        if preface_filename:
+            if not filename:
+                filename = frame.f_code.co_filename.split("/")[-1]
+            line_info = f"{filename}:l.{lineno}"
+        else:
+            line_info = f"l.{lineno}"
+        return line_info
+
+    def decorator(func):
+        # Get a color based on the function name
+        color_code = get_color_for_func(func.__name__)
+        padding = f'{color_code}│ \033[0m'
+
+        @pad_output(padding)
+        def wrapper(*args, **kwargs):
+            func_module = func.__module__
+            func_name = func.__name__
+            filename = get_filename(func)
+            line_info = get_line_info(inspect.currentframe(), preface_filename, filename=filename)
+
+            # Handle input arguments
+            if preface_filename:
+                preface_str = (
+                    f"{default_colors['line_number']}@{line_info}{default_colors['reset']}"
+                )
+            else:
+                preface_str = ""
+
+            # Include color for the function name
+            func_call_str = f"{color_code}┌ {func_name}{preface_str}{default_colors['reset']}("
+
+            sys.stdout.write('\b\b')
+            if inputs:
+                sig = inspect.signature(func)
+                bound_args = sig.bind(*args, **kwargs)
+                bound_args.apply_defaults()
+                arg_strings = []
+                input_arg_names = set(bound_args.arguments.keys())
+                print(f"{func_call_str}")
+                for name, value in bound_args.arguments.items():
+                    arg_str = f"{default_colors['input']}{truncate(value)}{default_colors['reset']}"
+                    if '\n' in arg_str:
+                        print(f"{color_code}  {name} = {default_colors['reset']}")
+                        # strip starting \n
+                        arg_str = arg_str.lstrip('\n')
+                        with pad_output("    "):
+                            print(arg_str)
+                    else:
+                        arg_strings.append(
+                            f"{color_code}  {name} = {default_colors['reset']}{arg_str}"
+                        )
+                print("):")
+
+            else:
+                print(f"{func_call_str})")
+                input_arg_names = set()  # No input arguments to skip
+
+            watched_vars_prev = {}
+            watching_all = False
+
+            if watch is None:
+                watching_all = True
+            elif not watch:
+                watching_all = False
+            else:
+                for var in watch:
+                    watched_vars_prev[var] = None
+
+            def local_trace(frame, event, arg):
+                if event == 'line':
+                    local_filename = filename  # Use the filename from outer scope
+                    line_info = get_line_info(frame, preface_filename, filename=local_filename)
+                    local_vars = frame.f_locals
+
+                    if watching_all:
+                        vars_to_watch = local_vars.keys()
+                    else:
+                        vars_to_watch = watch
+
+                    for var in vars_to_watch:
+                        if var in local_vars:
+                            value = local_vars[var]
+                            prev_value = watched_vars_prev.get(var, '__UNINITIALIZED__')
+
+                            if prev_value == '__UNINITIALIZED__':
+                                # Variable seen for the first time
+                                if var in input_arg_names:
+                                    # Skip printing input arguments' initial assignment
+                                    watched_vars_prev[var] = value
+                                else:
+                                    # Variable created
+                                    glyph = default_glyphs['create']
+                                    print(
+                                        f"{default_colors['line_number']}{line_info}:{default_colors['reset']}{var} {glyph} {truncate(value)}"
+                                    )
+                                    watched_vars_prev[var] = value
+                            elif value != prev_value:
+                                # Variable updated
+                                glyph = default_glyphs['assign']
+                                print(
+                                    f"{default_colors['line_number']}{line_info}:{default_colors['reset']}{var} {glyph} {truncate(value)}"
+                                )
+                                watched_vars_prev[var] = value
+                    return local_trace
+
+            def global_trace(frame, event, arg):
+                if event == 'call' and frame.f_code == func.__code__:
+                    return local_trace
+                return None
+
+            sys.settrace(global_trace)
+            try:
+                result = func(*args, **kwargs)
+            finally:
+                sys.settrace(None)
+                frame = inspect.currentframe().f_back
+                line_info = get_line_info(frame, preface_filename, filename=filename)
+                sys.stdout.write('\b\b')
+                print(f"{color_code}└ {func_name}{default_colors['reset']} ")
+
+                @pad_output(
+                    f"\b\b  {color_code}{default_glyphs['return']} {default_colors['reset']}"
+                )
+                def print_res():
+                    print(f"{default_colors['output']}{truncate(result)}{default_colors['reset']}")
+
+                print_res()
+            return result
+
+        return wrapper
+
+    return decorator
+    ##────────────────────────────────────────────────────────────────────────────}}}

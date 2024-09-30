@@ -1,7 +1,7 @@
-a_obj: 
-    index: &aid 2
+a_obj: !ClassA
+    index: &aid ${i}
     name: oldname
     <<{<+}: 
-        name: "new_name ${&aid}"
+        name: "oldname ${&aid}"
 
 

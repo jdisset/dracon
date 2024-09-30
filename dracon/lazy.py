@@ -24,6 +24,7 @@ from dracon.interpolation_utils import (
     InterpolationMatch,
 )
 from dracon.interpolation import evaluate_expression
+from dracon.utils import ftrace
 
 
 class InterpolationError(Exception):
@@ -135,6 +136,7 @@ class LazyInterpolable(Lazy[T]):
 ## {{{                     --     resolve all lazy     --
 
 
+@ftrace()
 def resolve_all_lazy(obj, root_obj=None, current_path=None):
     """will do its best to resolve all lazy objects in the object"""
 
@@ -151,24 +153,20 @@ def resolve_all_lazy(obj, root_obj=None, current_path=None):
 
     # recursively call resolve_all_lazy on all items in the object (including keys in mappings)
     if isinstance(obj, BaseModel):
-        print(f"Resolving lazy in model {obj}")
         for key, value in obj:
             resolve_all_lazy(value, root_obj, current_path + KeyPath(str(key)))
 
     elif isinstance(obj, cabc.Mapping):
-        print(f"Resolving lazy in mapping {obj}")
         for key, value in obj.items():
             resolve_all_lazy(key, root_obj, current_path + MAPPING_KEY + str(key))
             resolve_all_lazy(value, root_obj, current_path + key)
 
     elif isinstance(obj, cabc.Iterable) and not isinstance(obj, (str, bytes)):
-        print(f"Resolving lazy in iterable {obj}")
         for i, item in enumerate(obj):
             resolve_all_lazy(item, root_obj, current_path + KeyPath(str(i)))
 
     # now check if we have a lazy interpolable object
     elif isinstance(obj, LazyInterpolable):
-        print(f"Resolving lazy interpolable {obj}")
         if current_path.is_mapping_key():
             raise NotImplementedError("Lazy objects in key mappings are not supported")
         obj.name = current_path.stem

@@ -12,7 +12,7 @@ from pydantic import (
     PydanticSchemaGenerationError,
 )
 
-from dracon.utils import ShallowDict
+from dracon.utils import ShallowDict, ftrace
 from dracon import dracontainer
 from dracon.dracontainer import Dracontainer
 from dracon.interpolation import outermost_interpolation_exprs, InterpolableNode
@@ -40,7 +40,6 @@ def pydantic_validate(tag, value, localns=None, root_obj=None, current_path=None
     tag_type = resolve_type(tag, localns=localns or {})
 
     if not is_lazy_compatible(tag_type) and isinstance(value, Dracontainer) and tag_type is not Any:
-        print(f"Tag type for {value} of type {type(value)} is {tag_type}: not lazy compatible")
         value.resolve_all_lazy()
 
     return TypeAdapter(tag_type).validate_python(value)
@@ -143,15 +142,13 @@ class Draconstructor(Constructor):
         self._current_path = ROOTPATH
         self.resolve_interpolations = resolve_interpolations
 
+    @ftrace()
     def construct_object(self, node, deep=True):
         is_root = False
         if self._depth == 0:
-            print(f"Constructing root {node}")
             self._root_node = node
             is_root = True
             self._current_path = ROOTPATH
-        else:
-            print(f"Constructing root {node}")
         self._depth += 1
         tag = node.tag
         try:
@@ -179,11 +176,11 @@ class Draconstructor(Constructor):
         )
 
         if self.resolve_interpolations and is_root:
-            print(f"Resolving all lazy in root {node}")
             resolve_all_lazy(obj)
 
         return obj
 
+    @ftrace(watch=[])
     def construct_resolvable(self, node, tag_type):
         inner_type = get_inner_type(tag_type)
         if inner_type is Any:
@@ -199,8 +196,8 @@ class Draconstructor(Constructor):
         res = Resolvable(node=node, ctor=self, inner_type=inner_type)
         return res
 
+    @ftrace(watch=[])
     def construct_interpolable(self, node):
-        print(f"Constructing interpolable {node}")
         node_value = node.value
         init_outermost_interpolations = node.init_outermost_interpolations
         validator = partial(pydantic_validate, node.tag, localns=self.localns)
@@ -222,7 +219,6 @@ class Draconstructor(Constructor):
             i: Resolvable(node=n, ctor=self.copy()) for i, n in self.referenced_nodes.items()
         }
 
-        print(f"Constructing lazy interpolable with {node_value}. Extra symbols['__DR_NODES']={extra_symbols['__DR_NODES']}")
         lzy = LazyInterpolable(
             value=node_value,
             init_outermost_interpolations=init_outermost_interpolations,
@@ -255,6 +251,8 @@ class Draconstructor(Constructor):
             )
         mapping = self.yaml_base_dict_type()
         for key_node, value_node in node.value:
+            if key_node.tag == '!noconstruct' or value_node.tag == '!noconstruct':
+                continue
             key = self.construct_object(key_node, deep=True)
             if not isinstance(key, Hashable):
                 if isinstance(key, list):
@@ -283,5 +281,3 @@ class Draconstructor(Constructor):
             node.tag = self.resolver.DEFAULT_MAPPING_TAG
         else:
             node.tag = self.resolver.DEFAULT_SCALAR_TAG
-
-        print(f"Reset tag from {og_tag} to {node.tag}")
