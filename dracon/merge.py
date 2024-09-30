@@ -3,8 +3,13 @@ from copy import deepcopy
 import re
 from pydantic import BaseModel
 from enum import Enum
-from dracon.utils import dict_like, DictLike, ListLike
-from dracon.nodes import MergeNode, DraconMappingNode
+from dracon.utils import dict_like, DictLike, ListLike, ftrace
+from dracon.nodes import (
+    MergeNode,
+    DraconMappingNode,
+    DraconSequenceNode,
+    IncludeNode,
+)
 from ruamel.yaml.nodes import Node
 from dracon.keypath import KeyPath
 
@@ -16,15 +21,20 @@ def make_default_empty_mapping_node():
     )
 
 
+def add_to_context(context, node: Node):
+    from dracon.interpolation import InterpolableNode
+
+    if isinstance(node, (InterpolableNode, IncludeNode)):
+        node.extra_symbols = merged(node.extra_symbols, context, MergeKey(raw='{<+}'))
+
+
 def process_merges(comp_res):
     comp_res.find_special_nodes('merge', lambda n: isinstance(n, MergeNode))
     comp_res.sort_special_nodes('merge')
-    print(f'Found {len(comp_res.special_nodes["merge"])} merge nodes')
 
     for merge_path in comp_res.pop_all_special('merge'):
         merge_path = merge_path.removed_mapping_key()
         merge_node = merge_path.get_obj(comp_res.root)
-        print(f'Processing merge node at {merge_path}: {merge_node}')
         parent_path = merge_path.copy().up()
         node_key = merge_path[-1]
         parent_node = parent_path.get_obj(comp_res.root)
@@ -54,7 +64,6 @@ def process_merges(comp_res):
                 merge_node.start_mark,
                 f'Error: {str(e)}',
             ) from e
-
         # we want to do parent_node = merged(parent_node, merge_node, merge_key)
 
         del parent_node[node_key]
@@ -209,7 +218,6 @@ def merged(existing: Any, new: Any, k: MergeKey) -> DictLike:
             return pdict
 
         result = pdict.copy()
-        # result = deepcopy(pdict)
 
         if hasattr(pdict, 'tag') and hasattr(other, 'tag'):
             # we're dealing with nodes

@@ -22,11 +22,12 @@ from dracon.utils import (
     MetadataDictLike,
     ListLike,
     ShallowDict,
+    ftrace,
 )
 from dracon.interpolation_utils import resolve_interpolable_variables
 from dracon.interpolation import InterpolableNode
-from dracon.merge import process_merges
-from dracon.instructions import process_instructions, add_to_context
+from dracon.merge import process_merges, add_to_context
+from dracon.instructions import process_instructions
 from dracon.loaders.file import read_from_file
 from dracon.loaders.pkg import read_from_pkg
 from dracon.loaders.env import read_from_env
@@ -47,10 +48,10 @@ DEFAULT_LOADERS: Dict[str, Callable] = {
 }
 
 DEFAULT_MODULES_FOR_TYPES = [
-    'pydantic',
-    'typing',
-    'dracon',
-    'numpy',
+    # 'pydantic',
+    # 'typing',
+    # 'dracon',
+    # 'numpy',
 ]
 
 
@@ -62,10 +63,9 @@ DEFAULT_CONTEXT = {
 }
 
 
+@ftrace()
 def construct(node_or_val, **kwargs):
-    print(f'construct() called with {node_or_val=}, {kwargs=}')
     if isinstance(node_or_val, Node):
-        print(f'node_or_val is a Node: {node_or_val}')
         loader = DraconLoader(**kwargs)
         compres = CompositionResult(root=deepcopy(node_or_val))
         return loader.load_from_composition_result(compres, post_process=True)
@@ -143,6 +143,7 @@ class DraconLoader:
 
         return new_loader
 
+    @ftrace(inputs=False, watch=[])
     def compose_from_include_str(
         self,
         include_str: str,
@@ -162,62 +163,78 @@ class DraconLoader:
         # Need to clean this up, merge both (probably use comptime interpolation)
         # and make it consistent.
 
+        print(f"Composing from include string: {include_str}")
         include_str = resolve_interpolable_variables(include_str, self.context)
+        print(f"Interpolated include string to {include_str}")
 
-        if '@' in include_str:
-            # split at the first unescaped @
-            mainpath, keypath = re.split(r'(?<!\\)@', include_str, maxsplit=1)
-        else:
-            mainpath, keypath = include_str, ''
+        res = None
 
-        if composition_result is not None:
-            if mainpath.startswith('$'):  # it's an in-memory node
-                if not node:
-                    raise ValueError('Node not provided for in-memory include')
-                name = mainpath[1:]
-                if name in node.extra_symbols:
-                    incl_node = node.extra_symbols[name]
-                    incl_node = self.dump_to_node(incl_node)
-                    if keypath:
-                        print('keypath', keypath)
-                        incl_node = KeyPath(keypath).get_obj(incl_node)
-                        print('incl_node', incl_node)
-                    return CompositionResult(root=incl_node)
+        try:
+            if '@' in include_str:
+                # split at the first unescaped @
+                mainpath, keypath = re.split(r'(?<!\\)@', include_str, maxsplit=1)
+            else:
+                mainpath, keypath = include_str, ''
 
-                raise ValueError(f'Invalid in-memory include: {name} not found')
+            if composition_result is not None:
+                if mainpath.startswith('$'):  # it's an in-memory node
+                    print(f"Processing in-memory include: {mainpath}")
+                    if not node:
+                        raise ValueError('Node not provided for in-memory include')
+                    name = mainpath[1:]
+                    if name in node.extra_symbols:
+                        incl_node = node.extra_symbols[name]
+                        incl_node = deepcopy(self.dump_to_node(incl_node))
+                        if keypath:
+                            incl_node = KeyPath(keypath).get_obj(incl_node)
+                        res = CompositionResult(root=incl_node)
+                        return res
 
-            # it's a path starting with the root of the document
-            if include_str.startswith('/'):
-                return composition_result.rerooted(KeyPath(mainpath))
+                    raise ValueError(f'Invalid in-memory include: {name} not found')
 
-            # it's a path relative to the current node
-            if include_str.startswith('@') or include_str.startswith(
-                '.'
-            ):  # means relative to parent
-                comb_path = include_node_path.parent.down(KeyPath(mainpath))
-                return composition_result.rerooted(comb_path)
+                # it's a path starting with the root of the document
+                if include_str.startswith('/'):
+                    res = composition_result.rerooted(KeyPath(mainpath))
+                    return res
 
-            anchors = composition_result.anchor_paths
-            if mainpath in anchors:
-                return composition_result.rerooted(anchors[mainpath] + keypath)
+                # it's a path relative to the current node
+                if include_str.startswith('@') or include_str.startswith(
+                    '.'
+                ):  # means relative to parent
+                    comb_path = include_node_path.parent.down(KeyPath(mainpath))
+                    res = composition_result.rerooted(comb_path)
+                    return res
 
-            assert ':' in mainpath, f'Invalid include path: anchor {mainpath} not found in document'
+                anchors = composition_result.anchor_paths
+                if mainpath in anchors:
+                    res = composition_result.rerooted(anchors[mainpath] + keypath)
+                    return res
 
-        assert ':' in mainpath, f'Invalid include path: {mainpath}. No loader specified.'
+                assert (
+                    ':' in mainpath
+                ), f'Invalid include path: anchor {mainpath} not found in document'
 
-        loader, path = mainpath.split(':', 1)
-        if loader not in custom_loaders:
-            raise ValueError(f'Unknown loader: {loader}')
+            assert ':' in mainpath, f'Invalid include path: {mainpath}. No loader specified.'
 
-        res = custom_loaders[loader](path, loader=self)
-        if not isinstance(res, CompositionResult):
-            assert isinstance(res, str), f"Invalid loader result: {type(res)}"
-            res = self.copy().compose_config_from_str(res)
+            loader, path = mainpath.split(':', 1)
+            if loader not in custom_loaders:
+                raise ValueError(f'Unknown loader: {loader}')
 
-        if keypath:
-            res = res.rerooted(KeyPath(keypath))
-
-        return res
+            res = custom_loaders[loader](path, loader=self)
+            if not isinstance(res, CompositionResult):
+                assert isinstance(res, str), f"Invalid loader result: {type(res)}"
+                res = self.copy().compose_config_from_str(res)
+            if keypath:
+                res = res.rerooted(KeyPath(keypath))
+            return res
+        finally:
+            if isinstance(res, CompositionResult) and node is not None:
+                # we need to update the context of the composed document
+                # with the context of the loader that composed it
+                walk_node(
+                    node=res.root,
+                    callback=partial(add_to_context, node.extra_symbols),
+                )
 
     def compose_config_from_str(self, content: str) -> CompositionResult:
         self.yaml.compose(content)
@@ -248,7 +265,6 @@ class DraconLoader:
         return self.load_from_composition_result(comp)
 
     def post_process_composed(self, comp: CompositionResult):
-        print('Post processing composed')
         walk_node(
             node=comp.root,
             callback=partial(add_to_context, self.context),
@@ -262,9 +278,11 @@ class DraconLoader:
 
         return comp
 
+    @ftrace(inputs=False, watch=[])
     def preprocess_references(self, comp_res: CompositionResult):
         comp_res.find_special_nodes('interpolable', lambda n: isinstance(n, InterpolableNode))
         comp_res.sort_special_nodes('interpolable')
+        print(f"Preprocessing {len(comp_res.special_nodes['interpolable'])} interpolable nodes")
 
         for path in comp_res.pop_all_special('interpolable'):
             node = path.get_obj(comp_res.root)
@@ -296,17 +314,22 @@ class DraconLoader:
         return comp_res
 
     def process_includes(self, comp_res: CompositionResult):
-        comp_res.find_special_nodes('include', lambda n: isinstance(n, IncludeNode))
-        comp_res.sort_special_nodes('include')
+        while True:  # we need to loop until there are no more includes (since some includes may bring other ones )
+            comp_res.find_special_nodes('include', lambda n: isinstance(n, IncludeNode))
+            if not comp_res.special_nodes['include']:
+                break
 
-        for inode_path in comp_res.pop_all_special('include'):
-            inode = inode_path.get_obj(comp_res.root)
-            assert isinstance(inode, IncludeNode), f"Invalid node type: {type(inode)}"
-            new_loader = self.copy()
-            include_composed = new_loader.compose_from_include_str(
-                inode.value, inode_path, comp_res, node=inode
-            )
-            comp_res.replace_node_at(inode_path, include_composed.root)
+            comp_res.sort_special_nodes('include')
+            print(f"Processing {len(comp_res.special_nodes['include'])} includes")
+            for inode_path in comp_res.pop_all_special('include'):
+                inode = inode_path.get_obj(comp_res.root)
+                assert isinstance(inode, IncludeNode), f"Invalid node type: {type(inode)}"
+                new_loader = self.copy()
+                include_composed = new_loader.compose_from_include_str(
+                    inode.value, inode_path, comp_res, node=inode
+                )
+                comp_res.replace_node_at(inode_path, include_composed.root)
+
         return comp_res
 
     def dump(self, data, stream=None):

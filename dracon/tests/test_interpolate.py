@@ -460,7 +460,17 @@ def test_defines():
 def test_include():
     loader = DraconLoader(enable_interpolation=True)
     loader.context['get_index'] = lambda obj: obj.index
+    loader.context['get_nameindex'] = lambda obj: obj.name_index
     compres = loader.compose_from_include_str('pkg:dracon:tests/configs/interp_include.yaml')
     config = loader.load_from_composition_result(compres)
     config.resolve_all_lazy()
     assert config.nested.a_index == 2
+
+    assert isinstance(config.nested.a_nested, ClassA)
+    assert config.nested.a_nested.index == 3
+    assert config.nested.oldname == 'oldname 2'
+
+    assert config.nested.a_nested.name == 'newer_name 3'
+
+    assert config.nested.nameindex == '3: oldname 3'
+    assert config.nested.nameindex_2 == '3: oldname 3'

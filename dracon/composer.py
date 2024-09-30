@@ -95,7 +95,6 @@ class CompositionResult(BaseModel):
     def find_anchors(self):
         def _find_anchors(node, path):
             if node.anchor is not None:
-                print(f'Found anchor: {node.anchor} at {path}')
                 self.anchor_paths[node.anchor] = path
 
         self.walk(_find_anchors)

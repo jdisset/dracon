@@ -1,6 +1,18 @@
 __dracon__:
-  new_a: &newa !include pkg:dracon:tests/configs/complex_interp@a_obj # just need to include without interpolating
+  a: &aobj
+    <<: !include pkg:dracon:tests/configs/complex_interp@a_obj # just need to include without interpolating
+
+!noconstruct _: !include &aobj pkg:dracon:tests/configs/complex_interp@a_obj
 
 nested:
-  !define a_id: ${get_index(construct(&newa:i=2))}
+  !define a_id: ${get_index(construct(&aobj:i=2))}
   a_index: ${a_id}
+  oldname: ${(&aobj:i=2).name}
+  !define new_a: ${&aobj:i=3}
+  !define constructed_a: ${construct(new_a)}
+  nameindex: ${get_nameindex(constructed_a)}
+  nameindex_2: ${constructed_a.name_index}
+  a_nested: &a_nest
+    <<: !include $new_a
+    <<{<+}:
+      name: "newer_name ${&a_nest.index}"

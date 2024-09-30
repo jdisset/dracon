@@ -18,9 +18,9 @@ from typing import (
     MutableMapping,
     MutableSequence,
 )
-from ruamel.yaml.nodes import ScalarNode
-from dracon.utils import DictLike, generate_unique_id, ShallowDict
-from dracon.nodes import DraconMappingNode
+from ruamel.yaml.nodes import ScalarNode, Node
+from dracon.utils import DictLike, generate_unique_id, ShallowDict, ftrace
+from dracon.nodes import DraconMappingNode, DraconSequenceNode, IncludeNode
 
 from dracon.interpolation_utils import (
     outermost_interpolation_exprs,
@@ -30,7 +30,6 @@ from dracon.interpolation_utils import (
 )
 
 from copy import deepcopy
-from dracon.resolvable import Resolvable
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
@@ -136,15 +135,27 @@ def do_safe_eval(expr: str, symbols: Optional[dict] = None):
     return safe_eval.eval(expr, raise_errors=True)
 
 
+@ftrace(watch=[])
 def dracon_resolve(obj, **ctx):
     from dracon.resolvable import Resolvable
+    from dracon.merge import add_to_context
+    from dracon.composer import walk_node
+    from functools import partial
 
-    print(f'dracon_resolve: {obj}')
     if isinstance(obj, Resolvable):
+        print('It\'s a resolvable')
         newobj = deepcopy(obj).resolve(ctx)
         return newobj
+
     print('Not a resolvable')
-    return obj
+    assert isinstance(obj, Node), f'Expected a Node, got {type(obj)}'
+    node = deepcopy(obj)
+    walk_node(
+        node=node,
+        callback=partial(add_to_context, ctx),
+    )
+
+    return node
 
 
 def prepare_symbols(current_path, root_obj, extra_symbols):
@@ -176,8 +187,6 @@ def evaluate_expression(
     extra_symbols: Optional[Dict[str, Any]] = None,
 ) -> Any:
     from dracon.merge import merged, MergeKey
-
-    # print(f'evaluate_expression: {expr}. current_path: {current_path}. root_obj: {root_obj}')
 
     # Initialize interpolations
     if init_outermost_interpolations is None:
@@ -287,8 +296,6 @@ class InterpolableNode(ScalarNode):
         # to the resolve method. It's sort of a asteval-specific limitation becasue there's no
         # locals() or globals() accessible from "inside" the expression...
 
-        # print(f'preprocess_ampersand_references: {match.expr}')
-
         if ':' in match.expr:
             match.expr, vardefs = match.expr.split(':')
             if vardefs:
@@ -301,8 +308,6 @@ class InterpolableNode(ScalarNode):
         else:  # we're trying to match a keypath
             keypath = current_path.parent.down(KeyPath(match.expr))
 
-        # node = keypath.get_obj(comp_res.root)
-
         if self.referenced_nodes.root_node is not None:
             assert self.referenced_nodes.root_node == comp_res.root, 'Root object mismatch'
         else:
@@ -311,9 +316,6 @@ class InterpolableNode(ScalarNode):
         keypathstr = str(keypath.simplified())
         self.referenced_nodes.available_paths.add(keypathstr)
         newexpr = f'__DRACON_RESOLVE(__DR_NODES["{keypathstr}"] {context_str})'
-        # print(
-        # f'newexpr: {newexpr}. keypath: {keypathstr}. available_paths: {self.referenced_nodes.available_paths}'
-        # )
 
         if '__DR_NODES' not in self.extra_symbols:
             self.extra_symbols['__DR_NODES'] = self.referenced_nodes
