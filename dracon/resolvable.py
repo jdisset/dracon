@@ -66,9 +66,9 @@ class Resolvable(Generic[T]):
             ]
         )
 
-    def resolve(self, context=None, localns=None, interpolate_all=None):
+    def resolve(self, context=None):
         """
-        Resolve the object from the stored node and constructor, adding context and localns if needed
+        Resolve the object from the stored node and constructor, adding context if needed
         Note: it doesn't necessarily returns an object of inner_type. In theory yes,
         but in practice, the node tag could have been changed at any point. And a resolvable doesn't
         enforce any constraints on the type of the object it will return. It just pauses the construction
@@ -78,9 +78,6 @@ class Resolvable(Generic[T]):
         assert self.node is not None
         ctor = deepcopy(self.ctor)
         ctor.context.update(context or {})
-        ctor.localns.update(localns or {})
-        if interpolate_all is not None:
-            ctor.interpolate_all = interpolate_all
         return ctor.construct_object(self.node)
 
     def copy(self):

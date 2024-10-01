@@ -21,9 +21,9 @@ def make_default_empty_mapping_node():
     )
 
 
-def add_to_context(context, node: Node):
-    if hasattr(node, 'extra_symbols'):
-        node.extra_symbols = merged(node.extra_symbols, context, MergeKey(raw='{<+}'))
+def add_to_context(context, item, merge_key='<<{+}'):
+    if hasattr(item, 'context'):
+        item.context = merged(item.context, context, MergeKey(raw=merge_key))
 
 
 @ftrace(inputs=False, watch=[])

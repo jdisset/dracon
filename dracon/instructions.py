@@ -17,6 +17,8 @@ from dracon.keypath import KeyPath, ROOTPATH
 from dracon.merge import merged, MergeKey, add_to_context
 from dracon.interpolation import evaluate_expression, InterpolableNode
 from functools import partial
+
+
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 ## {{{                      --     instruct utils     --
@@ -102,9 +104,9 @@ class Define(Instruction):
                 value,
                 current_path=path,
                 root_obj=comp_res.root,
-                extra_symbols=value_node.extra_symbols,
+                context=value_node.context,
             )
-            ctx = merged(ctx, value_node.extra_symbols, MergeKey(raw='{<+}'))
+            ctx = merged(ctx, value_node.context, MergeKey(raw='{<+}'))
 
         var_name = key_node.value
         assert var_name.isidentifier(), f"Invalid variable name in define instruction: {var_name}"
@@ -171,10 +173,10 @@ class Each(Instruction):
             key_node.value,
             current_path=path,
             root_obj=comp_res.root,
-            extra_symbols=key_node.extra_symbols,
+            context=key_node.context,
         )
 
-        ctx = merged(ctx, key_node.extra_symbols, MergeKey(raw='{<+}'))
+        ctx = merged(ctx, key_node.context, MergeKey(raw='{<+}'))
 
         new_parent = deepcopy(parent_node)
         del new_parent[key_node.value]

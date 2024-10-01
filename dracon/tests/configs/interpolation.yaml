@@ -4,7 +4,7 @@ base:
   interpolated_addition: ${2+2}
   file_stem: ${"$FILE_STEM"}
 
-loaded_base: ${load('$DIR/base.yaml')}
+loaded_base: !include file:$DIR/base
 
 
 int4: ${2+2}
