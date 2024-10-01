@@ -1,7 +1,6 @@
 !noconstruct _: !include &aobj pkg:dracon:tests/configs/complex_interp@a_obj
 
 nested:
-
   !define a_id: ${get_index(construct(&aobj:i=2))}
   a_index: ${a_id}
   oldname: ${(&aobj:i=2).name}
@@ -10,7 +9,7 @@ nested:
   nameindex: ${get_nameindex(constructed_a)}
   nameindex_2: ${constructed_a.name_index}
   a_nested: &a_nest
-    <<: !include $new_a
+    <<: !include $new_a # include a copy of aobj with i=3
     <<{<+}:
       name: "newer_name ${&a_nest.index}"
 

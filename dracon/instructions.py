@@ -94,7 +94,7 @@ class Define(Instruction):
 
         var_name = key_node.value
         assert var_name.isidentifier(), f"Invalid variable name in define instruction: {var_name}"
-        ctx = merged(ctx, {var_name: deepcopy(value)}, MergeKey(raw='{<+}'))
+        ctx = merged(ctx, {var_name: value}, MergeKey(raw='{<+}'))
 
         walk_node(
             node=parent_node,
@@ -191,6 +191,7 @@ class Each(Instruction):
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
+
 
 AVAILABLE_INSTRUCTIONS = [Define, Each]
 
