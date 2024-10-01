@@ -4,6 +4,7 @@ from ruamel.yaml.tag import Tag
 from dracon.utils import dict_like, list_like, generate_unique_id, node_repr
 from typing import Any, Hashable
 from dracon.keypath import KeyPath, escape_keypath_part
+from functools import partial
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 ## {{{                           --     utils     --
@@ -15,6 +16,15 @@ DRACON_UNSET_VALUE = '__!DRACON_UNSET_VALUE!__'
 DEFAULT_MAP_TAG = 'tag:yaml.org,2002:map'
 DEFAULT_SEQ_TAG = 'tag:yaml.org,2002:seq'
 DEFAULT_SCALAR_TAG = 'tag:yaml.org,2002:str'
+
+
+def reset_tag(node):
+    if isinstance(node, SequenceNode):
+        node.tag = DEFAULT_SEQ_TAG
+    elif isinstance(node, MappingNode):
+        node.tag = DEFAULT_MAP_TAG
+    else:
+        node.tag = DEFAULT_SCALAR_TAG
 
 
 def make_node(value: Any, tag=None, **kwargs):
@@ -58,6 +68,48 @@ class DraconScalarNode(ScalarNode):
 
     def __repr__(self):
         return node_repr(self)
+
+
+class DeferredNode(ScalarNode):
+    # A node that is not yet resolved, just a wrapper to another node
+    def __init__(
+        self,
+        tag,
+        value,
+        start_mark=None,
+        end_mark=None,
+        style=None,
+        comment=None,
+        anchor=None,
+        extra_symbols=None,
+    ):
+        ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
+        self.extra_symbols = extra_symbols or {}
+        self.loader = None
+
+    def compose(self, **kwargs):
+        from dracon.loader import DraconLoader
+        from dracon.composer import CompositionResult, walk_node
+        from dracon.merge import add_to_context
+
+        if not self.loader:
+            raise ValueError('DeferredNode must have a loader to be composed')
+
+        if not isinstance(self.value, Node):
+            raise ValueError('DeferredNode must have a Node as value')
+
+        walk_node(
+            node=self.value,
+            callback=partial(add_to_context, self.extra_symbols),
+        )
+
+        compres = CompositionResult(root=self.value)
+        compres = self.loader.post_process_composed(compres)
+        return compres
+
+    def construct(self, **kwargs):
+        compres = self.compose(**kwargs)
+        return self.loader.load_from_composition_result(compres)
 
 
 class IncludeNode(DraconScalarNode):

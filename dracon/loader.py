@@ -26,10 +26,11 @@ from dracon.utils import (
 )
 from dracon.interpolation_utils import resolve_interpolable_variables
 from dracon.interpolation import InterpolableNode
-from dracon.merge import process_merges, add_to_context
+from dracon.merge import process_merges, add_to_context, merged, MergeKey
 from dracon.instructions import process_instructions
 from dracon.loaders.file import read_from_file
 from dracon.loaders.pkg import read_from_pkg
+from dracon.nodes import DeferredNode
 from dracon.loaders.env import read_from_env
 from dracon.representer import DraconRepresenter
 from dracon import dracontainer
@@ -109,7 +110,6 @@ class DraconLoader:
         self.yaml.constructor.yaml_base_dict_type = base_dict_type
         self.reset_context()
         self.update_context(context or {})
-        self.referenced_nodes = {}
 
     def reset_context(self):
         self.context: Dict[str, Any] = {
@@ -277,6 +277,7 @@ class DraconLoader:
         comp = process_merges(comp)
         comp = delete_unset_nodes(comp)
         comp = self.save_references(comp)
+        comp = self.prepare_deferred_nodes(comp)
 
         return comp
 
@@ -290,6 +291,23 @@ class DraconLoader:
             assert isinstance(node, InterpolableNode), f"Invalid node type: {type(node)}"
             node.preprocess_references(comp_res, path)
 
+        return comp_res
+
+    def prepare_deferred_nodes(self, comp_res: CompositionResult):
+        # deferred is a special case, we want to do them first
+        deferred_nodes = []
+
+        def find_deferred_nodes(node: Node, path: KeyPath):
+            if isinstance(node, DeferredNode):
+                deferred_nodes.append((node, path))
+
+        comp_res.walk(find_deferred_nodes)
+        deferred_nodes = sorted(deferred_nodes, key=lambda x: len(x[1]), reverse=True)
+        for node, _ in deferred_nodes:
+            node.loader = self.copy()
+            node.loader.update_context(self.context)
+            node.loader.yaml.constructor.referenced_nodes = self.yaml.constructor.referenced_nodes
+            node.loader.yaml.constructor.context.update(self.context)
         return comp_res
 
     def save_references(self, comp_res: CompositionResult):
@@ -308,10 +326,10 @@ class DraconLoader:
                 if i not in referenced_nodes:
                     referenced_nodes[i] = deepcopy(n)
 
-        self.referenced_nodes = ShallowDict(referenced_nodes)
-        # set the referenced nodes of the constructor:
-        self.yaml.constructor.referenced_nodes = self.referenced_nodes
-
+        # self.yaml.constructor.referenced_nodes = ShallowDict(referenced_nodes)
+        self.yaml.constructor.referenced_nodes = ShallowDict(
+            merged(self.yaml.constructor.referenced_nodes, referenced_nodes, MergeKey(raw='{<+}'))
+        )
         return comp_res
 
     def process_includes(self, comp_res: CompositionResult):

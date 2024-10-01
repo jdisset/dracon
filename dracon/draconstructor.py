@@ -18,6 +18,7 @@ from dracon.dracontainer import Dracontainer
 from dracon.interpolation import outermost_interpolation_exprs, InterpolableNode
 from dracon.lazy import LazyInterpolable, resolve_all_lazy, is_lazy_compatible
 from dracon.resolvable import Resolvable, get_inner_type
+from dracon.nodes import DeferredNode, reset_tag
 
 from typing import (
     Optional,
@@ -153,14 +154,18 @@ class Draconstructor(Constructor):
         tag = node.tag
         try:
             tag_type = resolve_type(tag, localns=self.localns)
+
             if issubclass(get_origin_type(tag_type), Resolvable):
                 return self.construct_resolvable(node, tag_type)
+
+            if isinstance(node, DeferredNode):
+                return node
 
             if isinstance(node, InterpolableNode):
                 return self.construct_interpolable(node)
 
             if tag.startswith('!'):
-                self.reset_tag(node)
+                reset_tag(node)
 
             obj = super().construct_object(node, deep=True)
         except Exception as e:
@@ -186,7 +191,7 @@ class Draconstructor(Constructor):
         if inner_type is Any:
             inner_type = parse_resolvable_tag(node.tag)
         if inner_type is Any:
-            self.reset_tag(node)
+            reset_tag(node)
         else:
             # check if it's a string or a type:
             if isinstance(inner_type, str):
@@ -218,6 +223,8 @@ class Draconstructor(Constructor):
         extra_symbols['__DR_NODES'] = {
             i: Resolvable(node=n, ctor=self.copy()) for i, n in self.referenced_nodes.items()
         }
+
+        print(f"{extra_symbols['__DR_NODES']=}")
 
         lzy = LazyInterpolable(
             value=node_value,
@@ -271,12 +278,3 @@ class Draconstructor(Constructor):
             mapping[key] = value
 
         return mapping
-
-    def reset_tag(self, node):
-        og_tag = node.tag
-        if isinstance(node, SequenceNode):
-            node.tag = self.resolver.DEFAULT_SEQUENCE_TAG
-        elif isinstance(node, MappingNode):
-            node.tag = self.resolver.DEFAULT_MAPPING_TAG
-        else:
-            node.tag = self.resolver.DEFAULT_SCALAR_TAG

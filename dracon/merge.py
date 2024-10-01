@@ -22,9 +22,7 @@ def make_default_empty_mapping_node():
 
 
 def add_to_context(context, node: Node):
-    from dracon.interpolation import InterpolableNode
-
-    if isinstance(node, (InterpolableNode, IncludeNode)):
+    if hasattr(node, 'extra_symbols'):
         node.extra_symbols = merged(node.extra_symbols, context, MergeKey(raw='{<+}'))
 
 
