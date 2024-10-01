@@ -73,6 +73,11 @@ class ShallowDict(MutableMapping, Generic[K, V]):
         # Provide a custom copy method for explicit shallow copying
         return self.__copy__()
 
+    def __repr__(self):
+        return f'ShallowDict({self._dict})'
+
+
+
 
 @runtime_checkable
 class DictLike(Protocol[K, V]):

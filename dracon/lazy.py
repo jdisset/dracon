@@ -112,6 +112,9 @@ class LazyInterpolable(Lazy[T]):
                 extra_symbols=self.extra_symbols,
             )
 
+        if self.extra_symbols is not None:
+            print(f"{self.extra_symbols.get('__DR_NODES')=}")
+
         return self.validate(self.value)
 
     def get(self, owner_instance, setval=False):
