@@ -105,11 +105,12 @@ def test_params_config():
     assert config["list2"] == [7, 8, 9]
 
 
-def test_env_variable_inclusion():
-    config = get_config(base_config_path)
 
-    # Check if the environment variable is included correctly
-    assert config["ppath"] == "test_var_2"
+def test_base_variable_inclusion():
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.load(f"pkg:{interp_config_path}")
+
+    assert config.base.file_stem == "interpolation"
 
 
 def test_composition_through_interpolation():

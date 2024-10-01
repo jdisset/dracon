@@ -2,7 +2,6 @@
 from ruamel.yaml import YAML, Node
 from typing import Type, Callable
 import os
-import copy
 import re
 from pathlib import Path
 from typing import Optional, Dict, Any, Annotated, TypeVar
@@ -17,7 +16,6 @@ from dracon.composer import (
 from dracon.draconstructor import Draconstructor
 from dracon.keypath import KeyPath, ROOTPATH
 from dracon.utils import (
-    collect_all_types,
     DictLike,
     MetadataDictLike,
     ListLike,
@@ -48,13 +46,6 @@ DEFAULT_LOADERS: Dict[str, Callable] = {
     'env': read_from_env,
 }
 
-DEFAULT_MODULES_FOR_TYPES = [
-    # 'pydantic',
-    # 'typing',
-    # 'dracon',
-    # 'numpy',
-]
-
 
 DEFAULT_CONTEXT = {
     # some SAFE os functions (not all of them are safe)
@@ -78,70 +69,61 @@ class DraconLoader:
     def __init__(
         self,
         custom_loaders: Optional[Dict[str, Callable]] = None,
-        custom_types: Optional[Dict[str, Type]] = None,
         capture_globals: bool = True,
         base_dict_type: Type[DictLike] = dracontainer.Mapping,
         base_list_type: Type[ListLike] = dracontainer.Sequence,
         enable_interpolation: bool = False,
-        interpolate_all: bool = False,
         context: Optional[Dict[str, Any]] = None,
     ):
         self.custom_loaders = DEFAULT_LOADERS
         self.custom_loaders.update(custom_loaders or {})
-        self.custom_types = custom_types or {}
-        self._context = context
-        self._interpolate_all = interpolate_all
+        self._context_arg = context
         self._enable_interpolation = enable_interpolation
+        self.referenced_nodes = {}
 
         self.yaml = YAML()
         self.yaml.Composer = DraconComposer
         self.yaml.Constructor = Draconstructor
         self.yaml.Representer = DraconRepresenter
 
-        self.yaml.constructor.resolve_interpolations = interpolate_all
         self.yaml.composer.interpolation_enabled = enable_interpolation
-
-        localns = collect_all_types(
-            DEFAULT_MODULES_FOR_TYPES,
-            capture_globals=capture_globals,
-        )
-        localns.update(self.custom_types)
-        self.yaml.constructor.localns = localns
         self.yaml.constructor.yaml_base_dict_type = base_dict_type
+        self.context = ShallowDict(self._context_arg) if self._context_arg else ShallowDict()
         self.reset_context()
-        self.update_context(context or {})
 
     def reset_context(self):
-        self.context: Dict[str, Any] = {
-            **DEFAULT_CONTEXT,
-            'load': load,  # from string or path to obj
-            'construct': partial(  # from node to obj
-                construct,
-                custom_types=self.yaml.constructor.localns,
-                context=self._context,
-                interpolate_all=self._interpolate_all,
-                enable_interpolation=self._enable_interpolation,
-            ),
-        }
+        self.update_context(DEFAULT_CONTEXT)
+        self.update_context(
+            {
+                'construct': partial(  # from node to obj
+                    construct,
+                    custom_loaders=self.custom_loaders,
+                    capture_globals=True,
+                    enable_interpolation=self._enable_interpolation,
+                    context=self.context,
+                )
+            }
+        )
 
     def update_context(self, kwargs):
-        # make sure it's created if it doesn't exist
-        self.context.update(kwargs)
-        self.yaml.constructor.context.update(self.context)
+        add_to_context(kwargs, self)
 
     def copy(self):
         new_loader = DraconLoader(
             custom_loaders=self.custom_loaders,
-            custom_types=self.custom_types,
             capture_globals=False,
             base_dict_type=self.yaml.constructor.yaml_base_dict_type,
             base_list_type=self.yaml.constructor.yaml_base_list_type,
             enable_interpolation=self.yaml.composer.interpolation_enabled,
-            context=self.context.copy(),
+            context=self.context.copy() if self.context else None,
         )
+        new_loader.referenced_nodes = self.referenced_nodes
         new_loader.yaml.constructor.yaml_constructors = self.yaml.constructor.yaml_constructors
 
         return new_loader
+
+    def __deepcopy__(self, memo):
+        return self.copy()
 
     @ftrace(inputs=False, watch=[])
     def compose_from_include_str(
@@ -157,9 +139,9 @@ class DraconLoader:
         # It's just a find + replace of $VAR with the value of VAR
         # from the loader context (i.e. "./$FILE_STEM.png").
         # It's weirdly independent from the rest of the interpolation system,
-        # and not even using the node.extra_symbols.
+        # and not even using the node.context.
         # It's conflicting with the node include syntax (!include $var)
-        # which does use the node.extra_symbols...
+        # which does use the node.context ...
         # Need to clean this up, merge both (probably use comptime interpolation)
         # and make it consistent.
 
@@ -179,8 +161,8 @@ class DraconLoader:
                     if not node:
                         raise ValueError('Node not provided for in-memory include')
                     name = mainpath[1:]
-                    if name in node.extra_symbols:
-                        incl_node = node.extra_symbols[name]
+                    if name in node.context:
+                        incl_node = node.context[name]
                         incl_node = self.dump_to_node(incl_node)
                         if keypath:
                             incl_node = KeyPath(keypath).get_obj(incl_node)
@@ -235,7 +217,7 @@ class DraconLoader:
                 # with the context of the loader that composed it
                 walk_node(
                     node=res.root,
-                    callback=partial(add_to_context, node.extra_symbols),
+                    callback=partial(add_to_context, node.context),
                 )
 
     def compose_config_from_str(self, content: str) -> CompositionResult:
@@ -245,7 +227,8 @@ class DraconLoader:
         return self.post_process_composed(res)
 
     def load_from_node(self, node):
-        self.yaml.constructor.context.update(self.context)
+        self.yaml.constructor.referenced_nodes = self.referenced_nodes
+        self.yaml.constructor.context = deepcopy(self.context or {})
         return self.yaml.constructor.construct_document(node)
 
     def load_from_composition_result(self, compres: CompositionResult, post_process=True):
@@ -305,9 +288,7 @@ class DraconLoader:
         deferred_nodes = sorted(deferred_nodes, key=lambda x: len(x[1]), reverse=True)
         for node, _ in deferred_nodes:
             node.loader = self.copy()
-            node.loader.update_context(self.context)
-            node.loader.yaml.constructor.referenced_nodes = self.yaml.constructor.referenced_nodes
-            node.loader.yaml.constructor.context.update(self.context)
+            # node.loader.update_context(self.context)
         return comp_res
 
     def save_references(self, comp_res: CompositionResult):
@@ -326,9 +307,8 @@ class DraconLoader:
                 if i not in referenced_nodes:
                     referenced_nodes[i] = deepcopy(n)
 
-        # self.yaml.constructor.referenced_nodes = ShallowDict(referenced_nodes)
-        self.yaml.constructor.referenced_nodes = ShallowDict(
-            merged(self.yaml.constructor.referenced_nodes, referenced_nodes, MergeKey(raw='{<+}'))
+        self.referenced_nodes = ShallowDict(
+            merged(self.referenced_nodes, referenced_nodes, MergeKey(raw='{<+}'))
         )
         return comp_res
 

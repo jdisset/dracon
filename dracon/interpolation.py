@@ -98,7 +98,7 @@ class LazyProtocol(Protocol):
     name: str
     current_path: KeyPath
     root_obj: Any
-    extra_symbols: DictLike
+    context: DictLike
 
 
 def resolve_field_references(expr: str):
@@ -156,7 +156,7 @@ def dracon_resolve(obj, **ctx):
     return node
 
 
-def prepare_symbols(current_path, root_obj, extra_symbols):
+def prepare_symbols(current_path, root_obj, context):
     symbols = copy(BASE_DRACON_SYMBOLS)
     symbols.update(
         {
@@ -167,7 +167,7 @@ def prepare_symbols(current_path, root_obj, extra_symbols):
             "__dracon_KeyPath": KeyPath,
         }
     )
-    symbols.update(extra_symbols or {})
+    symbols.update(context or {})
     return symbols
 
 
@@ -182,7 +182,7 @@ def evaluate_expression(
     root_obj: Any = None,
     allow_recurse: int = 5,
     init_outermost_interpolations: Optional[List[InterpolationMatch]] = None,
-    extra_symbols: Optional[Dict[str, Any]] = None,
+    context: Optional[Dict[str, Any]] = None,
 ) -> Any:
     from dracon.merge import merged, MergeKey
 
@@ -200,14 +200,14 @@ def evaluate_expression(
     if isinstance(current_path, str):
         current_path = KeyPath(current_path)
 
-    symbols = prepare_symbols(current_path, root_obj, extra_symbols)
+    symbols = prepare_symbols(current_path, root_obj, context)
 
     # Helper function to resolve Lazy instances
     def recurse_lazy_resolve(expr):
         if isinstance(expr, LazyProtocol):
             expr.current_path = current_path
             expr.root_obj = root_obj
-            expr.extra_symbols = merged(expr.extra_symbols, extra_symbols, MergeKey(raw='{<+}'))
+            expr.context = merged(expr.context, context, MergeKey(raw='{<+}'))
             expr = expr.resolve()
         return expr
 
@@ -224,7 +224,7 @@ def evaluate_expression(
             current_path,
             root_obj,
             allow_recurse=allow_recurse,
-            extra_symbols=extra_symbols,
+            context=context,
         )
         evaluated_expr = do_safe_eval(str(resolved_expr), symbols)
         endexpr = recurse_lazy_resolve(evaluated_expr)
@@ -237,7 +237,7 @@ def evaluate_expression(
                 current_path,
                 root_obj,
                 allow_recurse=allow_recurse,
-                extra_symbols=extra_symbols,
+                context=context,
             )
             evaluated_expr = do_safe_eval(str(resolved_expr), symbols)
             newexpr = str(recurse_lazy_resolve(evaluated_expr))
@@ -265,22 +265,22 @@ class InterpolableNode(ScalarNode):
         anchor=None,
         comment=None,
         init_outermost_interpolations=None,
-        extra_symbols=None,
+        context=None,
     ):
         self.init_outermost_interpolations = init_outermost_interpolations
         ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
         self.referenced_nodes = NodeLookup()
         self.saved_references = {}
-        self.extra_symbols = extra_symbols or {}
+        self.context = context or {}
 
-    def evaluate(self, path='/', root_obj=None, extra_symbols=None):
-        extra_symbols = extra_symbols or {}
-        extra_symbols = {**self.extra_symbols, **extra_symbols}
+    def evaluate(self, path='/', root_obj=None, context=None):
+        context = context or {}
+        context = {**self.context, **context}
         newval = evaluate_expression(
             self.value,
             current_path=path,
             root_obj=root_obj,
-            extra_symbols=extra_symbols,  # type: ignore
+            context=context,  # type: ignore
         )
         return newval
 
@@ -315,8 +315,8 @@ class InterpolableNode(ScalarNode):
         self.referenced_nodes.available_paths.add(keypathstr)
         newexpr = f'__DRACON_RESOLVE(__DR_NODES["{keypathstr}"] {context_str})'
 
-        if '__DR_NODES' not in self.extra_symbols:
-            self.extra_symbols['__DR_NODES'] = self.referenced_nodes
+        if '__DR_NODES' not in self.context:
+            self.context['__DR_NODES'] = self.referenced_nodes
 
         return newexpr
 
@@ -352,8 +352,8 @@ class InterpolableNode(ScalarNode):
             parent_node._recompute_map()
 
     def flush_references(self):
-        if '__DR_NODES' in self.extra_symbols:
-            del self.extra_symbols['__DR_NODES']
+        if '__DR_NODES' in self.context:
+            del self.context['__DR_NODES']
 
 
 ##───────────────────────────────────────────────────────────────────────────}}}

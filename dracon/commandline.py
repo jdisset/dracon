@@ -217,7 +217,11 @@ class Program(BaseModel, Generic[T]):
                 yield f"{key}: !include \"file:{conf}\""
 
     def generate_config(
-        self, args: dict[str, str], defined_vars: dict[str, str], confs_to_merge: list[str], context=None
+        self,
+        args: dict[str, str],
+        defined_vars: dict[str, str],
+        confs_to_merge: list[str],
+        context=None,
     ) -> Optional[T]:
         def make_override(argname, value):
             argname = argname.lstrip('-')
@@ -230,10 +234,10 @@ class Program(BaseModel, Generic[T]):
         if context is not None:
             custom_types.update(context)
         loader = DraconLoader(
-            custom_types=custom_types,
             enable_interpolation=True,
             base_list_type=list,
             base_dict_type=dict,
+            context=custom_types,
         )
         # loader.yaml.representer.full_module_path = False
 

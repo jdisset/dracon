@@ -83,11 +83,11 @@ class LazyInterpolable(Lazy[T]):
         root_obj: Any = None,
         init_outermost_interpolations: Optional[List[InterpolationMatch]] = None,
         permissive: bool = False,
-        extra_symbols: Optional[Dict[str, Any]] = None,
+        context: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(value, validator, name)
 
-        self.extra_symbols = extra_symbols
+        self.context = context
         self.current_path = current_path
         self.root_obj = root_obj
         self.init_outermost_interpolations = (
@@ -109,11 +109,8 @@ class LazyInterpolable(Lazy[T]):
                 self.current_path,
                 self.root_obj,
                 init_outermost_interpolations=self.init_outermost_interpolations,
-                extra_symbols=self.extra_symbols,
+                context=self.context,
             )
-
-        if self.extra_symbols is not None:
-            print(f"{self.extra_symbols.get('__DR_NODES')=}")
 
         return self.validate(self.value)
 

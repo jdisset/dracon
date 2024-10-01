@@ -16,8 +16,8 @@ from typing import (
 )
 from typing import runtime_checkable, get_args, get_origin
 import typing
-import importlib
 import inspect
+import importlib
 import uuid
 import sys
 import re
@@ -138,57 +138,6 @@ class ListLike(Generic[E], metaclass=ListLikeMeta):
 
 def list_like(obj) -> bool:
     return isinstance(obj, ListLike)
-
-
-##────────────────────────────────────────────────────────────────────────────}}}
-
-
-## {{{                      --     type collection     --
-def get_all_types(items):
-    return {
-        name: obj
-        for name, obj in items.items()
-        if isinstance(
-            obj,
-            (
-                type,
-                typing._GenericAlias,
-                typing._SpecialForm,
-                typing._SpecialGenericAlias,
-            ),
-        )
-    }
-
-
-def get_all_types_from_module(module):
-    if isinstance(module, str):
-        try:
-            module = importlib.import_module(module)
-        except ImportError:
-            print(f"WARNING: Could not import module {module}")
-            return {}
-    return get_all_types(module.__dict__)
-
-
-def get_globals_up_to_frame(frame_n):
-    frames = inspect.stack()
-    globalns = {}
-
-    for frame_id in range(min(frame_n, len(frames) - 1), 0, -1):
-        frame = frames[frame_id]
-        globalns.update(frame.frame.f_globals)
-
-    return globalns
-
-
-def collect_all_types(modules, capture_globals=True, globals_at_frame=15):
-    types = {}
-    for module in modules:
-        types.update(get_all_types_from_module(module))
-    if capture_globals:
-        globalns = get_globals_up_to_frame(globals_at_frame)
-        types.update(get_all_types(globalns))
-    return types
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}

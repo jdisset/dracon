@@ -12,6 +12,8 @@ from pydantic import (
     PydanticSchemaGenerationError,
 )
 
+import typing
+import inspect
 from dracon.utils import ShallowDict, ftrace
 from dracon import dracontainer
 from dracon.dracontainer import Dracontainer
@@ -107,6 +109,43 @@ def get_origin_type(t):
     return orig
 
 
+def get_all_types(items):
+    return {
+        name: obj
+        for name, obj in items.items()
+        if isinstance(
+            obj,
+            (
+                type,
+                typing._GenericAlias,
+                typing._SpecialForm,
+                typing._SpecialGenericAlias,
+            ),
+        )
+    }
+
+
+def get_all_types_from_module(module):
+    if isinstance(module, str):
+        try:
+            module = importlib.import_module(module)
+        except ImportError:
+            print(f"WARNING: Could not import module {module}")
+            return {}
+    return get_all_types(module.__dict__)
+
+
+def get_globals_up_to_frame(frame_n):
+    frames = inspect.stack()
+    globalns = {}
+
+    for frame_id in range(min(frame_n, len(frames) - 1), 0, -1):
+        frame = frames[frame_id]
+        globalns.update(frame.frame.f_globals)
+
+    return globalns
+
+
 def parse_resolvable_tag(tag):
     if tag.startswith('!'):
         tag = tag[1:]
@@ -116,6 +155,23 @@ def parse_resolvable_tag(tag):
     return Any
 
 
+def collect_all_types(modules, capture_globals=True, globals_at_frame=15):
+    types = {}
+    for module in modules:
+        types.update(get_all_types_from_module(module))
+    if capture_globals:
+        globalns = get_globals_up_to_frame(globals_at_frame)
+        types.update(get_all_types(globalns))
+    return types
+
+
+DEFAULT_MODULES_FOR_TYPES = [
+    # 'pydantic',
+    # 'typing',
+    # 'dracon',
+    # 'numpy',
+]
+
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
@@ -124,27 +180,34 @@ class Draconstructor(Constructor):
         self,
         preserve_quotes=None,
         loader=None,
-        localns=None,
-        context=None,
         reference_nodes=None,
-        interpolate_all=False,
         resolve_interpolations=False,
+        capture_globals=True,
     ):
         Constructor.__init__(self, preserve_quotes=preserve_quotes, loader=loader)
         self.preserve_quotes = preserve_quotes
         self.yaml_base_dict_type = dracontainer.Mapping
         self.yaml_base_sequence_type = dracontainer.Sequence
-        self.localns = localns or {}
-        self.context = context or {}
-        self.interpolate_all = interpolate_all
+
+        self.localns = collect_all_types(
+            DEFAULT_MODULES_FOR_TYPES,
+            capture_globals=capture_globals,
+        )
+        self.localns.update(get_all_types_from_module('__main__'))
+
         self.referenced_nodes = reference_nodes or {}
         self._depth = 0
         self._root_node = None
         self._current_path = ROOTPATH
         self.resolve_interpolations = resolve_interpolations
+        self.context = None
 
     @ftrace()
     def construct_object(self, node, deep=True):
+        assert self.context is not None, "Context must be set before constructing objects"
+
+        self.localns.update(get_all_types(self.context))
+
         is_root = False
         if self._depth == 0:
             self._root_node = node
@@ -219,33 +282,35 @@ class Draconstructor(Constructor):
 
             validator = partial(validator_f)
 
-        extra_symbols = merged(self.context, node.extra_symbols, MergeKey(raw='{<+}'))
-        extra_symbols['__DR_NODES'] = {
+        context = ShallowDict(merged(self.context, node.context, MergeKey(raw='{<+}')))
+        context['__DR_NODES'] = {
             i: Resolvable(node=n, ctor=self.copy()) for i, n in self.referenced_nodes.items()
         }
 
-        print(f"{extra_symbols['__DR_NODES']=}")
 
         lzy = LazyInterpolable(
             value=node_value,
             init_outermost_interpolations=init_outermost_interpolations,
             validator=validator,
-            extra_symbols=extra_symbols,
             current_path=self._current_path,
             root_obj=self._root_node,
+            context=context,
         )
 
         return lzy
 
     def copy(self):
-        return Draconstructor(
+        ctor = Draconstructor(
             preserve_quotes=self.preserve_quotes,
             loader=self.loader,
-            localns=self.localns,
-            context=self.context,
             reference_nodes=self.referenced_nodes,
-            interpolate_all=self.interpolate_all,
         )
+        ctor.context = self.context.copy()
+
+        return ctor
+
+    def __deepcopy__(self, memo):
+        return self.copy()
 
     def construct_mapping(self, node: Any, deep: bool = False) -> Any:
         if not isinstance(node, MappingNode):

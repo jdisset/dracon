@@ -266,7 +266,7 @@ def test_obj_references():
     as_ampersand_anchor: ${[&smpl:i=i for i in range(5)]}
     """
 
-    loader = DraconLoader(enable_interpolation=True)
+    loader = DraconLoader(enable_interpolation=True, context={'ClassA': ClassA})
     loader.yaml.representer.full_module_path = False
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
@@ -334,7 +334,7 @@ def test_obj_references_instruct():
 
     """
 
-    loader = DraconLoader(enable_interpolation=True)
+    loader = DraconLoader(enable_interpolation=True, context={'ClassA': ClassA})
     loader.yaml.representer.full_module_path = False
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
@@ -377,7 +377,7 @@ def test_instruct_on_nodes():
 
     """
 
-    loader = DraconLoader(enable_interpolation=True)
+    loader = DraconLoader(enable_interpolation=True, context={'ClassA': ClassA})
     loader.yaml.representer.full_module_path = False
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
@@ -429,7 +429,7 @@ def test_defines():
 
     """
 
-    loader = DraconLoader(enable_interpolation=True, custom_types={'ClassA': ClassA})
+    loader = DraconLoader(enable_interpolation=True, context={'ClassA': ClassA})
     loader.yaml.representer.full_module_path = False
     loader.context['func'] = lambda x, y: x + y
     loader.context['get_index'] = lambda obj: obj.index
@@ -458,7 +458,7 @@ def test_defines():
 
 
 def test_include():
-    loader = DraconLoader(enable_interpolation=True)
+    loader = DraconLoader(enable_interpolation=True, context={'ClassA': ClassA})
     loader.context['get_index'] = lambda obj: obj.index
     loader.context['get_nameindex'] = lambda obj: obj.name_index
     compres = loader.compose_from_include_str('pkg:dracon:tests/configs/interp_include.yaml')

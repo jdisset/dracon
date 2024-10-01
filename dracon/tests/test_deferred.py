@@ -56,7 +56,7 @@ def test_deferred():
 
     """
 
-    loader = DraconLoader(enable_interpolation=True, custom_types={'ClassA': ClassA})
+    loader = DraconLoader(enable_interpolation=True, context={'ClassA': ClassA})
     loader.yaml.representer.full_module_path = False
     loader.context['func'] = lambda x, y: x + y
     loader.context['get_index'] = lambda obj: obj.index

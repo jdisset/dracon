@@ -7,6 +7,7 @@ from pydantic.dataclasses import dataclass
 
 import pyparsing as pp
 import re
+from dracon.utils import ftrace
 
 
 class InterpolationError(Exception):
@@ -151,14 +152,16 @@ def find_interpolable_variables(expr: str) -> list[VarMatch]:
     return matches
 
 
+@ftrace()
 def resolve_interpolable_variables(expr: str, symbols: Dict[str, Any]) -> str:
     var_matches = find_interpolable_variables(expr)
     if not var_matches:
         return expr
     offset = 0
+    print(f"{var_matches=}, {symbols=}")
     for match in var_matches:
         if match.varname not in symbols:
-            raise InterpolationError(f"Variable {match.varname} not found in symbols")
+            raise InterpolationError(f"Variable {match.varname} not found in {symbols=}")
         newexpr = str(symbols[match.varname])
         expr = expr[: match.start + offset] + newexpr + expr[match.end + offset :]
         original_len = match.end - match.start

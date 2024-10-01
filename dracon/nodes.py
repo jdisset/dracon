@@ -81,10 +81,10 @@ class DeferredNode(ScalarNode):
         style=None,
         comment=None,
         anchor=None,
-        extra_symbols=None,
+        context=None,
     ):
         ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
-        self.extra_symbols = extra_symbols or {}
+        self.context = context or {}
         self.loader = None
 
     def compose(self, **kwargs):
@@ -100,7 +100,7 @@ class DeferredNode(ScalarNode):
 
         walk_node(
             node=self.value,
-            callback=partial(add_to_context, self.extra_symbols),
+            callback=partial(add_to_context, self.context),
         )
 
         compres = CompositionResult(root=self.value)
@@ -121,12 +121,12 @@ class IncludeNode(DraconScalarNode):
         tag=None,
         anchor=None,
         comment=None,
-        extra_symbols=None,
+        context=None,
     ):
         DraconScalarNode.__init__(
             self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor
         )
-        self.extra_symbols = extra_symbols or {}
+        self.context = context or {}
 
     def __str__(self):
         return node_repr(self)
