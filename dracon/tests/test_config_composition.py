@@ -105,7 +105,6 @@ def test_params_config():
     assert config["list2"] == [7, 8, 9]
 
 
-
 def test_base_variable_inclusion():
     loader = DraconLoader(enable_interpolation=True)
     config = loader.load(f"pkg:{interp_config_path}")
@@ -162,7 +161,9 @@ class WithResolvable(BaseModel):
 
 
 def test_resolvable():
-    loader = DraconLoader(enable_interpolation=True)
+    loader = DraconLoader(
+        enable_interpolation=True, context={"Person": Person, "WithResolvable": WithResolvable}
+    )
     config = loader.load(f"pkg:{resolvable_config_path}")
 
     assert type(config.ned) is Resolvable

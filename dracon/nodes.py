@@ -70,48 +70,6 @@ class DraconScalarNode(ScalarNode):
         return node_repr(self)
 
 
-class DeferredNode(ScalarNode):
-    # A node that is not yet resolved, just a wrapper to another node
-    def __init__(
-        self,
-        tag,
-        value,
-        start_mark=None,
-        end_mark=None,
-        style=None,
-        comment=None,
-        anchor=None,
-        context=None,
-    ):
-        ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
-        self.context = context or {}
-        self.loader = None
-
-    def compose(self, **kwargs):
-        from dracon.loader import DraconLoader
-        from dracon.composer import CompositionResult, walk_node
-        from dracon.merge import add_to_context
-
-        if not self.loader:
-            raise ValueError('DeferredNode must have a loader to be composed')
-
-        if not isinstance(self.value, Node):
-            raise ValueError('DeferredNode must have a Node as value')
-
-        walk_node(
-            node=self.value,
-            callback=partial(add_to_context, self.context),
-        )
-
-        compres = CompositionResult(root=self.value)
-        compres = self.loader.post_process_composed(compres)
-        return compres
-
-    def construct(self, **kwargs):
-        compres = self.compose(**kwargs)
-        return self.loader.load_from_composition_result(compres)
-
-
 class IncludeNode(DraconScalarNode):
     def __init__(
         self,

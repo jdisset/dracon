@@ -35,18 +35,6 @@ class Instruction:
 
 @ftrace(watch=[])
 def process_instructions(comp_res: CompositionResult):
-    # deferred is a special case, we want to do them first
-    deferred_nodes = []
-
-    def find_deferred_nodes(node: Node, path: KeyPath):
-        if inst := Deferred.match(node.tag):
-            deferred_nodes.append((inst, path))
-
-    comp_res.walk(find_deferred_nodes)
-    deferred_nodes = sorted(deferred_nodes, key=lambda x: len(x[1]), reverse=True)
-    for inst, path in deferred_nodes:
-        inst.process(comp_res, path.copy())
-
     # then all other instructions
     instruction_nodes = []
 
@@ -194,6 +182,7 @@ class Each(Instruction):
             for node in new_nodes:
                 new_node = deepcopy(node)
                 new_parent.append(new_node)
+
                 ctx = merged(ctx, {self.var_name: item}, MergeKey(raw='{<+}'))
                 walk_node(
                     node=new_node,
@@ -202,50 +191,6 @@ class Each(Instruction):
 
         comp_res.replace_node_at(path.parent, new_parent)
         del parent_node[key_node.value]
-
-        return comp_res
-
-
-##────────────────────────────────────────────────────────────────────────────}}}
-
-
-## {{{                         --     deferred     --
-class Deferred(Instruction):
-    PATTERN = r"!deferred"
-
-    """
-        `!deferred value`
-        `!deferred!othertag value`
-
-        Will store the value in a DeferredNode, which will not be composed until explicitly resolved.
-
-    """
-
-    @staticmethod
-    def match(value: Optional[str]) -> Optional['Deferred']:
-        if not value:
-            return None
-        if value == '!deferred':
-            return Deferred()
-        return None
-
-    @ftrace(False, watch=[])
-    def process(self, comp_res: CompositionResult, path: KeyPath):
-        from dracon.nodes import DeferredNode, reset_tag
-
-        if path == ROOTPATH:
-            raise ValueError("Cannot use !deferred at the root level")
-
-        node = path.get_obj(comp_res.root)
-
-        assert node.tag.startswith('!deferred'), f"Expected tag '!deferred', but got {node.tag}"
-        node.tag = node.tag[len('!deferred') :]
-        if node.tag == "":
-            reset_tag(node)
-
-        new_node = DeferredNode(tag='', value=deepcopy(node))
-
-        comp_res.replace_node_at(path, new_node)
 
         return comp_res
 

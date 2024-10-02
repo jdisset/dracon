@@ -3,7 +3,7 @@ import re
 import pytest
 from dracon import dump, loads
 from dracon.loader import DraconLoader
-from dracon.nodes import DeferredNode
+from dracon.deferred import DeferredNode
 from dracon.dracontainer import Dracontainer, Mapping, Sequence
 from dracon.interpolation import InterpolationError, InterpolationMatch
 from typing import Generic, TypeVar, Any, Optional, Annotated, cast, List
@@ -58,7 +58,6 @@ def test_deferred():
 
     loader = DraconLoader(enable_interpolation=True, context={'ClassA': ClassA})
     loader.yaml.representer.full_module_path = False
-    loader.context['func'] = lambda x, y: x + y
     loader.context['get_index'] = lambda obj: obj.index
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
@@ -73,5 +72,49 @@ def test_deferred():
     nested = config.nested.construct()
 
     assert nested.a_index == 42
+    assert nested.aname == "new_name 42"
+    assert nested.constructed_nameindex == "42: new_name 42"
+
+
+def test_deferred_explicit():
+    yaml_content = """
+    !define i42 : !int 42
+
+    a_obj: !ClassA &ao
+        index: &aid ${i42}
+        name: oldname
+        <<{<+}: 
+            name: "new_name ${&aid}"
+
+    nested:
+        !define aid: ${get_index(construct(&/a_obj)) + $CONSTANT}
+        a_index: ${aid}
+        aname: ${&/a_obj.name}
+        constructed_nameindex: ${construct(&/a_obj).name_index}
+        !define ao: ${&/a_obj}
+        obj2:
+            <<: !include $ao
+        obj3:
+            <<: !include /a_obj
+
+    """
+
+    loader = DraconLoader(
+        enable_interpolation=True, context={'ClassA': ClassA}, deferred_paths=['/nested']
+    )
+    loader.yaml.representer.full_module_path = False
+    config = loader.loads(yaml_content)
+    config.resolve_all_lazy()
+
+    assert isinstance(config.a_obj, ClassA)
+    assert config['a_obj'].index == 42
+    assert config['a_obj'].name == "new_name 42"
+
+    assert type(config['nested']) is DeferredNode
+
+    config.nested.update_context({'get_index': lambda obj: obj.index, '$CONSTANT': 10})
+    nested = config.nested.construct()
+
+    assert nested.a_index == 52
     assert nested.aname == "new_name 42"
     assert nested.constructed_nameindex == "42: new_name 42"

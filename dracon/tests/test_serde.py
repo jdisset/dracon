@@ -34,7 +34,7 @@ def test_simple():
             attr3: 3.14
     """
 
-    loader = DraconLoader()
+    loader = DraconLoader(context={"ClassA": ClassA, "ClassB": ClassB})
     loader.yaml.representer.full_module_path = False
 
     obj = loader.loads(conf)
@@ -58,7 +58,7 @@ def test_complex():
     b = ClassB(attr1="hello", attr2=42, attrA=a)
     c = ClassC(attr1=["hello", "world"], attrB=b)
 
-    loader = DraconLoader()
+    loader = DraconLoader(context={"ClassA": ClassA, "ClassB": ClassB, "ClassC": ClassC})
     loader.yaml.representer.full_module_path = False
     conf = loader.dump(c)
     assert (
@@ -70,14 +70,13 @@ def test_complex():
 class ClassEx(BaseModel):
     attr: float = 0
 
+
 def test_empty():
     conf = """
         emptyd: !ClassEx {}
         """
-    loader = DraconLoader()
+    loader = DraconLoader(context={"ClassEx": ClassEx})
     loader.yaml.representer.full_module_path = False
     obj = loader.loads(conf)
     assert isinstance(obj.emptyd, ClassEx)
     assert obj.emptyd.attr == 0
-
-
