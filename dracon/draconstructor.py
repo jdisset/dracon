@@ -20,7 +20,8 @@ from dracon.dracontainer import Dracontainer
 from dracon.interpolation import outermost_interpolation_exprs, InterpolableNode
 from dracon.lazy import LazyInterpolable, resolve_all_lazy, is_lazy_compatible
 from dracon.resolvable import Resolvable, get_inner_type
-from dracon.nodes import DeferredNode, reset_tag
+from dracon.deferred import DeferredNode
+from dracon.nodes import reset_tag
 
 from typing import (
     Optional,
@@ -166,10 +167,10 @@ def collect_all_types(modules, capture_globals=True, globals_at_frame=15):
 
 
 DEFAULT_MODULES_FOR_TYPES = [
-    # 'pydantic',
-    # 'typing',
-    # 'dracon',
-    # 'numpy',
+    'pydantic',
+    'typing',
+    'dracon',
+    'numpy',
 ]
 
 ##────────────────────────────────────────────────────────────────────────────}}}
@@ -182,7 +183,7 @@ class Draconstructor(Constructor):
         loader=None,
         reference_nodes=None,
         resolve_interpolations=False,
-        capture_globals=True,
+        capture_globals=False,
     ):
         Constructor.__init__(self, preserve_quotes=preserve_quotes, loader=loader)
         self.preserve_quotes = preserve_quotes
@@ -286,7 +287,6 @@ class Draconstructor(Constructor):
         context['__DR_NODES'] = {
             i: Resolvable(node=n, ctor=self.copy()) for i, n in self.referenced_nodes.items()
         }
-
 
         lzy = LazyInterpolable(
             value=node_value,

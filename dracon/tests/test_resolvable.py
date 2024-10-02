@@ -21,7 +21,7 @@ def test_resolvable_merge_attrs():
     subattr_2: subvalue2
     """
 
-    loader = DraconLoader()
+    loader = DraconLoader(context={'MyClass': MyClass})
     obj = loader.loads(yaml_content)
     assert isinstance(obj, MyClass)
 
@@ -67,7 +67,7 @@ def test_resolvable_merge_attrs_custom_merge_key():
     subattr_2: subvalue2
     """
 
-    loader = DraconLoader()
+    loader = DraconLoader(context={'MyClass': MyClass})
     obj = loader.loads(yaml_content)
     assert isinstance(obj, MyClass)
 

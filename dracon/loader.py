@@ -28,7 +28,7 @@ from dracon.merge import process_merges, add_to_context, merged, MergeKey
 from dracon.instructions import process_instructions
 from dracon.loaders.file import read_from_file
 from dracon.loaders.pkg import read_from_pkg
-from dracon.nodes import DeferredNode
+from dracon.deferred import DeferredNode, process_deferred
 from dracon.loaders.env import read_from_env
 from dracon.representer import DraconRepresenter
 from dracon import dracontainer
@@ -74,12 +74,17 @@ class DraconLoader:
         base_list_type: Type[ListLike] = dracontainer.Sequence,
         enable_interpolation: bool = False,
         context: Optional[Dict[str, Any]] = None,
+        deferred_paths: Optional[
+            list[KeyPath | str]
+        ] = None,  # list of paths to nodes that we need to force-defer
     ):
         self.custom_loaders = DEFAULT_LOADERS
         self.custom_loaders.update(custom_loaders or {})
         self._context_arg = context
         self._enable_interpolation = enable_interpolation
         self.referenced_nodes = {}
+        self.deferred_paths = deferred_paths or []
+        self.deferred_paths = [KeyPath(p) for p in self.deferred_paths]
 
         self.yaml = YAML()
         self.yaml.Composer = DraconComposer
@@ -254,13 +259,15 @@ class DraconLoader:
             node=comp.root,
             callback=partial(add_to_context, self.context),
         )
+
         comp = self.preprocess_references(comp)
+        comp = process_deferred(comp, force_deferred_at=self.deferred_paths)
         comp = process_instructions(comp)
         comp = self.process_includes(comp)
         comp = process_merges(comp)
         comp = delete_unset_nodes(comp)
         comp = self.save_references(comp)
-        comp = self.prepare_deferred_nodes(comp)
+        comp = self.update_deferred_nodes(comp)
 
         return comp
 
@@ -276,8 +283,9 @@ class DraconLoader:
 
         return comp_res
 
-    def prepare_deferred_nodes(self, comp_res: CompositionResult):
-        # deferred is a special case, we want to do them first
+    def update_deferred_nodes(self, comp_res: CompositionResult):
+        # copies the loader into deferred nodes so they can resume their composition by themselves
+
         deferred_nodes = []
 
         def find_deferred_nodes(node: Node, path: KeyPath):
@@ -286,9 +294,10 @@ class DraconLoader:
 
         comp_res.walk(find_deferred_nodes)
         deferred_nodes = sorted(deferred_nodes, key=lambda x: len(x[1]), reverse=True)
+
         for node, _ in deferred_nodes:
             node.loader = self.copy()
-            # node.loader.update_context(self.context)
+            node.full_composition = deepcopy(comp_res)
         return comp_res
 
     def save_references(self, comp_res: CompositionResult):
