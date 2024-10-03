@@ -302,3 +302,111 @@ def test_mappingkey():
     assert newmk.is_mapping_key()
     assert not valuek.is_mapping_key()
     assert valuek.get_obj(M) == 5
+
+
+def test_match_exact():
+    pattern = KeyPath("a.b.c")
+    target = KeyPath("a.b.c")
+    assert pattern.match(target)
+
+
+def test_match_single_wildcard():
+    pattern = KeyPath("a.*.c")
+    target1 = KeyPath("a.b.c")
+    target2 = KeyPath("a.xyz.c")
+    target3 = KeyPath("a.b.d")
+    assert pattern.match(target1)
+    assert pattern.match(target2)
+    assert not pattern.match(target3)
+
+
+def test_match_multi_wildcard():
+    pattern = KeyPath("a.**.d")
+    target1 = KeyPath("a.b.c.d")
+    target2 = KeyPath("a.d")
+    target3 = KeyPath("a.x.y.z.d")
+    target4 = KeyPath("a.b.c.e")
+    assert pattern.match(target1)
+    assert pattern.match(target2)
+    assert pattern.match(target3)
+    assert not pattern.match(target4)
+
+
+def test_match_partial_segment():
+    pattern = KeyPath("a.b*.d")
+    target1 = KeyPath("a.b.d")
+    target2 = KeyPath("a.bcd.d")
+    target3 = KeyPath("a.bc123.d")
+    target4 = KeyPath("a.c.d")
+    assert pattern.match(target1)
+    assert pattern.match(target2)
+    assert pattern.match(target3)
+    assert not pattern.match(target4)
+
+
+def test_match_mixed_wildcards_and_partial():
+    pattern = KeyPath("a.*.b*.**.c*d")
+    target1 = KeyPath("a.x.by.cd")
+    target2 = KeyPath("a.x.bz.y.z.cd")
+    target3 = KeyPath("a.x.by.z.czzd")
+    target4 = KeyPath("a.x.cy.z.d")
+    assert pattern.match(target1)
+    assert pattern.match(target2)
+    assert pattern.match(target3)
+    assert not pattern.match(target4)
+
+
+def test_match_with_root():
+    pattern = KeyPath("/a.b*.c")
+    target1 = KeyPath("/a.b.c")
+    target2 = KeyPath("/a.bxyz.c")
+    target3 = KeyPath("a.b.c")
+    assert pattern.match(target1)
+    assert pattern.match(target2)
+    assert not pattern.match(target3)
+
+
+def test_match_only_wildcards():
+    pattern = KeyPath("*.**.*")
+    target1 = KeyPath("a.b.c")
+    target2 = KeyPath("a.b.c.d.e")
+    target3 = KeyPath("a")
+    assert pattern.match(target1)
+    assert pattern.match(target2)
+    assert not pattern.match(target3)
+
+
+def test_match_empty():
+    pattern = KeyPath("")
+    target1 = KeyPath("")
+    target2 = KeyPath("a")
+    assert pattern.match(target1)
+    assert not pattern.match(target2)
+
+
+def test_match_complex_pattern():
+    pattern = KeyPath("/a.*.b*.**.c*.*d")
+    target1 = KeyPath("/a.x.by.z.cz.yd")
+    target2 = KeyPath("/a.x.b.c.d")
+    target3 = KeyPath("/a.x.by.z.c")
+    target4 = KeyPath("a.x.by.z.cz.yd")
+    assert pattern.match(target1)
+    assert pattern.match(target2)
+    assert not pattern.match(target3)
+    assert not pattern.match(target4)
+
+
+def test_match_with_integers():
+    pattern = KeyPath("a.*.b*.**")
+    target1 = KeyPath("a.0.b1.2.3")
+    target2 = KeyPath("a.x.by.z")
+    assert pattern.match(target1)
+    assert pattern.match(target2)
+
+
+def test_match_with_escaped_dots():
+    pattern = KeyPath("a.*.b\\.c*.d")
+    target1 = KeyPath("a.x.b.c.d")
+    target2 = KeyPath("a.x.b\\.c123.d")
+    assert not pattern.match(target1)
+    assert pattern.match(target2)

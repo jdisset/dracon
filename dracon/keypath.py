@@ -4,11 +4,15 @@ from typing import List, Union, Hashable, Any, Optional, TypeVar, Type, Protocol
 from typing_extensions import runtime_checkable
 from ruamel.yaml.nodes import Node
 from dracon.utils import node_repr, list_like, dict_like
+import re
+
 
 class KeyPathToken(Enum):
     ROOT = 0
     UP = 1
     MAPPING_KEY = 2  # indicates that the path points to the key of a mapping, not the value
+    SINGLE_WILDCARD = 3  # represents '*' in glob patterns
+    MULTI_WILDCARD = 4  # represents '**' in glob patterns
 
 
 MAPPING_KEY = KeyPathToken.MAPPING_KEY
@@ -30,9 +34,7 @@ class KeyPath:
         self, path: Union[str, List[Union[Hashable, KeyPathToken]]], simplify: bool = True
     ):
         self.is_simple = False
-        if isinstance(path, str):
-            self.parts = self._parse_string(path)
-        elif isinstance(path, (list, tuple)):
+        if isinstance(path, (list, tuple)) and not isinstance(path, str):
             self.parts = list(path)  # Create a copy to avoid modifying the input
         else:
             self.parts = self._parse_string(str(path))
@@ -55,13 +57,13 @@ class KeyPath:
                 continue
             elif char == '/' and not escaped:
                 if current_part:
-                    parts.append(self._convert_part(current_part))
+                    parts.append(self._parse_part(current_part))
                     current_part = ""
                 parts.append(KeyPathToken.ROOT)
                 dot_count = 0
             elif char == '.' and not escaped:
                 if current_part:
-                    parts.append(self._convert_part(current_part))
+                    parts.append(self._parse_part(current_part))
                     current_part = ""
                 dot_count += 1
                 if dot_count > 1:
@@ -71,12 +73,14 @@ class KeyPath:
                 dot_count = 0
             escaped = False
         if current_part:
-            parts.append(self._convert_part(current_part))
+            parts.append(self._parse_part(current_part))
         return parts
 
-    def _convert_part(self, part: str) -> Union[Hashable, KeyPathToken]:
-        # if part.isdigit():
-        # return int(part)
+    def _parse_part(self, part: str) -> Union[Hashable, KeyPathToken]:
+        if part == '*':
+            return KeyPathToken.SINGLE_WILDCARD
+        elif part == '**':
+            return KeyPathToken.MULTI_WILDCARD
         return part
 
     def clear(self) -> 'KeyPath':
@@ -120,6 +124,45 @@ class KeyPath:
             return self.down(KeyPath(escape_keypath_part(path)))
         return self
 
+    def match(self, target: 'KeyPath') -> bool:
+        """
+        Match this KeyPath (as a pattern) against a target KeyPath.
+        Supports '*' for single-level wildcard, '**' for multi-level wildcard,
+        and partial matching within individual path segments.
+        """
+
+        def match_parts(pattern_parts, target_parts):
+            pi = ti = 0
+            while pi < len(pattern_parts) and ti < len(target_parts):
+                if pattern_parts[pi] == KeyPathToken.MULTI_WILDCARD:
+                    # Try to match the rest of the pattern against the rest of the target
+                    return any(
+                        match_parts(pattern_parts[pi + 1 :], target_parts[i:])
+                        for i in range(ti, len(target_parts) + 1)
+                    )
+                elif pattern_parts[pi] == KeyPathToken.SINGLE_WILDCARD:
+                    # Match any single part
+                    pi += 1
+                    ti += 1
+                elif isinstance(pattern_parts[pi], str) and isinstance(target_parts[ti], str):
+                    # Convert glob pattern to regex pattern
+                    regex_pattern = '^' + re.escape(pattern_parts[pi]).replace('\\*', '.*') + '$'
+                    if re.match(regex_pattern, target_parts[ti]):
+                        pi += 1
+                        ti += 1
+                    else:
+                        return False
+                elif pattern_parts[pi] == target_parts[ti]:
+                    # Exact match for non-string parts (e.g., KeyPathToken.ROOT)
+                    pi += 1
+                    ti += 1
+                else:
+                    return False
+            # Check if we've matched all parts
+            return pi == len(pattern_parts) and ti == len(target_parts)
+
+        return match_parts(self.simplified().parts, target.simplified().parts)
+
     # same as down
     def append(self, part: Union[Hashable, KeyPathToken]) -> 'KeyPath':
         return self.down(part)
@@ -160,8 +203,9 @@ class KeyPath:
         return self
 
     def simplified(self) -> 'KeyPath':
-        new = KeyPath(self.parts, simplify=not self.is_simple)
-        new.is_simple = True
+        if self.is_simple:
+            return self.copy()
+        new = KeyPath(self.parts, simplify=True)
         return new
 
     def __str__(self) -> str:
@@ -174,6 +218,10 @@ class KeyPath:
                 result += '.' if prev == KeyPathToken.UP else '..'
             elif part == MAPPING_KEY:
                 result += '🔑:' if prev in {KeyPathToken.ROOT, KeyPathToken.UP, None} else '.🔑:'
+            elif part == KeyPathToken.SINGLE_WILDCARD:
+                result += '*' if prev in {KeyPathToken.ROOT, KeyPathToken.UP, None} else '.*'
+            elif part == KeyPathToken.MULTI_WILDCARD:
+                result += '**' if prev in {KeyPathToken.ROOT, KeyPathToken.UP, None} else '.**'
             else:
                 if prev not in {KeyPathToken.ROOT, KeyPathToken.UP, None, MAPPING_KEY}:
                     result += '.'
@@ -221,6 +269,13 @@ class KeyPath:
 
         self.check_correctness()
 
+        # make sure there's no wildcards in the path
+        if any(
+            part in {KeyPathToken.SINGLE_WILDCARD, KeyPathToken.MULTI_WILDCARD}
+            for part in self.parts
+        ):
+            raise ValueError(f'Cannot get object from path with wildcards: {self}')
+
         res = obj
         for i, part in enumerate(self.parts):
             if part == KeyPathToken.UP:
@@ -233,9 +288,7 @@ class KeyPath:
                 assert hasattr(res, 'get_key')
                 res = res.get_key(self.parts[-1])
                 return res
-            res = _get_obj_impl(
-                res, part, create_path_if_not_exists, default_mapping_constructor
-            )
+            res = _get_obj_impl(res, part, create_path_if_not_exists, default_mapping_constructor)
         return res
 
     def is_mapping_key(self) -> bool:
@@ -252,15 +305,12 @@ class KeyPath:
         return KeyPath(self.parts[:-2]) + self.parts[-1]
 
 
-
 # protocol that tests if an object has a keypath_passthrough prperty:
 @runtime_checkable
 class Passthrough(Protocol):
     @property
     def keypath_passthrough(self):
         raise NotImplementedError
-
-
 
 
 def _get_obj_impl(
@@ -270,6 +320,7 @@ def _get_obj_impl(
     Get an attribute from an object, handling various types of objects.
     """
     from dracon.deferred import DeferredNode
+
     if isinstance(obj, DeferredNode):
         print(f"keypath_passthrough: {obj.keypath_passthrough}")
         return _get_obj_impl(
@@ -291,7 +342,9 @@ def _get_obj_impl(
                 obj[attr] = default_mapping_constructor()
                 return obj[attr]
             if isinstance(obj, Node):
-                raise AttributeError(f'Could not find attribute {attr} in node \n{node_repr(obj)} of type {type(obj)}')
+                raise AttributeError(
+                    f'Could not find attribute {attr} in node \n{node_repr(obj)} of type {type(obj)}'
+                )
             else:
                 raise AttributeError(f'Could not find attribute {attr} in {obj}')
 
