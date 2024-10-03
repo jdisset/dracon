@@ -296,8 +296,8 @@ class DraconLoader:
         deferred_nodes = sorted(deferred_nodes, key=lambda x: len(x[1]), reverse=True)
 
         for node, _ in deferred_nodes:
-            node.loader = self.copy()
-            node.full_composition = deepcopy(comp_res)
+            node._loader = self.copy()
+            node._full_composition = deepcopy(comp_res)
         return comp_res
 
     def save_references(self, comp_res: CompositionResult):

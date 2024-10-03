@@ -39,8 +39,9 @@ def process_instructions(comp_res: CompositionResult):
     instruction_nodes = []
 
     def find_instruction_nodes(node: Node, path: KeyPath):
-        if inst := match_instruct(node.tag):
-            instruction_nodes.append((inst, path))
+        if hasattr(node, 'tag') and node.tag:
+            if inst := match_instruct(node.tag):
+                instruction_nodes.append((inst, path))
 
     comp_res.walk(find_instruction_nodes)
     instruction_nodes = sorted(instruction_nodes, key=lambda x: len(x[1]))

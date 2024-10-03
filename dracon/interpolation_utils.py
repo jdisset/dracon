@@ -158,7 +158,6 @@ def resolve_interpolable_variables(expr: str, symbols: Dict[str, Any]) -> str:
     if not var_matches:
         return expr
     offset = 0
-    print(f"{var_matches=}, {symbols=}")
     for match in var_matches:
         if match.varname not in symbols:
             raise InterpolationError(f"Variable {match.varname} not found in {symbols=}")
