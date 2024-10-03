@@ -1,11 +1,20 @@
 from ruamel.yaml.representer import RoundTripRepresenter
 from ruamel.yaml.nodes import MappingNode, ScalarNode
+from typing import Protocol
 from ruamel.yaml.scalarstring import PlainScalarString
 from pydantic import BaseModel
 from dracon.utils import list_like, dict_like
 from dracon.resolvable import Resolvable
+from typing import Any, Hashable, Mapping
+from typing_extensions import runtime_checkable
 
 import numpy as np
+
+
+# protocol to identify classes that have a dracon_dump method
+@runtime_checkable
+class DraconDumpable(Protocol):
+    def dracon_dump_to_node(self, representer): ...
 
 
 class DraconRepresenter(RoundTripRepresenter):
@@ -15,6 +24,11 @@ class DraconRepresenter(RoundTripRepresenter):
             full_module_path  # if True, the full module path will be used as the tag
         )
         self.exclude_defaults = exclude_defaults
+
+    def represent_data(self, data: Any) -> Any:
+        if isinstance(data, DraconDumpable):
+            return data.dracon_dump_to_node(self)
+        return super().represent_data(data)
 
 
 def represent_pydantic_model(self, data):
@@ -48,3 +62,7 @@ def represent_pydantic_model(self, data):
 
 
 DraconRepresenter.add_multi_representer(BaseModel, represent_pydantic_model)
+
+# TODO:
+# - [ ] make keypaths regex to specify which keys are deferred
+# - 

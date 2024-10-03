@@ -146,7 +146,6 @@ def dracon_resolve(obj, **ctx):
         newobj = deepcopy(obj).resolve(ctx)
         return newobj
 
-    assert isinstance(obj, Node), f'Expected a Node, got {type(obj)}'
     node = deepcopy(obj)
     walk_node(
         node=node,
