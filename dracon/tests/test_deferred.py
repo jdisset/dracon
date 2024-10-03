@@ -86,16 +86,25 @@ def test_deferred_explicit():
         <<{<+}: 
             name: "new_name ${&aid}"
 
+
+    b_obj: !deferred:ClassA &bo
+        index: &bid ${int(i42) - 10}
+        name: oldname
+        <<{<+}: 
+            name: "new_name ${&bid}"
+
     nested:
         !define aid: ${get_index(construct(&/a_obj)) + $CONSTANT}
         a_index: ${aid}
         aname: ${&/a_obj.name}
         constructed_nameindex: ${construct(&/a_obj).name_index}
         !define ao: ${&/a_obj}
+        !define bo: ${&/b_obj} # required to go through a reference when pointing to a deferred node
         obj2:
-            <<: !include $ao
-        obj3:
-            <<: !include /a_obj
+            <<: !include ao
+        obj3: !include $ao
+        obj4: !include $bo
+            
 
     """
 
@@ -118,3 +127,14 @@ def test_deferred_explicit():
     assert nested.a_index == 52
     assert nested.aname == "new_name 42"
     assert nested.constructed_nameindex == "42: new_name 42"
+
+    assert isinstance(config.b_obj, DeferredNode)
+    b_obj = config.b_obj.construct()
+    assert isinstance(b_obj, ClassA)
+    assert b_obj.index == 32
+    assert b_obj.name == "new_name 32"
+
+    assert nested.obj2 == config.a_obj
+    assert nested.obj3 == config.a_obj
+    assert isinstance(nested.obj4, DeferredNode)
+    assert nested.obj4.construct() == b_obj

@@ -1,9 +1,9 @@
 from enum import Enum
 from copy import deepcopy
-from typing import List, Union, Hashable, Any
+from typing import List, Union, Hashable, Any, Optional, TypeVar, Type, Protocol, Tuple
+from typing_extensions import runtime_checkable
 from ruamel.yaml.nodes import Node
 from dracon.utils import node_repr, list_like, dict_like
-
 
 class KeyPathToken(Enum):
     ROOT = 0
@@ -233,7 +233,7 @@ class KeyPath:
                 assert hasattr(res, 'get_key')
                 res = res.get_key(self.parts[-1])
                 return res
-            res = self._get_obj_impl(
+            res = _get_obj_impl(
                 res, part, create_path_if_not_exists, default_mapping_constructor
             )
         return res
@@ -251,31 +251,49 @@ class KeyPath:
             return self
         return KeyPath(self.parts[:-2]) + self.parts[-1]
 
-    @staticmethod
-    def _get_obj_impl(
-        obj: Any, attr: Any, create_path_if_not_exists=False, default_mapping_constructor=None
-    ) -> Any:
-        """
-        Get an attribute from an object, handling various types of objects.
-        """
-        if list_like(obj):
-            return obj[int(attr)]
-        if hasattr(obj, attr):
-            return getattr(obj, attr)
-        else:
-            try:  # check if we can access it with __getitem__
+
+
+# protocol that tests if an object has a keypath_passthrough prperty:
+@runtime_checkable
+class Passthrough(Protocol):
+    @property
+    def keypath_passthrough(self):
+        raise NotImplementedError
+
+
+
+
+def _get_obj_impl(
+    obj: Any, attr: Any, create_path_if_not_exists=False, default_mapping_constructor=None
+) -> Any:
+    """
+    Get an attribute from an object, handling various types of objects.
+    """
+    from dracon.deferred import DeferredNode
+    if isinstance(obj, DeferredNode):
+        print(f"keypath_passthrough: {obj.keypath_passthrough}")
+        return _get_obj_impl(
+            obj.keypath_passthrough,
+            attr,
+            create_path_if_not_exists,
+            default_mapping_constructor,
+        )
+    if list_like(obj):
+        return obj[int(attr)]
+    if hasattr(obj, attr):
+        return getattr(obj, attr)
+    else:
+        try:  # check if we can access it with __getitem__
+            return obj[attr]
+        except (TypeError, KeyError):
+            if create_path_if_not_exists:
+                assert default_mapping_constructor is not None
+                obj[attr] = default_mapping_constructor()
                 return obj[attr]
-            except (TypeError, KeyError):
-                if create_path_if_not_exists:
-                    assert default_mapping_constructor is not None
-                    obj[attr] = default_mapping_constructor()
-                    return obj[attr]
-                if isinstance(obj, Node):
-                    raise AttributeError(
-                        f'Could not find attribute {attr} in node \n{node_repr(obj)}'
-                    )
-                else:
-                    raise AttributeError(f'Could not find attribute {attr} in {obj}')
+            if isinstance(obj, Node):
+                raise AttributeError(f'Could not find attribute {attr} in node \n{node_repr(obj)} of type {type(obj)}')
+            else:
+                raise AttributeError(f'Could not find attribute {attr} in {obj}')
 
 
 ROOTPATH = KeyPath('/')
