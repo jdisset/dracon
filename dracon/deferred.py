@@ -26,7 +26,9 @@ from functools import partial
 ## {{{                         --     DeferredNode     --
 
 
-class DeferredNode(ScalarNode):
+class DeferredNode(
+    ScalarNode
+):  # a deferred node should be transparent (we should be able to traverse it with a keypath)
     # A node that is not yet resolved, just a wrapper to another node
     def __init__(
         self,
@@ -73,6 +75,10 @@ class DeferredNode(ScalarNode):
         assert self.loader, "DeferredNode must have a loader to be constructed"
         compres = self.compose(**kwargs)
         return self.loader.load_from_node(compres)
+
+    @property
+    def keypath_passthrough(self):
+        return self.value
 
     # def compose(self, **kwargs):
     # if not self.loader:
@@ -130,11 +136,15 @@ def process_deferred(comp: CompositionResult, force_deferred_at: List[KeyPath | 
 
         if node.tag.startswith('!deferred'):
             node.tag = node.tag[len('!deferred') :]
+            if node.tag.startswith(':'):
+                node.tag = '!' + node.tag[1:]
         else:
             assert path in force_deferred_at
 
         if node.tag == "":
             reset_tag(node)
+
+        print(f"deferred node at path: {path}. tag: {node.tag}")
 
         new_node = DeferredNode(tag='', value=deepcopy(node), path=path)
 
