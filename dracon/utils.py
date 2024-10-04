@@ -209,7 +209,6 @@ def _deepcopy(obj, memo=None):
 
 
 deepcopy = _deepcopy
-# deepcopy = copy.deepcopy
 
 
 ## {{{                         --     printing     --

@@ -439,7 +439,7 @@ def test_defines():
     print(f"{config=}")
 
     assert config['expr42'] == 42
-    assert config['inc42'] == '42'
+    assert config['inc42'] == 42
     assert config['compint_expr'] == 8
     assert config['compint_inc'] == 8
     assert config['runtimeval_expr'] == 3
@@ -462,7 +462,7 @@ def test_include():
     loader.context['get_index'] = lambda obj: obj.index
     loader.context['get_nameindex'] = lambda obj: obj.name_index
     compres = loader.compose_from_include_str('pkg:dracon:tests/configs/interp_include.yaml')
-    config = loader.load_from_composition_result(compres)
+    config = loader.load_composition_result(compres)
     config.resolve_all_lazy()
     assert config.nested.a_index == 2
 

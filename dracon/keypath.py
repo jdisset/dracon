@@ -24,10 +24,6 @@ def escape_keypath_part(part: str) -> str:
 def unescape_keypath_part(part: str) -> str:
     return part.replace('\\.', '.').replace('\\/', '/')
 
-
-# special symbols:
-
-
 class KeyPath:
     def __init__(
         self, path: Union[str, List[Union[Hashable, KeyPathToken]]], simplify: bool = True

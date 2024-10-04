@@ -149,9 +149,7 @@ def resolve_all_lazy(obj, root_obj=None, current_path=None):
     if root_obj is None:
         if hasattr(obj, '_dracon_root_obj'):  # if the object has a root object, use that
             root_obj = obj._dracon_root_obj
-            print(f"Object {obj} has root object {root_obj}")
         else:
-            print(f"Object {obj} has no root object")
             root_obj = obj
     if current_path is None:
         if hasattr(obj, '_dracon_current_path'):
@@ -159,7 +157,6 @@ def resolve_all_lazy(obj, root_obj=None, current_path=None):
         else:
             current_path = ROOTPATH
 
-    print(f"Resolving lazy objects in object {obj} at path {current_path}. root_obj: {root_obj}")
     # recursively call resolve_all_lazy on all items in the object (including keys in mappings)
     if isinstance(obj, BaseModel):
         for key, value in obj:
@@ -178,13 +175,9 @@ def resolve_all_lazy(obj, root_obj=None, current_path=None):
     elif isinstance(obj, LazyInterpolable):
         if current_path.is_mapping_key():
             raise NotImplementedError("Lazy objects in key mappings are not supported")
-        print(f'Found lazy object "{obj}" at path "{current_path}. root_obj: {root_obj}"')
         parent = current_path.parent.get_obj(root_obj)
         val = obj.resolve()
         set_val(parent, current_path.stem, val)
-
-    else:
-        print(f"Object {obj} is not lazy interpolable")
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
