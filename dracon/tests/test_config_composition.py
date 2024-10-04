@@ -24,7 +24,7 @@ override_config_path = 'dracon:tests/configs/override.yaml'
 def get_config(config_path):
     loader = DraconLoader()
     compres = loader.compose_from_include_str(f"pkg:{config_path}")
-    config = loader.load_from_composition_result(compres)
+    config = loader.load_composition_result(compres)
     return config
 
 

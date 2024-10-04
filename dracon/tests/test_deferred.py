@@ -138,3 +138,7 @@ def test_deferred_explicit():
     assert nested.obj3 == config.a_obj
     assert isinstance(nested.obj4, DeferredNode)
     assert nested.obj4.construct() == b_obj
+
+def test_deferred_multiple():
+    from pydantic import BaseModel
+

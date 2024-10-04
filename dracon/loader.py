@@ -67,7 +67,7 @@ def construct(node_or_val, **kwargs):
     if isinstance(node_or_val, Node):
         loader = DraconLoader(**kwargs)
         compres = CompositionResult(root=deepcopy(node_or_val))
-        return loader.load_from_composition_result(compres, post_process=True)
+        return loader.load_composition_result(compres, post_process=True)
 
     return node_or_val
 
@@ -225,8 +225,6 @@ class DraconLoader:
             return res
         finally:
             if isinstance(res, CompositionResult) and node is not None:
-                # we need to update the context of the composed documdeepcopy(res)
-                # with the context of the loader that composed it
                 walk_node(
                     node=res.root,
                     callback=partial(add_to_context, node.context),
@@ -238,15 +236,15 @@ class DraconLoader:
         res = self.yaml.composer.get_result()
         return self.post_process_composed(res)
 
-    def load_from_node(self, node):
+    def load_node(self, node):
         self.yaml.constructor.referenced_nodes = self.referenced_nodes
         self.yaml.constructor.context = deepcopy(self.context or {})
         return self.yaml.constructor.construct_document(node)
 
-    def load_from_composition_result(self, compres: CompositionResult, post_process=True):
+    def load_composition_result(self, compres: CompositionResult, post_process=True):
         if post_process:
             compres = self.post_process_composed(compres)
-        return self.load_from_node(compres.root)
+        return self.load_node(compres.root)
 
     def load(self, config_path: str | Path):
         self.reset_context()
@@ -255,11 +253,11 @@ class DraconLoader:
         if ":" not in config_path:
             config_path = f"file:{config_path}"
         comp = self.compose_from_include_str(config_path)
-        return self.load_from_composition_result(comp)
+        return self.load_composition_result(comp)
 
     def loads(self, content: str):
         comp = self.compose_config_from_str(content)
-        return self.load_from_composition_result(comp)
+        return self.load_composition_result(comp)
 
     def post_process_composed(self, comp: CompositionResult):
         walk_node(
@@ -269,7 +267,7 @@ class DraconLoader:
 
         comp = self.preprocess_references(comp)
         comp = process_deferred(comp, force_deferred_at=self.deferred_paths)
-        comp = process_instructions(comp)
+        comp = process_instructions(comp, self)
         comp = self.process_includes(comp)
         comp = process_merges(comp)
         comp = delete_unset_nodes(comp)
@@ -332,6 +330,7 @@ class DraconLoader:
     def process_includes(self, comp_res: CompositionResult):
         while True:  # we need to loop until there are no more includes (since some includes may bring other ones )
             comp_res.find_special_nodes('include', lambda n: isinstance(n, IncludeNode))
+
             if not comp_res.special_nodes['include']:
                 break
 
@@ -375,7 +374,7 @@ def load(config_path: str | Path, raw_dict=False, **kwargs):
 
 def load_node(node: Node, **kwargs):
     loader = DraconLoader(**kwargs)
-    return loader.load_from_node(node)
+    return loader.load_node(node)
 
 
 def load_file(config_path: str | Path, raw_dict=True, **kwargs):

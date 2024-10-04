@@ -28,12 +28,12 @@ class Instruction:
     def match(value: Optional[str]) -> Optional['Instruction']:
         raise NotImplementedError
 
-    def process(self, comp_res: CompositionResult, path: KeyPath):
+    def process(self, comp_res: CompositionResult, path: KeyPath, loader) -> CompositionResult:
         raise NotImplementedError
 
 
 @ftrace(watch=[])
-def process_instructions(comp_res: CompositionResult):
+def process_instructions(comp_res: CompositionResult, loader) -> CompositionResult:
     # then all other instructions
     instruction_nodes = []
 
@@ -46,7 +46,7 @@ def process_instructions(comp_res: CompositionResult):
     instruction_nodes = sorted(instruction_nodes, key=lambda x: len(x[1]))
 
     for inst, path in instruction_nodes:
-        inst.process(comp_res, path.copy())
+        inst.process(comp_res, path.copy(), loader)
 
     return comp_res
 
@@ -74,7 +74,7 @@ class Define(Instruction):
         return None
 
     @ftrace(False, watch=[])
-    def process(self, comp_res: CompositionResult, path: KeyPath):
+    def process(self, comp_res: CompositionResult, path: KeyPath, loader):
         if not path.is_mapping_key():
             raise ValueError(f"instruction 'define' must be a mapping key, but got {path}")
 
@@ -84,17 +84,17 @@ class Define(Instruction):
         assert isinstance(parent_node, DraconMappingNode)
         assert key_node.tag == '!define', f"Expected tag '!define', but got {key_node.tag}"
 
-        value = value_node.value
         ctx = {}
 
         if isinstance(value_node, InterpolableNode):
             value = evaluate_expression(
-                value,
+                value_node.value,
                 current_path=path,
                 root_obj=comp_res.root,
                 context=value_node.context,
             )
-            ctx = merged(ctx, value_node.context, MergeKey(raw='{<+}'))
+        else:
+            value = loader.load_composition_result(CompositionResult(root=value_node))
 
         var_name = key_node.value
         assert var_name.isidentifier(), f"Invalid variable name in define instruction: {var_name}"
@@ -142,7 +142,7 @@ class Each(Instruction):
         return None
 
     @ftrace(inputs=False, watch=[])
-    def process(self, comp_res: CompositionResult, path: KeyPath):
+    def process(self, comp_res: CompositionResult, path: KeyPath, loader):
         if not path.is_mapping_key():
             raise ValueError(f"instruction 'each' must be a mapping key, but got {path}")
 

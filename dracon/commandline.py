@@ -238,12 +238,11 @@ class Program(BaseModel, Generic[T]):
             custom_types.update(context)
         loader = DraconLoader(
             enable_interpolation=True,
-            base_list_type=list,
             base_dict_type=dict,
+            base_list_type=list,
             context=custom_types,
             **kwargs,
         )
-        # loader.yaml.representer.full_module_path = False
 
         empty_model = self.conf_type.model_construct()
 
@@ -285,7 +284,7 @@ class Program(BaseModel, Generic[T]):
                         new_tag = f"!Resolvable[{field_t.__name__}]"
                         resolvable_node.tag = new_tag
 
-            res = loader.load_from_composition_result(comp)
+            res = loader.load_composition_result(comp)
             if not isinstance(res, self.conf_type):
                 raise ArgParseError(f"Expected {self.conf_type} but got {type(res)}")
             return res

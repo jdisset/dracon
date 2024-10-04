@@ -82,7 +82,7 @@ class DeferredNode(DraconScalarNode, Generic[T]):
     def construct(self, **kwargs) -> T:  # type: ignore
         assert self._loader, "DeferredNode must have a loader to be constructed"
         compres = self.compose(**kwargs)
-        return self._loader.load_from_node(compres)
+        return self._loader.load_node(compres)
 
     @property
     def keypath_passthrough(self):
