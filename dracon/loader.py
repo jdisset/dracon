@@ -21,6 +21,7 @@ from dracon.utils import (
     ListLike,
     ShallowDict,
     ftrace,
+    deepcopy,
 )
 from dracon.interpolation_utils import resolve_interpolable_variables
 from dracon.interpolation import InterpolableNode
@@ -32,7 +33,7 @@ from dracon.deferred import DeferredNode, process_deferred
 from dracon.loaders.env import read_from_env
 from dracon.representer import DraconRepresenter
 from dracon import dracontainer
-from copy import deepcopy
+import copy
 from functools import partial
 
 
@@ -53,6 +54,12 @@ DEFAULT_CONTEXT = {
     'getenv': os.getenv,
     'getcwd': os.getcwd,
 }
+
+
+def dillcopy(obj):
+    import dill
+
+    return dill.loads(dill.dumps(obj))
 
 
 @ftrace()
@@ -298,6 +305,7 @@ class DraconLoader:
         for node, _ in deferred_nodes:
             node._loader = self.copy()
             node._full_composition = deepcopy(comp_res)
+            # node._full_composition = dillcopy(comp_res)
         return comp_res
 
     def save_references(self, comp_res: CompositionResult):

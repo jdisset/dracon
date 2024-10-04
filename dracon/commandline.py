@@ -9,13 +9,13 @@ from dracon.resolvable import Resolvable, get_inner_type
 from dracon.keypath import KeyPath
 from dracon.loader import DEFAULT_LOADERS
 import logging
+logger = logging.getLogger("dracon.commandline")
 import traceback
 
 B = TypeVar("B", bound=BaseModel)
 
 ProgramType = ForwardRef("Program")
 
-logger = logging.getLogger("dracon.commandline")
 
 
 class Arg:
@@ -123,7 +123,9 @@ class Program(BaseModel, Generic[T]):
             )
         )
 
-    def parse_args(self, argv: List[str], context=None) -> tuple[Optional[T], Dict[str, Any]]:
+    def parse_args(
+        self, argv: List[str], context=None, **kwargs
+    ) -> tuple[Optional[T], Dict[str, Any]]:
         self._positionals = [arg for arg in self._args if arg.positional]
         self._positionals.reverse()
         self._arg_map = {f'-{arg.short}': arg for arg in self._args if arg.short} | {
@@ -136,7 +138,7 @@ class Program(BaseModel, Generic[T]):
         while i < len(argv):
             i = self._parse_single_arg(argv, i, args, defined_vars, actions, confs_to_merge)
 
-        conf = self.generate_config(args, defined_vars, confs_to_merge, context)
+        conf = self.generate_config(args, defined_vars, confs_to_merge, context, **kwargs)
         if conf is not None:
             for action in actions:
                 action(self, conf)
@@ -222,6 +224,7 @@ class Program(BaseModel, Generic[T]):
         defined_vars: dict[str, str],
         confs_to_merge: list[str],
         context=None,
+        **kwargs,
     ) -> Optional[T]:
         def make_override(argname, value):
             argname = argname.lstrip('-')
@@ -238,6 +241,7 @@ class Program(BaseModel, Generic[T]):
             base_list_type=list,
             base_dict_type=dict,
             context=custom_types,
+            **kwargs,
         )
         # loader.yaml.representer.full_module_path = False
 

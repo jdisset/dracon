@@ -15,15 +15,19 @@ from typing import (
     Iterator,
 )
 from typing import runtime_checkable, get_args, get_origin
+from types import ModuleType, FunctionType
 import typing
 import inspect
 import importlib
+
 import uuid
 import sys
 import re
 import os
 from contextlib import ContextDecorator
 import threading
+import copy
+# from copy import deepcopy as deepcopy
 
 from collections.abc import MutableMapping, MutableSequence
 ##────────────────────────────────────────────────────────────────────────────}}}
@@ -36,7 +40,7 @@ def generate_unique_id() -> int:
     return uuid.uuid4().int
 
 
-## {{{                      --     dict/list like     --
+## {{{                      --     dict/list like     --{{{
 K = TypeVar('K')
 V = TypeVar('V')
 
@@ -77,8 +81,6 @@ class ShallowDict(MutableMapping, Generic[K, V]):
         return f'ShallowDict({self._dict})'
 
 
-
-
 @runtime_checkable
 class DictLike(Protocol[K, V]):
     def keys(self) -> Iterable[K]: ...
@@ -116,6 +118,8 @@ class ListLike_Permissive(Protocol[E]):
     # can be concatenated with another list-like object:
     def __add__(self, other: 'ListLike_Permissive[E]') -> 'ListLike_Permissive[E]': ...
 
+    # def __append__(self, item: E) -> None: ...
+
 
 def permissive_list_like(obj) -> bool:
     return isinstance(obj, ListLike_Permissive)
@@ -135,12 +139,78 @@ class ListLike(Generic[E], metaclass=ListLikeMeta):
 
     def __add__(self, other: 'ListLike[E]') -> 'ListLike[E]': ...
 
+    def __append__(self, item: E) -> None: ...
+
 
 def list_like(obj) -> bool:
     return isinstance(obj, ListLike)
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
+
+
+# def deepcopy(x: T, memo=None) -> T:
+# if memo is None:
+# memo = {}
+# d = id(x)
+# if d in memo:
+# return memo[d]
+# cls = type(x)
+# copier = copy._deepcopy_dispatch.get(cls)
+# if copier:
+# try:
+# y = copier(x, memo)
+# except Exception:
+# y = copy.copy(x)  # Fallback to shallow copy
+# else:
+# try:
+# if hasattr(x, '__deepcopy__'):
+# y = x.__deepcopy__(memo)
+# else:
+# if isinstance(x, type):
+# y = x
+# else:
+# try:
+# y = copy._reconstruct(x, memo, copy.deepcopy, safe_deepcopy)
+# except Exception:
+# y = copy.copy(x)  # Fallback to shallow copy
+# except Exception:
+# y = copy.copy(x)  # Fallback to shallow copy
+# memo[d] = y
+# return y
+
+
+def _deepcopy(obj, memo=None):
+    try:
+        return copy.deepcopy(obj, memo)
+    except Exception as e:
+        if isinstance(obj, (ModuleType, FunctionType, type)):
+            return obj  # Return the object itself for modules and types
+        elif isinstance(obj, DictLike):
+            new_dict = obj.__class__()
+            for k, v in obj.items():
+                new_dict[_deepcopy(k)] = _deepcopy(v)
+            return new_dict
+        elif isinstance(obj, ListLike):
+            new_list = obj.__class__()
+            for item in obj:
+                new_list.append(_deepcopy(item))
+            return new_list
+        elif hasattr(obj, '__dict__'):
+            # For objects with __dict__, create a new instance and copy attributes
+            new_obj = obj.__class__.__new__(obj.__class__)
+            for key, value in obj.__dict__.items():
+                setattr(new_obj, key, deepcopy(value))
+            return new_obj
+        elif isinstance(obj, (tuple, set, frozenset)):
+            return type(obj)(_deepcopy(item) for item in obj)
+        else:
+            return copy.copy(obj)  # Fallback to shallow copy for other types
+
+
+deepcopy = _deepcopy
+# deepcopy = copy.deepcopy
+
 
 ## {{{                         --     printing     --
 

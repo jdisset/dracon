@@ -1,10 +1,9 @@
 ## {{{                          --     imports     --
 from typing import Optional, Any
-from copy import deepcopy
 import re
 from pydantic import BaseModel
 from enum import Enum
-from dracon.utils import dict_like, DictLike, ListLike, ftrace
+from dracon.utils import dict_like, DictLike, ListLike, ftrace, deepcopy
 from dracon.composer import (
     CompositionResult,
     walk_node,

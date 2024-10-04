@@ -2,9 +2,8 @@
 from ruamel.yaml.nodes import Node, MappingNode, SequenceNode, ScalarNode
 from ruamel.yaml.tag import Tag
 from dracon.utils import dict_like, list_like, generate_unique_id, node_repr
-from typing import Any, Hashable
+from typing import Any, Hashable, Optional
 from dracon.keypath import KeyPath, escape_keypath_part
-from functools import partial
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 ## {{{                           --     utils     --
@@ -70,6 +69,29 @@ class DraconScalarNode(ScalarNode):
         return node_repr(self)
 
 
+class ContextNode(DraconScalarNode):
+    def __init__(
+        self,
+        tag,
+        value,
+        start_mark=None,
+        end_mark=None,
+        anchor=None,
+        comment=None,
+        context: Optional[dict[str, Any]] = None,
+    ):
+        DraconScalarNode.__init__(
+            self,
+            tag=tag,
+            value=value,
+            start_mark=start_mark,
+            end_mark=end_mark,
+            comment=comment,
+            anchor=anchor,
+        )
+        self.context = context or {}
+
+
 class IncludeNode(DraconScalarNode):
     def __init__(
         self,
@@ -86,12 +108,6 @@ class IncludeNode(DraconScalarNode):
         )
         self.context = context or {}
 
-    def __str__(self):
-        return node_repr(self)
-
-    def __repr__(self):
-        return node_repr(self)
-
 
 class MergeNode(DraconScalarNode):
     def __init__(self, value, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
@@ -99,12 +115,6 @@ class MergeNode(DraconScalarNode):
         DraconScalarNode.__init__(
             self, STR_TAG, value, start_mark, end_mark, comment=comment, anchor=anchor
         )
-
-    def __str__(self):
-        return node_repr(self)
-
-    def __repr__(self):
-        return node_repr(self)
 
 
 class UnsetNode(DraconScalarNode):
@@ -118,12 +128,6 @@ class UnsetNode(DraconScalarNode):
             comment=comment,
             anchor=anchor,
         )
-
-    def __str__(self):
-        return node_repr(self)
-
-    def __repr__(self):
-        return node_repr(self)
 
 
 ## {{{                        --     MappingNode     --

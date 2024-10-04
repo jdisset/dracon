@@ -1,5 +1,4 @@
 from enum import Enum
-from copy import deepcopy
 from typing import List, Union, Hashable, Any, Optional, TypeVar, Type, Protocol, Tuple
 from typing_extensions import runtime_checkable
 from ruamel.yaml.nodes import Node
@@ -113,6 +112,8 @@ class KeyPath:
 
     def down(self, path: "str | KeyPath | KeyPathToken") -> 'KeyPath':
         self.is_simple = False
+        if isinstance(path, int):
+            path = str(path)
         if isinstance(path, KeyPathToken):
             self.parts.append(path)
         elif isinstance(path, KeyPath):
@@ -260,6 +261,13 @@ class KeyPath:
         if self.parts and self.parts[-1] == KeyPathToken.MAPPING_KEY:
             raise ValueError(f'KeyPath cannot end with a mapping key: {self}')
 
+    # protocol that tests if an object has a keypath_passthrough prperty:
+    @runtime_checkable
+    class Passthrough(Protocol):
+        @property
+        def keypath_passthrough(self):
+            raise NotImplementedError
+
     def get_obj(
         self, obj: Any, create_path_if_not_exists=False, default_mapping_constructor=None
     ) -> Any:
@@ -303,14 +311,6 @@ class KeyPath:
         if not self.is_mapping_key():
             return self
         return KeyPath(self.parts[:-2]) + self.parts[-1]
-
-
-# protocol that tests if an object has a keypath_passthrough prperty:
-@runtime_checkable
-class Passthrough(Protocol):
-    @property
-    def keypath_passthrough(self):
-        raise NotImplementedError
 
 
 def _get_obj_impl(
