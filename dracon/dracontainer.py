@@ -1,8 +1,7 @@
 from typing import Any, Dict, List, Union, TypeVar, Generic, Optional, Set
 from collections.abc import MutableMapping, MutableSequence
-from copy import deepcopy
 from dracon.keypath import ROOTPATH, KeyPath
-from dracon.utils import DictLike, ListLike
+from dracon.utils import DictLike, ListLike, deepcopy
 from dracon.lazy import (
     Lazy,
     recursive_update_lazy_container,

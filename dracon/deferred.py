@@ -1,10 +1,9 @@
 ## {{{                          --     imports     --
 from typing import Optional, Any, List, Dict, Union, TypeVar, Generic, Type
-from copy import deepcopy
 import re
 from pydantic import BaseModel
 from enum import Enum
-from dracon.utils import dict_like, DictLike, ListLike, ftrace
+from dracon.utils import dict_like, DictLike, ListLike, ftrace, deepcopy
 from dracon.composer import (
     CompositionResult,
     walk_node,
@@ -53,7 +52,11 @@ class DeferredNode(DraconScalarNode, Generic[T]):
     def update_context(self, context):
         add_to_context(context, self)
 
-    def compose(self, **kwargs):
+    def compose(
+        self,
+        context: Optional[Dict[str, Any]] = None,
+        deferred_paths: Optional[list[KeyPath | str]] = None,
+    ) -> Node:
         # rather than composing just this node, we can hold a copy of the entire composition
         # and simply unlock the deferred node when we need to compose it. This way we can
         # have references to other nodes in the entire conf
@@ -62,6 +65,9 @@ class DeferredNode(DraconScalarNode, Generic[T]):
         assert self._full_composition
         assert isinstance(self.path, KeyPath)
         assert isinstance(self.value, Node)
+
+        self._loader.update_context(context or {})
+        self._loader.deferred_paths = deferred_paths or []
 
         composition = deepcopy(self._full_composition)
         composition.replace_node_at(self.path, self.value)
@@ -136,7 +142,9 @@ def process_deferred(comp: CompositionResult, force_deferred_at: List[KeyPath | 
             if node.tag.startswith(':'):
                 node.tag = '!' + node.tag[1:]
         else:
-            assert path in force_deferred_at
+            assert any(
+                p.match(path) for p in force_deferred_at
+            ), f"node at path {path} is not deferred"
 
         if node.tag == "":
             reset_tag(node)

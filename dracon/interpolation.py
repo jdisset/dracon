@@ -18,9 +18,8 @@ from typing import (
     MutableMapping,
     MutableSequence,
 )
-from ruamel.yaml.nodes import ScalarNode, Node
-from dracon.utils import DictLike, generate_unique_id, ShallowDict, ftrace
-from dracon.nodes import DraconMappingNode, DraconSequenceNode, IncludeNode
+from dracon.utils import DictLike, generate_unique_id, ShallowDict, ftrace, deepcopy
+from dracon.nodes import DraconMappingNode, DraconSequenceNode, IncludeNode, ContextNode
 
 from dracon.interpolation_utils import (
     outermost_interpolation_exprs,
@@ -29,7 +28,6 @@ from dracon.interpolation_utils import (
     resolve_interpolable_variables,
 )
 
-from copy import deepcopy
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
@@ -254,7 +252,7 @@ def evaluate_expression(
 
 
 ## {{{                     --     InterpolableNode     --
-class InterpolableNode(ScalarNode):
+class InterpolableNode(ContextNode):
     def __init__(
         self,
         value,
@@ -267,10 +265,11 @@ class InterpolableNode(ScalarNode):
         context=None,
     ):
         self.init_outermost_interpolations = init_outermost_interpolations
-        ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
+        ContextNode.__init__(
+            self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor, context=context
+        )
         self.referenced_nodes = NodeLookup()
         self.saved_references = {}
-        self.context = context or {}
 
     def evaluate(self, path='/', root_obj=None, context=None):
         context = context or {}

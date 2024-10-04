@@ -3,7 +3,6 @@ import sys
 import importlib
 from ruamel.yaml.nodes import MappingNode, SequenceNode
 from ruamel.yaml.constructor import ConstructorError
-from copy import deepcopy
 from dracon.merge import merged, MergeKey
 from dracon.keypath import KeyPath, ROOTPATH
 

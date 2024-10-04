@@ -4,7 +4,6 @@ from typing import (
     Generic,
     Type,
     Optional,
-    Callable,
     List,
 )
 
@@ -17,8 +16,8 @@ from dracon.nodes import (
 )
 
 from pydantic_core import core_schema
-from dracon.utils import get_inner_type
-from copy import deepcopy
+from dracon.utils import get_inner_type, deepcopy
+
 
 T = TypeVar("T")
 
