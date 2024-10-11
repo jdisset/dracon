@@ -149,8 +149,6 @@ def process_deferred(comp: CompositionResult, force_deferred_at: List[KeyPath | 
         if node.tag == "":
             reset_tag(node)
 
-        print(f"deferred node at path: {path}. tag: {node.tag}")
-
         new_node = DeferredNode(value=deepcopy(node), path=path)
 
         comp.replace_node_at(path, new_node)

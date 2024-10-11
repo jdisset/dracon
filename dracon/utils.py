@@ -149,43 +149,13 @@ def list_like(obj) -> bool:
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
-# def deepcopy(x: T, memo=None) -> T:
-# if memo is None:
-# memo = {}
-# d = id(x)
-# if d in memo:
-# return memo[d]
-# cls = type(x)
-# copier = copy._deepcopy_dispatch.get(cls)
-# if copier:
-# try:
-# y = copier(x, memo)
-# except Exception:
-# y = copy.copy(x)  # Fallback to shallow copy
-# else:
-# try:
-# if hasattr(x, '__deepcopy__'):
-# y = x.__deepcopy__(memo)
-# else:
-# if isinstance(x, type):
-# y = x
-# else:
-# try:
-# y = copy._reconstruct(x, memo, copy.deepcopy, safe_deepcopy)
-# except Exception:
-# y = copy.copy(x)  # Fallback to shallow copy
-# except Exception:
-# y = copy.copy(x)  # Fallback to shallow copy
-# memo[d] = y
-# return y
-
-
-def _deepcopy(obj, memo=None):
+def _deepcopy(obj: T, memo=None) -> T:
+    # a deepcopy with shallow fallback for objects that can't be deepcopied
     try:
         return copy.deepcopy(obj, memo)
     except Exception as e:
         if isinstance(obj, (ModuleType, FunctionType, type)):
-            return obj  # Return the object itself for modules and types
+            return obj  # Return the object itself for modules, functions and types
         elif isinstance(obj, DictLike):
             new_dict = obj.__class__()
             for k, v in obj.items():
@@ -197,7 +167,6 @@ def _deepcopy(obj, memo=None):
                 new_list.append(_deepcopy(item))
             return new_list
         elif hasattr(obj, '__dict__'):
-            # For objects with __dict__, create a new instance and copy attributes
             new_obj = obj.__class__.__new__(obj.__class__)
             for key, value in obj.__dict__.items():
                 setattr(new_obj, key, deepcopy(value))

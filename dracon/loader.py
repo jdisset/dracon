@@ -303,7 +303,6 @@ class DraconLoader:
         for node, _ in deferred_nodes:
             node._loader = self.copy()
             node._full_composition = deepcopy(comp_res)
-            # node._full_composition = dillcopy(comp_res)
         return comp_res
 
     def save_references(self, comp_res: CompositionResult):
