@@ -4,6 +4,7 @@ import importlib
 from ruamel.yaml.nodes import MappingNode, SequenceNode
 from ruamel.yaml.constructor import ConstructorError
 from dracon.merge import merged, MergeKey
+import pydantic
 from dracon.keypath import KeyPath, ROOTPATH
 
 from pydantic import (
@@ -231,6 +232,10 @@ class Draconstructor(Constructor):
                 reset_tag(node)
 
             obj = super().construct_object(node, deep=True)
+        except pydantic.ValidationError as e:
+            raise ConstructorError(
+                None, None, f"Error while constructing {tag}: {e.errors()}", node.start_mark
+            ) from e
         except Exception as e:
             raise ConstructorError(
                 None, None, f"Error while constructing {tag}: {e}", node.start_mark

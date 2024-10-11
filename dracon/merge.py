@@ -19,7 +19,6 @@ def make_default_empty_mapping_node():
         value=[],
     )
 
-
 def add_to_context(context, item, merge_key='<<{+<}[~<]'):
     if hasattr(item, 'context'):
         item.context = merged(item.context, context, MergeKey(raw=merge_key))
