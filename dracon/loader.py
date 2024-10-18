@@ -64,10 +64,20 @@ def dillcopy(obj):
 
 @ftrace()
 def construct(node_or_val, **kwargs):
-    if isinstance(node_or_val, Node):
-        loader = DraconLoader(**kwargs)
-        compres = CompositionResult(root=deepcopy(node_or_val))
-        return loader.load_composition_result(compres, post_process=True)
+
+    try:
+        if isinstance(node_or_val, Node):
+            loader = DraconLoader(**kwargs)
+            compres = CompositionResult(root=deepcopy(node_or_val))
+            return loader.load_composition_result(compres, post_process=True)
+    except Exception as e:
+        # give much more context to the error, since this usually happens inside an asteval eval
+        import traceback
+
+        msg = f'Error while constructing node: {e}\n{traceback.format_exc()}'
+        raise ValueError(msg)
+
+
 
     return node_or_val
 

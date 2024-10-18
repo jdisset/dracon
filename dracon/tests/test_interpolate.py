@@ -89,6 +89,7 @@ def test_dict():
     dump = DraconLoader().dump(obj)
     loader = DraconLoader(enable_interpolation=True)
     loaded = loader.loads(dump)
+    print(f"{loaded=}")
     loaded.resolve_all_lazy()
 
     assert loaded.name == 'John'
@@ -242,6 +243,8 @@ def test_ampersand_interpolation_complex():
     config.resolve_all_lazy()
     assert '__dracon__' not in config
 
+    print(config)
+
     assert config['all_objs'] == [
         {'index': 1, 'name': 'Name 1'},
         {'index': 2, 'name': 'Name 2'},
@@ -249,6 +252,7 @@ def test_ampersand_interpolation_complex():
         {'index': 4, 'name': 'Name 4'},
         {'index': 5, 'name': 'Name 5'},
     ]
+
 
     assert config['all_objs_by_anchor'] == config['all_objs']
 

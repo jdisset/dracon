@@ -287,6 +287,19 @@ class DraconSequenceNode(SequenceNode):
             anchor=self.anchor,
         )
 
+    def __len__(self) -> int:
+        return len(self.value)
+
+    def __contains__(self, value: Node) -> bool:
+        return value in self.value
+
+    def __iter__(self):
+        return iter(self.value)
+
+    def __append__(self, value: Node):
+        self.value.append(value)
+
+
     def append(self, value: Node):
         self.value.append(value)
 

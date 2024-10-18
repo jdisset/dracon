@@ -44,7 +44,7 @@ def pydantic_validate(tag, value, localns=None, root_obj=None, current_path=None
     tag_type = resolve_type(tag, localns=localns or {})
 
     if not is_lazy_compatible(tag_type) and isinstance(value, Dracontainer) and tag_type is not Any:
-        value.resolve_all_lazy()
+        resolve_all_lazy(value)
 
     return TypeAdapter(tag_type).validate_python(value)
 
