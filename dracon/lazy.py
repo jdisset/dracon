@@ -17,7 +17,7 @@ from dracon.interpolation_utils import (
     InterpolationMatch,
 )
 from dracon.interpolation import evaluate_expression
-from dracon.utils import ftrace
+from dracon.utils import ftrace, ListLike
 from dracon.utils import node_repr, list_like, dict_like
 
 
@@ -167,7 +167,7 @@ def resolve_all_lazy(obj, root_obj=None, current_path=None):
             resolve_all_lazy(key, root_obj, current_path + MAPPING_KEY + str(key))
             resolve_all_lazy(value, root_obj, current_path + key)
 
-    elif isinstance(obj, cabc.Iterable) and not isinstance(obj, (str, bytes)):
+    elif isinstance(obj, ListLike) and not isinstance(obj, (str, bytes)):
         for i, item in enumerate(obj):
             resolve_all_lazy(item, root_obj, current_path + KeyPath(str(i)))
 
@@ -176,8 +176,12 @@ def resolve_all_lazy(obj, root_obj=None, current_path=None):
         if current_path.is_mapping_key():
             raise NotImplementedError("Lazy objects in key mappings are not supported")
         parent = current_path.parent.get_obj(root_obj)
+        obj.root_obj = root_obj
+        obj.current_path = current_path
         val = obj.resolve()
         set_val(parent, current_path.stem, val)
+        # recurse (if the value is itself a lazy object or contain lazy objects)
+        resolve_all_lazy(current_path.get_obj(root_obj), root_obj, current_path)
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}

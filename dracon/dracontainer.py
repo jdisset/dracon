@@ -5,6 +5,7 @@ from dracon.utils import DictLike, ListLike, deepcopy
 from dracon.lazy import (
     Lazy,
     recursive_update_lazy_container,
+    resolve_all_lazy,
 )
 
 
@@ -155,18 +156,6 @@ class Dracontainer:
         resolve_all_lazy(self)
 
 
-def resolve_all_lazy(val):
-    if isinstance(val, DictLike):
-        for key in val.keys():
-            resolve_all_lazy(key)
-            resolve_all_lazy(val[key])
-    elif isinstance(val, ListLike):
-        for i in range(len(val)):
-            resolve_all_lazy(val[i])
-    elif isinstance(val, Lazy):
-        val.get(val, setval=True)
-
-
 class Mapping(Dracontainer, MutableMapping[K, V], Generic[K, V]):
     def __init__(self, data: Optional[DictLike[K, V]] = None):
         super().__init__()
@@ -176,8 +165,12 @@ class Mapping(Dracontainer, MutableMapping[K, V], Generic[K, V]):
                 self[key] = value
 
     def __getattr__(self, key):
-        if key in self:
-            return self[key]
+        try:
+            _data = object.__getattribute__(self, '_data')
+            if key in _data:
+                return self[key]
+        except AttributeError:
+            pass
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{key}'")
 
     def __getitem__(self, key):

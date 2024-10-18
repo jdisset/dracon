@@ -130,7 +130,13 @@ def preprocess_expr(expr: str, symbols: Optional[dict] = None):
 def do_safe_eval(expr: str, symbols: Optional[dict] = None):
     expr = preprocess_expr(expr, symbols)
     safe_eval = Interpreter(user_symbols=symbols or {}, max_string_length=1000)
-    return safe_eval.eval(expr, raise_errors=True)
+    res = safe_eval.eval(expr, raise_errors=False)
+    errors = safe_eval.error
+    if errors:
+        errors = [': '.join(e.get_error()) for e in errors]
+        errormsg = '\n'.join(errors)
+        raise InterpolationError(f"Error evaluating expression {expr}:\n{errormsg}")
+    return res
 
 
 @ftrace(watch=[])
