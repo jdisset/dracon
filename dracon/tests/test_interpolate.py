@@ -1,30 +1,12 @@
 ## {{{                          --     imports     --
-import re
-import pytest
-from dracon import dump, loads
 from dracon.loader import DraconLoader
-from dracon.dracontainer import Dracontainer, Mapping, Sequence
-from dracon.interpolation import InterpolationError, InterpolationMatch
-from typing import Generic, TypeVar, Any, Optional, Annotated, cast, List
-from pydantic import (
-    BaseModel,
-    field_validator,
-    BeforeValidator,
-    WrapValidator,
-    AfterValidator,
-    ConfigDict,
-    Field,
-)
-
+from dracon.dracontainer import Mapping
+from pydantic import BaseModel
 from dracon.interpolation import outermost_interpolation_exprs
 from dracon.lazy import LazyInterpolable
-
-from pydantic.dataclasses import dataclass
 from dracon.keypath import KeyPath
-from typing import Any, Dict, Callable, Optional, Tuple, List
 import copy
 from dracon.interpolation_utils import find_field_references
-from asteval import Interpreter
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
@@ -70,7 +52,6 @@ def test_dict():
 
     interp_matches = outermost_interpolation_exprs(test_expr_paren)
     assert len(interp_matches) == 2
-    print(interp_matches)
     assert interp_matches[0].start == 0
 
     obj = {
@@ -89,7 +70,6 @@ def test_dict():
     dump = DraconLoader().dump(obj)
     loader = DraconLoader(enable_interpolation=True)
     loaded = loader.loads(dump)
-    print(f"{loaded=}")
     loaded.resolve_all_lazy()
 
     assert loaded.name == 'John'
@@ -116,8 +96,6 @@ def test_lazy():
 
     loader = DraconLoader(enable_interpolation=True)
     ymldump = loader.dump(obj)
-
-    print(ymldump)
 
     loaded = loader.loads(ymldump)
     loaded_copy = copy.copy(loaded)
@@ -243,8 +221,6 @@ def test_ampersand_interpolation_complex():
     config.resolve_all_lazy()
     assert '__dracon__' not in config
 
-    print(config)
-
     assert config['all_objs'] == [
         {'index': 1, 'name': 'Name 1'},
         {'index': 2, 'name': 'Name 2'},
@@ -252,7 +228,6 @@ def test_ampersand_interpolation_complex():
         {'index': 4, 'name': 'Name 4'},
         {'index': 5, 'name': 'Name 5'},
     ]
-
 
     assert config['all_objs_by_anchor'] == config['all_objs']
 
@@ -300,7 +275,6 @@ def test_instruction_define():
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
 
-    print(config)
     assert config.a == 6
 
 
@@ -319,6 +293,94 @@ def test_instruction_each_simple():
     assert len(config['ilist']) == 5
 
     config.resolve_all_lazy()
+
+
+def test_instruction_if_true():
+    yaml_content = """
+    !if 1:
+      a: 1
+      b: 2
+    c: 3
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+    config.resolve_all_lazy()
+
+    assert 'a' in config
+    assert 'b' in config
+    assert 'c' in config
+    assert config.a == 1
+    assert config.b == 2
+    assert config.c == 3
+
+
+def test_instruction_if_false():
+    yaml_content = """
+    !if ${False}:
+      a: 1
+      b: 2
+    c: 3
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+    config.resolve_all_lazy()
+
+    assert 'a' not in config
+    assert 'b' not in config
+    assert 'c' in config
+    assert config.c == 3
+
+
+def test_instruction_if_inside_each():
+    yaml_content = """
+    numbers:
+      !each(n) ${list(range(5))}:
+        - !if ${(n % 2) == 0}:
+            number: ${n}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+    config.resolve_all_lazy()
+
+    expected_numbers = [{'number': 0}, {'number': 2}, {'number': 4}]
+    assert config.numbers == expected_numbers
+
+
+def test_instruction_if_complex_expression_true():
+    yaml_content = """
+    !define threshold: ${10}
+    !define value: ${15}
+    !if ${value > threshold}:
+      result: "Value is greater than threshold"
+    !if ${value <= threshold}:
+      result: "Value is less than or equal to threshold"
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+    config.resolve_all_lazy()
+
+    assert 'result' in config
+    assert config.result == "Value is greater than threshold"
+
+
+def test_instruction_if_with_external_function():
+    yaml_content = """
+    !define is_even: ${is_even_function(4)}
+    !if ${is_even}:
+      number_type: "Even"
+    !if ${not is_even}:
+      number_type: "Odd"
+    """
+
+    def is_even_function(n):
+        return n % 2 == 0
+
+    loader = DraconLoader(enable_interpolation=True, context={'is_even_function': is_even_function})
+    config = loader.loads(yaml_content)
+    config.resolve_all_lazy()
+
+    assert 'number_type' in config
+    assert config.number_type == "Even"
 
 
 def test_obj_references_instruct():
@@ -385,8 +447,6 @@ def test_instruct_on_nodes():
     loader.yaml.representer.full_module_path = False
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
-    print(config)
-    print(f"{config['other_list']=}")
 
     assert config['list42'] == [
         ClassA(index=42, name='new_name 42'),
@@ -440,8 +500,6 @@ def test_defines():
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
 
-    print(f"{config=}")
-
     assert config['expr42'] == 42
     assert config['inc42'] == 42
     assert config['compint_expr'] == 8
@@ -479,5 +537,4 @@ def test_include():
     assert config.nested.nameindex == '3: oldname 3'
     assert config.nested.nameindex_2 == '3: oldname 3'
 
-    print(config.nested)
     assert config.nested.alist == [ClassA(index=1, name='name 1'), ClassA(index=2, name='name 2')]

@@ -299,24 +299,46 @@ class DraconSequenceNode(SequenceNode):
     def __append__(self, value: Node):
         self.value.append(value)
 
+    def __extend__(self, values: list[Node]):
+        self.value.extend(values)
+
+    def extend(self, values: list[Node]):
+        self.value.extend(values)
 
     def append(self, value: Node):
         self.value.append(value)
 
     @classmethod
-    def from_mapping(cls, mapping: DraconMappingNode, empty=False):
+    def from_mapping(cls, mapping: DraconMappingNode, empty=False, elt_tag=None):
         tag = mapping.tag
         if tag == DEFAULT_MAP_TAG:
             tag = DEFAULT_SEQ_TAG
-        return cls(
+        newseq = cls(
             tag=tag,
-            value=[v for _, v in mapping.value] if not empty else [],
+            value=[],
             start_mark=mapping.start_mark,
             end_mark=mapping.end_mark,
             flow_style=mapping.flow_style,
             comment=mapping.comment,
             anchor=mapping.anchor,
         )
+
+        if not empty:
+            elt_tag = elt_tag or DEFAULT_MAP_TAG
+            for key, value in mapping.items():
+                mapval = DraconMappingNode(
+                    tag=elt_tag,
+                    value=[(key, value)],
+                )
+                newseq.append(mapval)
+
+        return newseq
+
+    def __str__(self):
+        return node_repr(self)
+
+    def __repr__(self):
+        return node_repr(self)
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}

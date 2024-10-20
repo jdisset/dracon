@@ -2,7 +2,7 @@ from enum import Enum
 from typing import List, Union, Hashable, Any, Optional, TypeVar, Type, Protocol, Tuple
 from typing_extensions import runtime_checkable
 from ruamel.yaml.nodes import Node
-from dracon.utils import node_repr, list_like, dict_like
+from dracon.utils import node_repr, list_like, dict_like, ftrace
 import re
 
 
@@ -23,6 +23,7 @@ def escape_keypath_part(part: str) -> str:
 
 def unescape_keypath_part(part: str) -> str:
     return part.replace('\\.', '.').replace('\\/', '/')
+
 
 class KeyPath:
     def __init__(
@@ -318,7 +319,6 @@ def _get_obj_impl(
     from dracon.deferred import DeferredNode
 
     if isinstance(obj, DeferredNode):
-        print(f"keypath_passthrough: {obj.keypath_passthrough}")
         return _get_obj_impl(
             obj.keypath_passthrough,
             attr,
@@ -327,22 +327,25 @@ def _get_obj_impl(
         )
     if list_like(obj):
         return obj[int(attr)]
-    if hasattr(obj, attr):
-        return getattr(obj, attr)
-    else:
-        try:  # check if we can access it with __getitem__
-            return obj[attr]
-        except (TypeError, KeyError):
-            if create_path_if_not_exists:
-                assert default_mapping_constructor is not None
-                obj[attr] = default_mapping_constructor()
+    try:
+        return obj[attr]
+    except (TypeError, KeyError):
+        if hasattr(obj, attr):
+            return getattr(obj, attr)
+        else:
+            try:  # check if we can access it with __getitem__
                 return obj[attr]
-            if isinstance(obj, Node):
-                raise AttributeError(
-                    f'Could not find attribute {attr} in node \n{node_repr(obj)} of type {type(obj)}'
-                )
-            else:
-                raise AttributeError(f'Could not find attribute {attr} in {obj}')
+            except (TypeError, KeyError):
+                if create_path_if_not_exists:
+                    assert default_mapping_constructor is not None
+                    obj[attr] = default_mapping_constructor()
+                    return obj[attr]
+                if isinstance(obj, Node):
+                    raise AttributeError(
+                        f'Could not find attribute {attr} in node \n{node_repr(obj)} of type {type(obj)}'
+                    )
+                else:
+                    raise AttributeError(f'Could not find attribute {attr} in {obj}')
 
 
 ROOTPATH = KeyPath('/')
