@@ -209,6 +209,25 @@ class Each(Instruction):
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 ## {{{                            --     if     --
+
+
+def as_bool(value: str | int | bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return bool(value)
+    if isinstance(value, str):
+        try:
+            return bool(int(value))
+        except ValueError:
+            pass
+        if value.lower() in ['true']:
+            return True
+        if value.lower() in ['false', 'null', 'none', '']:
+            return False
+    raise ValueError(f"Could not convert {value} to bool")
+
+
 class If(Instruction):
     """
     `!if expr : value`
@@ -252,7 +271,7 @@ class If(Instruction):
                 )
             )
         else:
-            evaluated_expr = bool(expr)
+            evaluated_expr = as_bool(expr)
 
         if evaluated_expr:
             if isinstance(value_node, DraconMappingNode):
@@ -260,7 +279,7 @@ class If(Instruction):
                     parent_node, DraconMappingNode
                 ), 'if statement with mapping must appear in a mapping'
                 for key, node in value_node.items():
-                    parent_node[key] = node
+                    parent_node.append((key, node))
             elif isinstance(value_node, DraconSequenceNode):
                 raise NotImplementedError(
                     "if statement containing a sequence is not yet implemented"
@@ -269,7 +288,7 @@ class If(Instruction):
                 assert isinstance(
                     parent_node, DraconMappingNode
                 ), 'if statement with scalar-like must appear in a mapping'
-                parent_node[value_path] = value_node
+                comp_res.replace_node_at(parent_path, value_node)
 
         del parent_node[key_node.value]
         return comp_res
