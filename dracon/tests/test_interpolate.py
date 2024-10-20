@@ -300,18 +300,39 @@ def test_instruction_if_true():
     !if 1:
       a: 1
       b: 2
-    c: 3
+      !if ${True}:
+        c: 3
+        !if null:
+            d: 4
+        !if 1:
+            e: 5
+        !if true:
+            f: 6
+        !if false:
+            g: 7
+        !if ${False}:
+            h: 8
+        !if ${True }:
+            i: 9
+        !if 0:
+            j: 10
+        !if 2:
+            k: 11
     """
     loader = DraconLoader(enable_interpolation=True)
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
 
-    assert 'a' in config
-    assert 'b' in config
-    assert 'c' in config
-    assert config.a == 1
-    assert config.b == 2
-    assert config.c == 3
+    print(config)
+    assert config == {
+        'a': 1,
+        'b': 2,
+        'c': 3,
+        'e': 5,
+        'f': 6,
+        'i': 9,
+        'k': 11,
+    }
 
 
 def test_instruction_if_false():
@@ -346,21 +367,46 @@ def test_instruction_if_inside_each():
     assert config.numbers == expected_numbers
 
 
+def test_instruction_if_sequence():
+    yaml_content = """
+    !define threshold: ${10}
+    !define val: ${15}
+    list:
+        - !if ${val > threshold}: "greater"
+        - !if ${val > threshold}:
+            a: 1
+            !if 1:
+                b: 2
+        - !if ${val <= threshold}: "lessthan"
+        - other
+    """
+
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+    config.resolve_all_lazy()
+
+    assert config.list == [
+        "greater",
+        {'a': 1, 'b': 2},
+        "other",
+    ]
+
+
 def test_instruction_if_complex_expression_true():
     yaml_content = """
     !define threshold: ${10}
     !define value: ${15}
     !if ${value > threshold}:
-      result: "Value is greater than threshold"
+      result: "greater"
     !if ${value <= threshold}:
-      result: "Value is less than or equal to threshold"
+      result: "lessthan"
     """
     loader = DraconLoader(enable_interpolation=True)
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
 
     assert 'result' in config
-    assert config.result == "Value is greater than threshold"
+    assert config.result == "greater"
 
 
 def test_instruction_if_with_external_function():
