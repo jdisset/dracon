@@ -33,7 +33,6 @@ from dracon.deferred import DeferredNode, process_deferred
 from dracon.loaders.env import read_from_env
 from dracon.representer import DraconRepresenter
 from dracon import dracontainer
-import copy
 from functools import partial
 
 
@@ -240,12 +239,14 @@ class DraconLoader:
                     callback=partial(add_to_context, node.context),
                 )
 
+    @ftrace(watch=[])
     def compose_config_from_str(self, content: str) -> CompositionResult:
         self.yaml.compose(content)
         assert isinstance(self.yaml.composer, DraconComposer)
         res = self.yaml.composer.get_result()
         return self.post_process_composed(res)
 
+    @ftrace(watch=[])
     def load_node(self, node):
         self.yaml.constructor.referenced_nodes = self.referenced_nodes
         self.yaml.constructor.context = deepcopy(self.context or {})
@@ -256,6 +257,7 @@ class DraconLoader:
             compres = self.post_process_composed(compres)
         return self.load_node(compres.root)
 
+    @ftrace(watch=[])
     def load(self, config_path: str | Path):
         self.reset_context()
         if isinstance(config_path, Path):
@@ -265,10 +267,12 @@ class DraconLoader:
         comp = self.compose_from_include_str(config_path)
         return self.load_composition_result(comp)
 
+    @ftrace(watch=[])
     def loads(self, content: str):
         comp = self.compose_config_from_str(content)
         return self.load_composition_result(comp)
 
+    @ftrace(watch=[])
     def post_process_composed(self, comp: CompositionResult):
         walk_node(
             node=comp.root,
@@ -286,14 +290,14 @@ class DraconLoader:
 
         return comp
 
-    @ftrace(inputs=False, watch=[])
+    @ftrace(watch=[])
     def preprocess_references(self, comp_res: CompositionResult):
         comp_res.find_special_nodes('interpolable', lambda n: isinstance(n, InterpolableNode))
         comp_res.sort_special_nodes('interpolable')
 
         for path in comp_res.pop_all_special('interpolable'):
             node = path.get_obj(comp_res.root)
-            assert isinstance(node, InterpolableNode), f"Invalid node type: {type(node)}"
+            assert isinstance(node, InterpolableNode), f"Invalid node type: {type(node)}  => {node}"
             node.preprocess_references(comp_res, path)
 
         return comp_res
@@ -315,6 +319,7 @@ class DraconLoader:
             node._full_composition = deepcopy(comp_res)
         return comp_res
 
+    ftrace(watch=[])
     def save_references(self, comp_res: CompositionResult):
         # the preprocessed refernces are stored as paths that point to refered nodes
         # however, after all the merging and including is done, we need to save
@@ -336,6 +341,7 @@ class DraconLoader:
         )
         return comp_res
 
+    ftrace(watch=[])
     def process_includes(self, comp_res: CompositionResult):
         while True:  # we need to loop until there are no more includes (since some includes may bring other ones )
             comp_res.find_special_nodes('include', lambda n: isinstance(n, IncludeNode))
@@ -355,6 +361,7 @@ class DraconLoader:
 
         return comp_res
 
+    ftrace(watch=[])
     def dump(self, data, stream=None):
         if stream is None:
             from io import StringIO
@@ -365,6 +372,7 @@ class DraconLoader:
         else:
             return self.yaml.dump(data, stream)
 
+    ftrace(watch=[])
     def dump_to_node(self, data):
         if isinstance(data, Node):
             return data
@@ -390,6 +398,7 @@ def load_file(config_path: str | Path, raw_dict=True, **kwargs):
     return load(f'file:{config_path}', raw_dict, **kwargs)
 
 
+ftrace(watch=[])
 def loads(config_str: str, raw_dict=False, **kwargs):
     loader = DraconLoader(**kwargs)
     if raw_dict:
