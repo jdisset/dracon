@@ -2,6 +2,7 @@
 from ruamel.yaml.composer import Composer
 from ruamel.yaml.nodes import Node, MappingNode, SequenceNode, ScalarNode
 
+from dracon.utils import ftrace
 from dracon.nodes import (
     DraconScalarNode,
     DraconMappingNode,
@@ -163,6 +164,7 @@ class DraconComposer(Composer):
 
         return node
 
+    @ftrace(watch=[])
     def wrapped_node(self, node: Node) -> Node:
         if isinstance(node, MappingNode):
             return DraconMappingNode(
@@ -200,6 +202,7 @@ class DraconComposer(Composer):
         else:
             raise NotImplementedError(f'Node type {type(node)} not supported')
 
+    @ftrace(watch=[])
     def compose_alias_event(self):
         event = self.parser.get_event()
         return IncludeNode(
@@ -209,6 +212,7 @@ class DraconComposer(Composer):
             comment=event.comment,
         )
 
+    @ftrace(watch=[])
     def compose_scalar_node(self, anchor=None) -> Node:
         event = self.parser.get_event()
         tag = event.ctag
@@ -234,6 +238,7 @@ class DraconComposer(Composer):
 
         return node
 
+    @ftrace(watch=[])
     def handle_interpolation(self, node) -> Node:
         if self.interpolation_enabled:
             tag_iexpr = outermost_interpolation_exprs(node.tag)
@@ -253,6 +258,7 @@ class DraconComposer(Composer):
                 )
         return node
 
+    @ftrace(watch=[])
     def compose_include_node(self) -> Node:
         normal_node = self.compose_scalar_node()
         node = IncludeNode(
@@ -264,6 +270,7 @@ class DraconComposer(Composer):
         )
         return node
 
+    @ftrace(watch=[])
     def compose_merge_node(self) -> Any:
         event = self.parser.get_event()
         tag = event.ctag
@@ -319,6 +326,7 @@ def is_merge_key(value: str) -> bool:
     return value.startswith('<<')
 
 
+@ftrace(watch=[])
 def delete_unset_nodes(comp_res: CompositionResult):
     # when we delete an unset node, we have to check if the parent is a mapping node
     # and if we just made it empty. If so, we have to replace it with an UnsetNode
