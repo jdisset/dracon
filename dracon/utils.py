@@ -122,6 +122,7 @@ class ListLike_Permissive(Protocol[E]):
 
     def __len__(self) -> int: ...
 
+
 def permissive_list_like(obj) -> bool:
     return isinstance(obj, ListLike_Permissive)
 
@@ -141,13 +142,10 @@ class ListLike(Generic[E], metaclass=ListLikeMeta):
     def __add__(self, other: 'ListLike[E]') -> 'ListLike[E]': ...
 
     def __append__(self, item: E) -> None: ...
-    
+
     def __len__(self) -> int: ...
 
     def __iter__(self) -> Iterator[E]: ...
-
-
-
 
 
 def list_like(obj) -> bool:
@@ -263,13 +261,20 @@ def node_repr(node, prefix='', is_last=True, is_root=True, enable_colors=True):
     }
 
     def get_node_repr(node):
-        tag = SHORT_TAGS.get(node.tag, node.tag)
+        ntag = ''
+        if hasattr(node, 'tag'):
+            ntag = node.tag
+        tag = SHORT_TAGS.get(ntag, ntag)
         tstring = f'{TYPE_COLOR}{NODE_TYPES.get(type(node).__name__,"")}{RESET}'
 
         if isinstance(node, (MappingNode, SequenceNode)):
             return f'{TAG_COLOR}{tag}{RESET} {tstring}'
 
-        return f'{TAG_COLOR}{tag}{RESET} {VAL_COLOR}{node.value}{RESET} {tstring}'
+        nvalue = node
+        if hasattr(node, 'value'):
+            nvalue = node.value
+
+        return f'{TAG_COLOR}{tag}{RESET} {VAL_COLOR}{nvalue}{RESET} {tstring}'
 
     output = ''
 

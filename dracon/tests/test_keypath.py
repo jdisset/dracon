@@ -215,6 +215,8 @@ def test_get():
 class DummyNode:
     def __init__(self, value):
         self.value = value
+        self.tag = ''
+
 
     def __eq__(self, other):
         return self.value == other.value
