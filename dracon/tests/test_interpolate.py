@@ -584,3 +584,6 @@ def test_include():
     assert config.nested.nameindex_2 == '3: oldname 3'
 
     assert config.nested.alist == [ClassA(index=1, name='name 1'), ClassA(index=2, name='name 2')]
+
+    assert config.other.a == 3
+    assert config.other.var_b_value == 15

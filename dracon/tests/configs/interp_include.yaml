@@ -1,5 +1,9 @@
 !noconstruct _: !include &aobj pkg:dracon:tests/configs/complex_interp@a_obj
 
+!define var_a: 3
+!define undefined_var: ${5 + 5}
+other: !include file:$DIR/include_define
+
 nested:
   !define a_id: ${get_index(construct(&aobj:i=2))}
   a_index: ${a_id}

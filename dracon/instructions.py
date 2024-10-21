@@ -85,18 +85,15 @@ class Define(Instruction):
             return Define()
         return None
 
-    @ftrace(False, watch=[])
-    def process(self, comp_res: CompositionResult, path: KeyPath, loader):
+    def get_name_and_value(self, comp_res, path, loader):
         if not path.is_mapping_key():
-            raise ValueError(f"instruction 'define' must be a mapping key, but got {path}")
-
+            raise ValueError(
+                f"instruction {self.__class__.__name__} must be a mapping key, but got {path}"
+            )
         key_node = path.get_obj(comp_res.root)
         value_node = path.removed_mapping_key().get_obj(comp_res.root)
         parent_node = path.parent.get_obj(comp_res.root)
         assert isinstance(parent_node, DraconMappingNode)
-        assert key_node.tag == '!define', f"Expected tag '!define', but got {key_node.tag}"
-
-        ctx = {}
 
         if isinstance(value_node, InterpolableNode):
             value = evaluate_expression(
@@ -109,16 +106,51 @@ class Define(Instruction):
             value = loader.load_composition_result(CompositionResult(root=value_node))
 
         var_name = key_node.value
-        assert var_name.isidentifier(), f"Invalid variable name in define instruction: {var_name}"
-        ctx = merged(ctx, {var_name: value}, MergeKey(raw='{<+}'))
+        assert (
+            var_name.isidentifier()
+        ), f"Invalid variable name in {self.__class__.__name__} instruction: {var_name}"
+
+        del parent_node[var_name]
+
+        return var_name, value, parent_node
+
+    @ftrace(False, watch=[])
+    def process(self, comp_res: CompositionResult, path: KeyPath, loader):
+        var_name, value, parent_node = self.get_name_and_value(comp_res, path, loader)
 
         walk_node(
             node=parent_node,
-            callback=partial(add_to_context, ctx),
+            callback=partial(add_to_context, {var_name: value}),
         )
 
-        # remove the node
-        del parent_node[var_name]
+        return comp_res
+
+
+class SetDefault(Define):
+    """
+    `!set_default var_name : default_value`
+
+    Similar to !define, but only sets the variable if it doesn't already exist in the context
+
+    If value is an interpolation, this node triggers composition-time evaluation
+    """
+
+    @staticmethod
+    def match(value: Optional[str]) -> Optional['SetDefault']:
+        if not value:
+            return None
+        if value == '!set_default':
+            return SetDefault()
+        return None
+
+    @ftrace(False, watch=[])
+    def process(self, comp_res: CompositionResult, path: KeyPath, loader):
+        var_name, value, parent_node = self.get_name_and_value(comp_res, path, loader)
+
+        walk_node(
+            node=parent_node,
+            callback=partial(add_to_context, {var_name: value}, merge_key='<<{>~}[>~]'),
+        )
 
         return comp_res
 
@@ -296,7 +328,7 @@ class If(Instruction):
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
-AVAILABLE_INSTRUCTIONS = [Define, Each, If]
+AVAILABLE_INSTRUCTIONS = [SetDefault, Define, Each, If]
 
 
 def match_instruct(value: str) -> Optional[Instruction]:

@@ -1,0 +1,10 @@
+!set_default var_a: 2
+
+!if ${var_a == 2}:
+  a: 2
+!if ${var_a == 3}:
+  a: 3
+
+!define var_b: ${undefined_var + 5}
+
+var_b_value: !include $var_b

@@ -272,7 +272,14 @@ class InterpolableNode(ContextNode):
     ):
         self.init_outermost_interpolations = init_outermost_interpolations
         ContextNode.__init__(
-            self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor, context=context
+            self,
+            value,
+            start_mark=start_mark,
+            end_mark=end_mark,
+            tag=tag,
+            comment=comment,
+            anchor=anchor,
+            context=context,
         )
         self.referenced_nodes = NodeLookup()
         self.saved_references = {}
