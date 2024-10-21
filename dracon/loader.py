@@ -63,7 +63,6 @@ def dillcopy(obj):
 
 @ftrace()
 def construct(node_or_val, **kwargs):
-
     try:
         if isinstance(node_or_val, Node):
             loader = DraconLoader(**kwargs)
@@ -75,8 +74,6 @@ def construct(node_or_val, **kwargs):
 
         msg = f'Error while constructing node: {e}\n{traceback.format_exc()}'
         raise ValueError(msg)
-
-
 
     return node_or_val
 
@@ -228,7 +225,10 @@ class DraconLoader:
             if not isinstance(res, CompositionResult):
                 if not isinstance(res, str):
                     raise ValueError(f"Invalid result type from loader '{loader}': {type(res)}")
-                res = self.copy().compose_config_from_str(res)
+                new_loader = self.copy()
+                if node is not None:
+                    add_to_context(node.context, new_loader)
+                res = new_loader.compose_config_from_str(res)
             if keypath:
                 res = res.rerooted(KeyPath(keypath))
             return res
@@ -274,6 +274,7 @@ class DraconLoader:
 
     @ftrace(watch=[])
     def post_process_composed(self, comp: CompositionResult):
+        # first we update the context of all context-containing nodes
         walk_node(
             node=comp.root,
             callback=partial(add_to_context, self.context),
@@ -319,7 +320,7 @@ class DraconLoader:
             node._full_composition = deepcopy(comp_res)
         return comp_res
 
-    ftrace(watch=[])
+    @ftrace(watch=[])
     def save_references(self, comp_res: CompositionResult):
         # the preprocessed refernces are stored as paths that point to refered nodes
         # however, after all the merging and including is done, we need to save
@@ -341,7 +342,7 @@ class DraconLoader:
         )
         return comp_res
 
-    ftrace(watch=[])
+    @ftrace(watch=[])
     def process_includes(self, comp_res: CompositionResult):
         while True:  # we need to loop until there are no more includes (since some includes may bring other ones )
             comp_res.find_special_nodes('include', lambda n: isinstance(n, IncludeNode))
@@ -361,7 +362,6 @@ class DraconLoader:
 
         return comp_res
 
-    ftrace(watch=[])
     def dump(self, data, stream=None):
         if stream is None:
             from io import StringIO
@@ -372,7 +372,6 @@ class DraconLoader:
         else:
             return self.yaml.dump(data, stream)
 
-    ftrace(watch=[])
     def dump_to_node(self, data):
         if isinstance(data, Node):
             return data
@@ -398,7 +397,6 @@ def load_file(config_path: str | Path, raw_dict=True, **kwargs):
     return load(f'file:{config_path}', raw_dict, **kwargs)
 
 
-ftrace(watch=[])
 def loads(config_str: str, raw_dict=False, **kwargs):
     loader = DraconLoader(**kwargs)
     if raw_dict:

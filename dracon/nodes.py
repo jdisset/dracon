@@ -72,27 +72,27 @@ class DraconScalarNode(ScalarNode):
 class ContextNode(DraconScalarNode):
     def __init__(
         self,
-        tag,
         value,
         start_mark=None,
         end_mark=None,
+        tag=None,
         anchor=None,
         comment=None,
         context: Optional[dict[str, Any]] = None,
     ):
         DraconScalarNode.__init__(
             self,
-            tag=tag,
             value=value,
             start_mark=start_mark,
             end_mark=end_mark,
+            tag=tag,
             comment=comment,
             anchor=anchor,
         )
         self.context = context or {}
 
 
-class IncludeNode(DraconScalarNode):
+class IncludeNode(ContextNode):
     def __init__(
         self,
         value,
@@ -103,10 +103,16 @@ class IncludeNode(DraconScalarNode):
         comment=None,
         context=None,
     ):
-        DraconScalarNode.__init__(
-            self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor
+        ContextNode.__init__(
+            self,
+            value=value,
+            start_mark=start_mark,
+            end_mark=end_mark,
+            tag=tag,
+            comment=comment,
+            anchor=anchor,
+            context=context,
         )
-        self.context = context or {}
 
 
 class MergeNode(DraconScalarNode):
