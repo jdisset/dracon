@@ -4,7 +4,7 @@ import pytest
 from dracon import dump, loads
 from dracon.loader import DraconLoader
 from dracon.deferred import DeferredNode
-from dracon.dracontainer import Dracontainer, Mapping, Sequence
+from dracon.dracontainer import Dracontainer, Mapping, Sequence, resolve_all_lazy
 from dracon.interpolation import InterpolationError, InterpolationMatch
 from typing import Generic, TypeVar, Any, Optional, Annotated, cast, List
 from pydantic import (
@@ -113,7 +113,7 @@ def test_deferred_explicit():
     )
     loader.yaml.representer.full_module_path = False
     config = loader.loads(yaml_content)
-    config.resolve_all_lazy()
+    resolve_all_lazy(config)
 
     assert isinstance(config.a_obj, ClassA)
     assert config['a_obj'].index == 42
@@ -123,6 +123,7 @@ def test_deferred_explicit():
 
     config.nested.update_context({'get_index': lambda obj: obj.index, '$CONSTANT': 10})
     nested = config.nested.construct()
+    resolve_all_lazy(nested)
 
     assert nested.a_index == 52
     assert nested.aname == "new_name 42"
@@ -130,15 +131,19 @@ def test_deferred_explicit():
 
     assert isinstance(config.b_obj, DeferredNode)
     b_obj = config.b_obj.construct()
+    resolve_all_lazy(b_obj)
     assert isinstance(b_obj, ClassA)
     assert b_obj.index == 32
     assert b_obj.name == "new_name 32"
+
+    print(f"{config.a_obj=}, {nested.obj2=}")
+    # here, nested.obj2 is a mapping... it should be a ClassA instance
 
     assert nested.obj2 == config.a_obj
     assert nested.obj3 == config.a_obj
     assert isinstance(nested.obj4, DeferredNode)
     assert nested.obj4.construct() == b_obj
 
+
 def test_deferred_multiple():
     from pydantic import BaseModel
-

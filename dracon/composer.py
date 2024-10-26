@@ -2,7 +2,7 @@
 from ruamel.yaml.composer import Composer
 from ruamel.yaml.nodes import Node, MappingNode, SequenceNode, ScalarNode
 
-from dracon.utils import ftrace
+from dracon.utils import ftrace, deepcopy
 from dracon.nodes import (
     DraconScalarNode,
     DraconMappingNode,
@@ -44,6 +44,13 @@ class CompositionResult(BaseModel):
     root: Node
     special_nodes: dict[SpecialNodeCategory, list[KeyPath]] = {}
     anchor_paths: dict[str, KeyPath] = {}
+
+    def __deepcopy__(self, memo=None):
+        return CompositionResult(
+            root=deepcopy(self.root, memo),
+            special_nodes={},
+            anchor_paths=deepcopy(self.anchor_paths, memo),
+        )
 
     def model_post_init(self, *args, **kwargs):
         super().model_post_init(*args, **kwargs)
@@ -95,7 +102,7 @@ class CompositionResult(BaseModel):
 
     def find_anchors(self):
         def _find_anchors(node, path):
-            if node.anchor is not None:
+            if hasattr(node, 'anchor') and node.anchor is not None:
                 self.anchor_paths[node.anchor] = path
 
         self.walk(_find_anchors)

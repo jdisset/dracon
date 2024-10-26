@@ -108,12 +108,15 @@ def metadata_dict_like(obj) -> bool:
 
 
 def dict_like(obj) -> bool:
-    return isinstance(obj, DictLike)
+    return all(
+        callable(getattr(obj, method, None))
+        for method in ('keys', 'values', 'items', '__getitem__', '__contains__', '__setitem__')
+    )
 
 
 @runtime_checkable
 class ListLike_Permissive(Protocol[E]):
-    def __getitem__(self, index: int) -> E: ...
+    def __getitem__(self, index: int) -> Any: ...
 
     # can be concatenated with another list-like object:
     def __add__(self, other: 'ListLike_Permissive[E]') -> 'ListLike_Permissive[E]': ...
@@ -137,7 +140,7 @@ class ListLikeMeta(type):
 
 
 class ListLike(Generic[E], metaclass=ListLikeMeta):
-    def __getitem__(self, index: int) -> E: ...
+    def __getitem__(self, index: int) -> Any: ...
 
     def __add__(self, other: 'ListLike[E]') -> 'ListLike[E]': ...
 
@@ -149,7 +152,14 @@ class ListLike(Generic[E], metaclass=ListLikeMeta):
 
 
 def list_like(obj) -> bool:
-    return isinstance(obj, ListLike)
+    return (
+        all(
+            callable(getattr(obj, method, None))
+            for method in ('__getitem__', '__add__', '__iter__', '__len__')
+        )
+        and not dict_like(obj)
+        and not isinstance(obj, str)
+    )
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
@@ -162,12 +172,12 @@ def _deepcopy(obj: T, memo=None) -> T:
     except Exception as e:
         if isinstance(obj, (ModuleType, FunctionType, type)):
             return obj  # Return the object itself for modules, functions and types
-        elif isinstance(obj, DictLike):
+        elif dict_like(obj):
             new_dict = obj.__class__()
             for k, v in obj.items():
                 new_dict[_deepcopy(k)] = _deepcopy(v)
             return new_dict
-        elif isinstance(obj, ListLike):
+        elif list_like(obj):
             new_list = obj.__class__()
             for item in obj:
                 new_list.append(_deepcopy(item))
