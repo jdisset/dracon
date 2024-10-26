@@ -149,7 +149,9 @@ class SetDefault(Define):
 
         walk_node(
             node=parent_node,
-            callback=partial(add_to_context, {var_name: value}, merge_key='<<{>~}[>~]'),
+            callback=partial(
+                add_to_context, {var_name: value}, merge_key=MergeKey(raw='<<{>~}[>~]')
+            ),
         )
 
         return comp_res

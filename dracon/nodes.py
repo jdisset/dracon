@@ -167,12 +167,12 @@ class DraconMappingNode(MappingNode):
         self._recompute_map()
 
     def _recompute_map(self):
-        self.map: dict[Hashable, int] = {}  # key value -> index
-
+        self.map = {}  # key value -> index
         for idx, (key, _) in enumerate(self.value):
-            assert hasattr(key, 'value'), f'Key {key} has no value attribute'
+            if not hasattr(key, 'value'):
+                raise ValueError(f'Key {key!r} has no value attribute')
             if key.value in self.map:
-                raise ValueError(f'Duplicate key: {key.value}')
+                raise ValueError(f'Duplicate key: {key.value!r}')
             self.map[key.value] = idx
 
     # and implement a get[] (and set) method
