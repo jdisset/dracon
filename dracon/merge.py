@@ -20,11 +20,6 @@ def make_default_empty_mapping_node():
     )
 
 
-def add_to_context(context, item, merge_key='<<{+<}[~<]'):
-    if hasattr(item, 'context'):
-        item.context = merged(item.context, context, MergeKey(raw=merge_key))
-
-
 @ftrace(inputs=False, watch=[])
 def process_merges(comp_res):
     comp_res.find_special_nodes('merge', lambda n: isinstance(n, MergeNode))
@@ -190,6 +185,14 @@ class MergeKey(BaseModel):
         self.list_mode, self.list_priority, self.list_depth = self.get_mode_priority(
             list_str, default_mode=default_list_mode, default_priority=default_list_priority
         )
+
+
+DEFAULT_ADD_TO_CONTEXT_MERGE_KEY = MergeKey(raw='<<{+<}[~<]')
+
+
+def add_to_context(context, item, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
+    if hasattr(item, 'context'):
+        item.context = merged(item.context, context, merge_key)
 
 
 def merged(existing: Any, new: Any, k: MergeKey) -> DictLike:

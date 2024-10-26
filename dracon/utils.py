@@ -1,7 +1,12 @@
 ## {{{                          --     imports     --
 import xxhash
+import types
 from ruamel.yaml.nodes import MappingNode, SequenceNode, ScalarNode, Node
+from collections import deque
 import base64
+import copy
+from types import ModuleType, FunctionType
+from typing import TypeVar, Any, Optional
 from typing import (
     Iterable,
     TypeVar,
@@ -165,36 +170,65 @@ def list_like(obj) -> bool:
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
+def _try_marshal(obj: T) -> Optional[T]:
+    """Attempt to marshal and unmarshal an object. Return None if not possible."""
+    try:
+        import marshal
+
+        return marshal.loads(marshal.dumps(obj))
+    except Exception:
+        return None
+
+
+def _try_pickle(obj: Any) -> Optional[Any]:
+    """Attempt to pickle and unpickle an object. Return None if not possible."""
+    try:
+        import pickle
+
+        return pickle.loads(pickle.dumps(obj))
+    except Exception:
+        return None
+
+
 def _deepcopy(obj: T, memo=None) -> T:
-    # a deepcopy with shallow fallback for objects that can't be deepcopied
+    if obj is None:
+        return obj
+
+    if memo is None:
+        memo = {}
+
+    obj_id = id(obj)
+    if obj_id in memo:
+        return memo[obj_id]
+
+    if hasattr(obj, '__deepcopy__'):
+        result = obj.__deepcopy__(memo)
+        memo[obj_id] = result
+        return result
+
+    result = _try_marshal(obj)
+    if result is not None:
+        memo[obj_id] = result
+        return result
+
+    result = _try_pickle(obj)
+    if result is not None:
+        memo[obj_id] = result
+        return result
+
     try:
         return copy.deepcopy(obj, memo)
     except Exception as e:
         if isinstance(obj, (ModuleType, FunctionType, type)):
             return obj  # Return the object itself for modules, functions and types
-        elif dict_like(obj):
-            new_dict = obj.__class__()
-            for k, v in obj.items():
-                new_dict[_deepcopy(k)] = _deepcopy(v)
-            return new_dict
-        elif list_like(obj):
-            new_list = obj.__class__()
-            for item in obj:
-                new_list.append(_deepcopy(item))
-            return new_list
-        elif hasattr(obj, '__dict__'):
-            new_obj = obj.__class__.__new__(obj.__class__)
-            for key, value in obj.__dict__.items():
-                setattr(new_obj, key, deepcopy(value))
-            return new_obj
-        elif isinstance(obj, (tuple, set, frozenset)):
-            return type(obj)(_deepcopy(item) for item in obj)
         else:
             return copy.copy(obj)  # Fallback to shallow copy for other types
 
 
-deepcopy = _deepcopy
+T = TypeVar('T')
 
+
+deepcopy = _deepcopy
 
 ## {{{                         --     printing     --
 
@@ -215,135 +249,147 @@ def get_hash(data: str) -> str:
     return base64.b32encode(hash_value).decode('utf-8').rstrip('=')
 
 
-def node_repr(node, prefix='', is_last=True, is_root=True, enable_colors=True):
-    if enable_colors:
-        BLUE = '\033[94m'
-        GREEN = '\033[92m'
-        YELLOW = '\033[93m'
-        MAGENTA = '\033[95m'
-        GREY = '\033[90m'
-        DARK_BLUE = '\033[34m'
-        DARK_GREEN = '\033[32m'
-        WHITE = '\033[97m'
-        RESET = '\033[0m'
-    else:
-        BLUE = ''
-        GREEN = ''
-        YELLOW = ''
-        MAGENTA = ''
-        GREY = ''
-        DARK_BLUE = ''
-        DARK_GREEN = ''
-        WHITE = ''
-        RESET = ''
+def node_repr(node, prefix='', is_last=True, is_root=True, enable_colors=True, _seen=None):
+    if _seen is None:
+        _seen = set()
 
-    TAG_COLOR: str = DARK_BLUE
-    YAML_TAG_COLOR: str = GREY
-    VAL_COLOR: str = WHITE
-    TYPE_COLOR: str = YELLOW
-    KEY_COLOR: str = MAGENTA
-    TREE_COLOR: str = GREY
+    node_id = id(node)
+    if node_id in _seen:
+        return f"<circular reference to {node.__class__.__name__}>"
 
-    VERTICAL: str = TREE_COLOR + '│ ' + RESET
-    ELBOW: str = TREE_COLOR + '├─' + RESET
-    ELBOW_END: str = TREE_COLOR + '└─' + RESET
-    EMPTY: str = TREE_COLOR + '  ' + RESET
+    _seen.add(node_id)
 
-    SHORT_TAGS = {
-        'tag:yaml.org,2002:int': 'int',
-        'tag:yaml.org,2002:str': 'str',
-        'tag:yaml.org,2002:float': 'float',
-        'tag:yaml.org,2002:bool': 'bool',
-        'tag:yaml.org,2002:null': 'null',
-        'tag:yaml.org,2002:map': 'map',
-        'tag:yaml.org,2002:seq': 'seq',
-    }
-    for k, v in SHORT_TAGS.items():
-        SHORT_TAGS[k] = YAML_TAG_COLOR + v + RESET
+    try:
+        if enable_colors:
+            BLUE = '\033[94m'
+            GREEN = '\033[92m'
+            YELLOW = '\033[93m'
+            MAGENTA = '\033[95m'
+            GREY = '\033[90m'
+            DARK_BLUE = '\033[34m'
+            DARK_GREEN = '\033[32m'
+            WHITE = '\033[97m'
+            RESET = '\033[0m'
+        else:
+            BLUE = ''
+            GREEN = ''
+            YELLOW = ''
+            MAGENTA = ''
+            GREY = ''
+            DARK_BLUE = ''
+            DARK_GREEN = ''
+            WHITE = ''
+            RESET = ''
 
-    NODE_TYPES = {
-        'ScalarNode': '',
-        'MappingNode': '',
-        'SequenceNode': '',
-        'InterpolableNode': '[INTRP]',
-        'MergeNode': '[MERGE]',
-        'IncludeNode': '[INCL]',
-    }
+        TAG_COLOR: str = DARK_BLUE
+        YAML_TAG_COLOR: str = GREY
+        VAL_COLOR: str = WHITE
+        TYPE_COLOR: str = YELLOW
+        KEY_COLOR: str = MAGENTA
+        TREE_COLOR: str = GREY
 
-    def get_node_repr(node):
-        ntag = ''
-        if hasattr(node, 'tag'):
-            ntag = node.tag
-        tag = SHORT_TAGS.get(ntag, ntag)
-        tstring = f'{TYPE_COLOR}{NODE_TYPES.get(type(node).__name__,"")}{RESET}'
+        VERTICAL: str = TREE_COLOR + '│ ' + RESET
+        ELBOW: str = TREE_COLOR + '├─' + RESET
+        ELBOW_END: str = TREE_COLOR + '└─' + RESET
+        EMPTY: str = TREE_COLOR + '  ' + RESET
 
-        if isinstance(node, (MappingNode, SequenceNode)):
-            return f'{TAG_COLOR}{tag}{RESET} {tstring}'
+        SHORT_TAGS = {
+            'tag:yaml.org,2002:int': 'int',
+            'tag:yaml.org,2002:str': 'str',
+            'tag:yaml.org,2002:float': 'float',
+            'tag:yaml.org,2002:bool': 'bool',
+            'tag:yaml.org,2002:null': 'null',
+            'tag:yaml.org,2002:map': 'map',
+            'tag:yaml.org,2002:seq': 'seq',
+        }
+        for k, v in SHORT_TAGS.items():
+            SHORT_TAGS[k] = YAML_TAG_COLOR + v + RESET
 
-        nvalue = node
-        if hasattr(node, 'value'):
-            nvalue = node.value
+        NODE_TYPES = {
+            'ScalarNode': '',
+            'MappingNode': '',
+            'SequenceNode': '',
+            'InterpolableNode': '[INTRP]',
+            'MergeNode': '[MERGE]',
+            'IncludeNode': '[INCL]',
+        }
 
-        return f'{TAG_COLOR}{tag}{RESET} {VAL_COLOR}{nvalue}{RESET} {tstring}'
+        def get_node_repr(node):
+            ntag = ''
+            if hasattr(node, 'tag'):
+                ntag = node.tag
+            tag = SHORT_TAGS.get(ntag, ntag)
+            tstring = f'{TYPE_COLOR}{NODE_TYPES.get(type(node).__name__,"")}{RESET}'
 
-    output = ''
+            if isinstance(node, (MappingNode, SequenceNode)):
+                return f'{TAG_COLOR}{tag}{RESET} {tstring}'
 
-    if is_root:
-        output += TREE_COLOR + '●─' + get_node_repr(node) + ' '
-    else:
-        connector: str = ELBOW_END if is_last else ELBOW
-        line_prefix = prefix + connector
-        output += line_prefix + get_node_repr(node) + '\n'
+            nvalue = node
+            if hasattr(node, 'value'):
+                nvalue = node.value
 
-    if isinstance(node, MappingNode):
+            return f'{TAG_COLOR}{tag}{RESET} {VAL_COLOR}{nvalue}{RESET} {tstring}'
+
+        output = ''
+
         if is_root:
-            output = '\n' + output + '\n'
-        child_prefix = prefix + (EMPTY if is_last else VERTICAL)
-        items = node.value
-        n = len(items)
+            output += TREE_COLOR + '●─' + get_node_repr(node) + ' '
+        else:
+            connector: str = ELBOW_END if is_last else ELBOW
+            line_prefix = prefix + connector
+            output += line_prefix + get_node_repr(node) + '\n'
 
-        for i, (key, value) in enumerate(items):
-            is_last_item = i == n - 1
+        if isinstance(node, MappingNode):
+            if is_root:
+                output = '\n' + output + '\n'
+            child_prefix = prefix + (EMPTY if is_last else VERTICAL)
+            items = node.value
+            n = len(items)
 
-            # Print the key
-            key_connector: str = ELBOW_END if is_last_item else ELBOW
-            key_line_prefix = child_prefix + key_connector
+            for i, (key, value) in enumerate(items):
+                is_last_item = i == n - 1
 
-            if hasattr(key, 'value'):
-                key_repr = f'{TAG_COLOR}{SHORT_TAGS.get(key.tag, key.tag)}{RESET} {TREE_COLOR}󰌆{KEY_COLOR} {key.value} {RESET}'
-                keytypestr = f'{TYPE_COLOR}{NODE_TYPES.get(type(key).__name__,"")}{RESET}'
-                key_repr += f'{keytypestr}'
-            else:
-                key_repr = f'noval(<{type(key)}>{key}) [KEY]'
-            output += key_line_prefix + key_repr + '\n'
+                # Print the key
+                key_connector: str = ELBOW_END if is_last_item else ELBOW
+                key_line_prefix = child_prefix + key_connector
 
-            # Recursively print the value
-            child_output = node_repr(
-                value,
-                prefix=child_prefix + (EMPTY if is_last_item else VERTICAL),
-                is_last=True,
-                is_root=False,
-                enable_colors=enable_colors,
-            )
-            output += child_output
+                if hasattr(key, 'value'):
+                    key_repr = f'{TAG_COLOR}{SHORT_TAGS.get(key.tag, key.tag)}{RESET} {TREE_COLOR}󰌆{KEY_COLOR} {key.value} {RESET}'
+                    keytypestr = f'{TYPE_COLOR}{NODE_TYPES.get(type(key).__name__,"")}{RESET}'
+                    key_repr += f'{keytypestr}'
+                else:
+                    key_repr = f'noval(<{type(key)}>{key}) [KEY]'
+                output += key_line_prefix + key_repr + '\n'
 
-    elif isinstance(node, SequenceNode):
-        child_prefix = prefix + (EMPTY if is_last else VERTICAL)
-        items = node.value
-        n = len(items)
+                # Recursively print the value
+                child_output = node_repr(
+                    value,
+                    prefix=child_prefix + (EMPTY if is_last_item else VERTICAL),
+                    is_last=True,
+                    is_root=False,
+                    enable_colors=enable_colors,
+                )
+                output += child_output
 
-        for i, value in enumerate(items):
-            is_last_item = i == n - 1
-            child_output = node_repr(
-                value,
-                prefix=child_prefix,
-                is_last=is_last_item,
-                is_root=False,
-                enable_colors=enable_colors,
-            )
-            output += child_output
+        elif isinstance(node, SequenceNode):
+            child_prefix = prefix + (EMPTY if is_last else VERTICAL)
+            items = node.value
+            n = len(items)
 
-    return output
+            for i, value in enumerate(items):
+                is_last_item = i == n - 1
+                child_output = node_repr(
+                    value,
+                    prefix=child_prefix,
+                    is_last=is_last_item,
+                    is_root=False,
+                    enable_colors=enable_colors,
+                )
+                output += child_output
+
+        return output
+    finally:
+        _seen.remove(node_id)
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}

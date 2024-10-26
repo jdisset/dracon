@@ -3,10 +3,16 @@ from ruamel.yaml import YAML, Node
 from typing import Type, Callable
 import copy
 import os
+
+# for cache stuff:
+from cachetools import cached, LRUCache
+from cachetools.keys import hashkey
+from functools import lru_cache
 import re
 from pathlib import Path
 from typing import Optional, Dict, Any, Annotated, TypeVar
 from pydantic import BeforeValidator, Field, PlainSerializer
+
 from dracon.composer import (
     IncludeNode,
     CompositionResult,
@@ -14,8 +20,10 @@ from dracon.composer import (
     delete_unset_nodes,
     walk_node,
 )
+
 from dracon.draconstructor import Draconstructor
 from dracon.keypath import KeyPath, ROOTPATH
+
 from dracon.utils import (
     DictLike,
     MetadataDictLike,
@@ -33,6 +41,9 @@ from dracon.loaders.pkg import read_from_pkg
 from dracon.deferred import DeferredNode, process_deferred
 from dracon.loaders.env import read_from_env
 from dracon.representer import DraconRepresenter
+
+from dracon.postprocess import preprocess_references
+
 from dracon import dracontainer
 from functools import partial
 
@@ -246,17 +257,14 @@ class DraconLoader:
                     callback=partial(add_to_context, node.context),
                 )
 
-    @ftrace(watch=[])
     def compose_config_from_str(self, content: str) -> CompositionResult:
-        self.yaml.compose(content)
-        assert isinstance(self.yaml.composer, DraconComposer)
-        res = self.yaml.composer.get_result()
-        return self.post_process_composed(res)
+        composed_content = deepcopy(cached_compose_config_from_str(self.yaml, content))
+        return self.post_process_composed(composed_content)
 
     @ftrace(watch=[])
     def load_node(self, node):
         self.yaml.constructor.referenced_nodes = self.referenced_nodes
-        self.yaml.constructor.context = deepcopy(self.context or {})
+        self.yaml.constructor.context = self.context.copy() or {}
         return self.yaml.constructor.construct_document(node)
 
     def load_composition_result(self, compres: CompositionResult, post_process=True):
@@ -287,7 +295,7 @@ class DraconLoader:
             callback=partial(add_to_context, self.context),
         )
 
-        comp = self.preprocess_references(comp)
+        comp = preprocess_references(comp)
         comp = process_deferred(comp, force_deferred_at=self.deferred_paths)
         comp = process_instructions(comp, self)
         comp = self.process_includes(comp)
@@ -298,17 +306,7 @@ class DraconLoader:
 
         return comp
 
-    @ftrace(watch=[])
-    def preprocess_references(self, comp_res: CompositionResult):
-        comp_res.find_special_nodes('interpolable', lambda n: isinstance(n, InterpolableNode))
-        comp_res.sort_special_nodes('interpolable')
 
-        for path in comp_res.pop_all_special('interpolable'):
-            node = path.get_obj(comp_res.root)
-            assert isinstance(node, InterpolableNode), f"Invalid node type: {type(node)}  => {node}"
-            node.preprocess_references(comp_res, path)
-
-        return comp_res
 
     def update_deferred_nodes(self, comp_res: CompositionResult):
         # copies the loader into deferred nodes so they can resume their composition by themselves
@@ -423,6 +421,14 @@ def load_config_to_dict(maybe_config: str | DictLike) -> DictLike:
         conf.set_metadata({'dracon_origin': maybe_config})
         return conf
     return maybe_config
+
+
+@cached(LRUCache(maxsize=1e6), key=lambda yaml, content: hashkey(content))
+def cached_compose_config_from_str(yaml, content):
+    yaml.compose(content)
+    assert isinstance(yaml.composer, DraconComposer)
+    res = yaml.composer.get_result()
+    return res
 
 
 T = TypeVar('T')
