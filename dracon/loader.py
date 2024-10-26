@@ -1,6 +1,7 @@
 ## {{{                          --     imports     --
 from ruamel.yaml import YAML, Node
 from typing import Type, Callable
+import copy
 import os
 import re
 from pathlib import Path
@@ -106,7 +107,11 @@ class DraconLoader:
 
         self.yaml.composer.interpolation_enabled = enable_interpolation
         self.yaml.constructor.yaml_base_dict_type = base_dict_type
-        self.context = ShallowDict(self._context_arg) if self._context_arg else ShallowDict()
+        self.context = (
+            ShallowDict[str, Any](self._context_arg)
+            if self._context_arg
+            else ShallowDict[str, Any]()
+        )
         self.reset_context()
 
     def reset_context(self):
@@ -163,7 +168,9 @@ class DraconLoader:
         # Need to clean this up, merge both (probably use comptime interpolation)
         # and make it consistent.
 
-        include_str = resolve_interpolable_variables(include_str, self.context)
+        context = self.context if not node else node.context
+
+        include_str = resolve_interpolable_variables(include_str, context)
 
         res = None
 
@@ -316,8 +323,8 @@ class DraconLoader:
         deferred_nodes = sorted(deferred_nodes, key=lambda x: len(x[1]), reverse=True)
 
         for node, _ in deferred_nodes:
-            node._loader = self.copy()
-            node._full_composition = deepcopy(comp_res)
+            node._loader = self
+            node._full_composition = comp_res
         return comp_res
 
     @ftrace(watch=[])

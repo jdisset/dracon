@@ -1,7 +1,7 @@
 ## {{{                          --     imports     --
 from ruamel.yaml.nodes import Node, MappingNode, SequenceNode, ScalarNode
 from ruamel.yaml.tag import Tag
-from dracon.utils import dict_like, list_like, generate_unique_id, node_repr
+from dracon.utils import dict_like, list_like, generate_unique_id, node_repr, deepcopy
 from typing import Any, Hashable, Optional
 from dracon.keypath import KeyPath, escape_keypath_part
 ##────────────────────────────────────────────────────────────────────────────}}}
@@ -90,6 +90,18 @@ class ContextNode(DraconScalarNode):
             anchor=anchor,
         )
         self.context = context or {}
+
+        # deepcopy still shallows copy the context:
+        def __deepcopy__(self, memo):
+            return self.__class__(
+                value=self.value,
+                start_mark=self.start_mark,
+                end_mark=self.end_mark,
+                tag=self.tag,
+                anchor=self.anchor,
+                comment=self.comment,
+                context=self.context.copy(),
+            )
 
 
 class IncludeNode(ContextNode):
@@ -226,6 +238,18 @@ class DraconMappingNode(MappingNode):
             anchor=self.anchor,
         )
 
+    def __deepcopy__(self, memo):
+        copied_value = deepcopy(self.value, memo)
+        return self.__class__(
+            tag=self.tag,
+            value=copied_value,
+            start_mark=self.start_mark,
+            end_mark=self.end_mark,
+            flow_style=self.flow_style,
+            comment=self.comment,
+            anchor=self.anchor,
+        )
+
     def get_include_nodes(self) -> list[KeyPath]:
         res = []
 
@@ -345,6 +369,17 @@ class DraconSequenceNode(SequenceNode):
 
     def __repr__(self):
         return node_repr(self)
+
+    def __deepcopy__(self, memo):
+        return self.__class__(
+            tag=self.tag,
+            value=deepcopy(self.value, memo),
+            start_mark=self.start_mark,
+            end_mark=self.end_mark,
+            flow_style=self.flow_style,
+            comment=self.comment,
+            anchor=self.anchor,
+        )
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}

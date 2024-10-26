@@ -2,7 +2,7 @@ from typing import Optional, Any
 import re
 from pydantic import BaseModel
 from enum import Enum
-from dracon.utils import dict_like, DictLike, ListLike, ftrace, deepcopy
+from dracon.utils import dict_like, DictLike, ListLike, ftrace, deepcopy, list_like
 from dracon.nodes import (
     MergeNode,
     DraconMappingNode,
@@ -18,6 +18,7 @@ def make_default_empty_mapping_node():
         tag='',
         value=[],
     )
+
 
 def add_to_context(context, item, merge_key='<<{+<}[~<]'):
     if hasattr(item, 'context'):
@@ -68,11 +69,7 @@ def process_merges(comp_res):
         if merge_key.keypath:
             parent_path = parent_path + KeyPath(merge_key.keypath)
 
-        new_parent = deepcopy(
-            parent_path.get_obj(
-                comp_res.root,
-            )
-        )
+        new_parent = parent_path.get_obj(comp_res.root)
 
         new_parent = merged(new_parent, merge_node, merge_key)
         assert isinstance(new_parent, Node)
@@ -199,9 +196,9 @@ def merged(existing: Any, new: Any, k: MergeKey) -> DictLike:
     def merge_value(v1: Any, v2: Any, depth: int = 0) -> Any:
         if type(v1) is type(v2) and hasattr(v1, 'merged_with') and hasattr(v2, 'merged_with'):
             return v1.merged_with(v2, depth + 1)
-        elif isinstance(v1, DictLike) and isinstance(v2, DictLike):
+        elif dict_like(v1) and dict_like(v2):
             return merge_dicts(v1, v2, depth + 1)
-        elif isinstance(v1, ListLike) and isinstance(v2, ListLike):
+        elif list_like(v1) and list_like(v2):
             return merge_lists(v1, v2, depth + 1)
         else:
             return v1 if k.dict_priority == MergePriority.EXISTING else v2

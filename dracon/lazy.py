@@ -17,8 +17,7 @@ from dracon.interpolation_utils import (
     InterpolationMatch,
 )
 from dracon.interpolation import evaluate_expression
-from dracon.utils import ftrace, ListLike
-from dracon.utils import node_repr, list_like, dict_like
+from dracon.utils import list_like, dict_like, ftrace
 
 
 class InterpolationError(Exception):
@@ -142,6 +141,10 @@ def set_val(parent: Any, key, value: Any) -> None:
             raise AttributeError(f'Could not set attribute {key} in {parent}')
 
 
+def num_array_like(obj):
+    return hasattr(obj, 'dtype') and hasattr(obj, 'shape') and obj.dtype.kind in 'iuf'
+
+
 @ftrace()
 def resolve_all_lazy(obj, root_obj=None, current_path=None):
     """will do its best to resolve all lazy objects in the object"""
@@ -162,12 +165,12 @@ def resolve_all_lazy(obj, root_obj=None, current_path=None):
         for key, value in obj:
             resolve_all_lazy(value, root_obj, current_path + KeyPath(str(key)))
 
-    elif isinstance(obj, cabc.Mapping):
+    elif dict_like(obj):
         for key, value in obj.items():
             resolve_all_lazy(key, root_obj, current_path + MAPPING_KEY + str(key))
             resolve_all_lazy(value, root_obj, current_path + key)
 
-    elif isinstance(obj, ListLike) and not isinstance(obj, (str, bytes)):
+    elif list_like(obj) and not isinstance(obj, (str, bytes)) and not num_array_like(obj):
         for i, item in enumerate(obj):
             resolve_all_lazy(item, root_obj, current_path + KeyPath(str(i)))
 

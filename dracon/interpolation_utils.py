@@ -7,7 +7,7 @@ from pydantic.dataclasses import dataclass
 
 import pyparsing as pp
 import re
-from dracon.utils import ftrace
+from dracon.utils import ftrace, DictLike
 
 
 class InterpolationError(Exception):
@@ -153,7 +153,7 @@ def find_interpolable_variables(expr: str) -> list[VarMatch]:
 
 
 @ftrace()
-def resolve_interpolable_variables(expr: str, symbols: Dict[str, Any]) -> str:
+def resolve_interpolable_variables(expr: str, symbols: DictLike[str, Any]) -> str:
     var_matches = find_interpolable_variables(expr)
     if not var_matches:
         return expr

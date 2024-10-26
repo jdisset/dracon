@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Union, TypeVar, Generic, Optional, Set
 from collections.abc import MutableMapping, MutableSequence
 from dracon.keypath import ROOTPATH, KeyPath
-from dracon.utils import DictLike, ListLike, deepcopy
+from dracon.utils import DictLike, ListLike, deepcopy, dict_like, list_like
 from dracon.lazy import (
     Lazy,
     recursive_update_lazy_container,
@@ -121,9 +121,9 @@ class Dracontainer:
 
     @classmethod
     def create(cls, data: Union[DictLike[K, V], ListLike[V], None] = None):
-        if isinstance(data, DictLike):
+        if dict_like(data):
             return Mapping(data)
-        elif isinstance(data, ListLike):
+        elif list_like(data):
             return Sequence(data)
         else:
             raise ValueError("Input must be either a dict or a list")
@@ -221,14 +221,14 @@ class Sequence(Dracontainer, MutableSequence[V]):
 
     def __setitem__(self, index, value):
         index = int(index)
-        self._data[index] = self._to_dracontainer(value, index)
+        self._data[index] = self._to_dracontainer(value, index)  # type: ignore
 
     def __delitem__(self, index):
         del self._data[index]
         if index in self._per_item_metadata:
             del self._per_item_metadata[index]
 
-    def __getitem__(self, index):
+    def __getitem__(self, index):  # type: ignore
         index = int(index)
         element = self._data[index]
         return self._handle_lazy(str(index), element)
@@ -251,26 +251,30 @@ class Sequence(Dracontainer, MutableSequence[V]):
     def clear(self):
         self._data.clear()
 
-    def insert(self, index, value):
+    def insert(self, index: int, value: V):
         self._data.insert(index, self._to_dracontainer(value, index))
 
-    def append(self, value):
+    def append(self, value: V):
         self._data.append(self._to_dracontainer(value, key=len(self._data)))
+
+    def __append__(self, value):
+        self.append(value)
 
     def extend(self, values):
         for value in values:
             self.append(value)
 
-    def __add__(self, other: 'Sequence[V]'):
+    def __add__(self, other: 'Sequence[V]') -> 'Sequence[V]':
         new_data = deepcopy(self._data)
         new_data.extend(other)
-        return Sequence(new_data)
+        return Sequence(new_data)  # type: ignore
 
     def __eq__(self, other):
         if isinstance(other, Sequence):
             return self._data == other._data
         elif isinstance(other, List):
             return self._data == other
+        return False
 
 
 def create_dracontainer(

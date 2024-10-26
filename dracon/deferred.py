@@ -69,7 +69,7 @@ class DeferredNode(DraconScalarNode, Generic[T]):
         self._loader.update_context(context or {})
         self._loader.deferred_paths = deferred_paths or []
 
-        composition = deepcopy(self._full_composition)
+        composition = self._full_composition
         composition.replace_node_at(self.path, self.value)
         walk_node(
             node=self.path.get_obj(composition.root),
@@ -149,7 +149,7 @@ def process_deferred(comp: CompositionResult, force_deferred_at: List[KeyPath | 
         if node.tag == "":
             reset_tag(node)
 
-        new_node = DeferredNode(value=deepcopy(node), path=path)
+        new_node = DeferredNode(value=node, path=path)
 
         comp.replace_node_at(path, new_node)
 

@@ -46,7 +46,17 @@ def pydantic_validate(tag, value, localns=None, root_obj=None, current_path=None
     if not is_lazy_compatible(tag_type) and isinstance(value, Dracontainer) and tag_type is not Any:
         resolve_all_lazy(value)
 
-    return TypeAdapter(tag_type).validate_python(value)
+    try:
+        return TypeAdapter(tag_type).validate_python(value)
+    except PydanticSchemaGenerationError as e:
+        # we try a simple construction:
+        try:
+            instance = tag_type(value)
+            return instance
+        except Exception as e2:
+            raise ValueError(
+                f"Failed to validate {tag}, i.e {tag_type=} with {value=}. When trying as a simple construction, got {e2}. When trying as a Pydantic schema, got {e}"
+            ) from e
 
 
 DEFAULT_TYPES = {
@@ -230,8 +240,10 @@ class Draconstructor(Constructor):
 
             if tag.startswith('!'):
                 reset_tag(node)
-
             obj = super().construct_object(node, deep=True)
+
+            node.tag = tag  # we don't want to permanently change the tag of the node because it might be referenced elsewhere
+
         except pydantic.ValidationError as e:
             raise ConstructorError(
                 None, None, f"Error while constructing {tag}: {e.errors()}", node.start_mark
