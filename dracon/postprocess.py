@@ -25,6 +25,7 @@ from dracon.loaders.env import read_from_env
 from dracon.representer import DraconRepresenter
 from dracon import dracontainer
 from functools import partial
+from functools import lru_cache
 
 
 @ftrace(watch=[])

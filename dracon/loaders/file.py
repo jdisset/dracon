@@ -3,11 +3,14 @@ from typing import ForwardRef, TypeAlias
 from .load_utils import with_possible_ext
 from typing import Optional
 
+from cachetools import cached, LRUCache
+from cachetools.keys import hashkey
 
 DraconLoader = ForwardRef('DraconLoader')
 
 
-def read_from_file(path: str, extra_paths=None, loader: Optional[DraconLoader] = None):
+@cached(LRUCache(maxsize=1e6))
+def read_from_file(path: str, extra_paths=None):
     """
     Reads the content of a file, searching in the specified path and additional paths if provided.
 
@@ -43,11 +46,6 @@ def read_from_file(path: str, extra_paths=None, loader: Optional[DraconLoader] =
     with open(p, 'r') as f:
         raw = f.read()
 
-    if loader:
-        loader.update_context({'$DIR': p.parent.as_posix(), '$FILE': p.name, '$FILE_STEM': p.stem})
+    new_context = {'$DIR': p.parent.as_posix(), '$FILE': p.name, '$FILE_STEM': p.stem}
 
-    return raw
-
-
-def compose_from_file(path: str, loader: DraconLoader, extra_paths=None):
-    return loader.compose_config_from_str(read_from_file(path, extra_paths))
+    return raw, new_context

@@ -2,11 +2,14 @@ from .load_utils import with_possible_ext
 from importlib.resources import files, as_file
 from typing import ForwardRef, Optional
 from pathlib import Path
+from cachetools import cached, LRUCache
+from cachetools.keys import hashkey
 
 DraconLoader = ForwardRef('DraconLoader')
 
 
-def read_from_pkg(path: str, loader: Optional[DraconLoader] = None):
+@cached(LRUCache(maxsize=1e6))
+def read_from_pkg(path: str):
     pkg = None
 
     if ':' in path:
@@ -21,16 +24,13 @@ def read_from_pkg(path: str, loader: Optional[DraconLoader] = None):
         try:
             with as_file(files(pkg) / fpath.as_posix()) as p:
                 with open(p, 'r') as f:
-                    if loader:
-                        loader.update_context(
-                            {
-                                '$FILE': Path(p).resolve().absolute().as_posix(),
-                                '$DIR': Path(p).parent.resolve().absolute().as_posix(),
-                                '$FILE_STEM': Path(p).stem,
-                            }
-                        )
+                    new_context = {
+                        '$FILE': Path(p).resolve().absolute().as_posix(),
+                        '$DIR': Path(p).parent.resolve().absolute().as_posix(),
+                        '$FILE_STEM': Path(p).stem,
+                    }
 
-                    return f.read()
+                    return f.read(), new_context
         except FileNotFoundError:
             pass
 
@@ -45,7 +45,3 @@ def read_from_pkg(path: str, loader: Optional[DraconLoader] = None):
         Available subdirs:
         - {resources_str}'''
     )
-
-
-def compose_from_pkg(path: str, loader: DraconLoader):
-    return loader.compose_config_from_str(read_from_pkg(path))

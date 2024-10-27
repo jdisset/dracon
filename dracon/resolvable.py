@@ -106,9 +106,12 @@ class Resolvable(Generic[T]):
 
         res.root[MergeNode(merge_key)] = node
 
-        # res.merge_nodes.extend([ROOTPATH + p for p in res.root.get_merge_nodes()])
-        # res.include_nodes.extend([ROOTPATH + p for p in res.root.get_include_nodes()])
+        res.find_special_nodes('merge', lambda n: isinstance(n, MergeNode))
+        res.sort_special_nodes('merge')
         res.special_nodes['merge'].extend([ROOTPATH + p for p in res.root.get_merge_nodes()])
+
+        res.find_special_nodes('include', lambda n: isinstance(n, IncludeNode))
+        res.sort_special_nodes('include')
         res.special_nodes['include'].extend([ROOTPATH + p for p in res.root.get_include_nodes()])
 
         new_resolvable = Resolvable(

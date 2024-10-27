@@ -11,6 +11,7 @@ from dracon.nodes import (
 )
 from ruamel.yaml.nodes import Node
 from dracon.keypath import KeyPath
+from functools import lru_cache
 
 
 def make_default_empty_mapping_node():
@@ -21,6 +22,7 @@ def make_default_empty_mapping_node():
 
 
 @ftrace(inputs=False, watch=[])
+@lru_cache
 def process_merges(comp_res):
     comp_res.find_special_nodes('merge', lambda n: isinstance(n, MergeNode))
     comp_res.sort_special_nodes('merge')
@@ -192,7 +194,11 @@ DEFAULT_ADD_TO_CONTEXT_MERGE_KEY = MergeKey(raw='<<{+<}[~<]')
 
 def add_to_context(context, item, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
     if hasattr(item, 'context'):
-        item.context = merged(item.context, context, merge_key)
+        item.context = context_add(item.context, context, merge_key)
+
+
+def context_add(base, newcontext, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
+    return merged(base, newcontext, merge_key)
 
 
 def merged(existing: Any, new: Any, k: MergeKey) -> DictLike:

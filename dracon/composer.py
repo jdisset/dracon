@@ -43,7 +43,8 @@ INCLUDE_TAG = '!include'
 class CompositionResult(BaseModel):
     root: Node
     special_nodes: dict[SpecialNodeCategory, list[KeyPath]] = {}
-    anchor_paths: dict[str, KeyPath] = {}
+    anchor_paths: Optional[dict[str, KeyPath]] = None
+    node_map: Optional[dict[KeyPath, Node]] = None
 
     def __deepcopy__(self, memo=None):
         return CompositionResult(
@@ -52,11 +53,25 @@ class CompositionResult(BaseModel):
             anchor_paths=deepcopy(self.anchor_paths, memo),
         )
 
+    def __hash__(self):
+        return hash(id(self.root))
+
     def model_post_init(self, *args, **kwargs):
         super().model_post_init(*args, **kwargs)
         for category in SpecialNodeCategory.__args__:
             self.special_nodes.setdefault(category, [])
-        self.find_anchors()
+        if self.node_map is None:
+            self.make_map()
+        if self.anchor_paths is None:
+            self.find_anchors()
+
+    def make_map(self):
+        self.node_map = {}
+
+        def _callback(node, path):
+            self.node_map[path] = node
+
+        walk_node(self.root, _callback, start_path=ROOTPATH)
 
     def rerooted(self, new_root_path: KeyPath):
         return CompositionResult(root=new_root_path.get_obj(self.root))
@@ -84,12 +99,19 @@ class CompositionResult(BaseModel):
         nodes = self.special_nodes.get(category, [])
         self.special_nodes[category] = sorted(nodes, key=len, reverse=reverse)
 
+    def walk_no_path(
+        self,
+        callback: Callable[[Node], None],
+    ):
+        for _, node in self.node_map.items():
+            callback(node)
+
     def walk(
         self,
         callback: Callable[[Node, KeyPath], None],
-        start_path: KeyPath = ROOTPATH,
     ):
-        walk_node(start_path.get_obj(self.root), callback, start_path=start_path)
+        for path, node in self.node_map.items():
+            callback(node, path)
 
     def find_special_nodes(
         self,
@@ -97,17 +119,51 @@ class CompositionResult(BaseModel):
         is_special: Callable[[Node], bool],
     ):
         special_nodes = []
-        self.walk(lambda node, path: special_nodes.append(path) if is_special(node) else None)
+
+        for path, node in self.node_map.items():
+            if is_special(node):
+                special_nodes.append(path)
+
         self.special_nodes[category] = special_nodes
 
     def find_anchors(self):
-        def _find_anchors(node, path):
-            if hasattr(node, 'anchor') and node.anchor is not None:
+        def is_anchor(node):
+            return hasattr(node, 'anchor') and (node.anchor is not None)
+
+        self.anchor_paths = {}
+        for path, node in self.node_map.items():
+            if is_anchor(node):
                 self.anchor_paths[node.anchor] = path
 
-        self.walk(_find_anchors)
-
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+def walk_node(node, callback, start_path=None):
+    def __walk_node_no_path(node):
+        callback(node)
+        if isinstance(node, DraconMappingNode):
+            for k_node, v_node in node.value:
+                __walk_node_no_path(k_node)
+                __walk_node_no_path(v_node)
+        elif isinstance(node, DraconSequenceNode):
+            for v in node.value:
+                __walk_node_no_path(v)
+
+    def __walk_node(node, path):
+        callback(node, path)
+        path = path.removed_mapping_key()
+        if isinstance(node, DraconMappingNode):
+            for k_node, v_node in node.value:
+                __walk_node(k_node, path + MAPPING_KEY + k_node.value)
+                __walk_node(v_node, path + k_node.value)
+        elif isinstance(node, DraconSequenceNode):
+            for i, v in enumerate(node.value):
+                __walk_node(v, path + str(i))
+
+    if start_path is not None:
+        __walk_node(node, start_path)
+    else:
+        __walk_node_no_path(node)
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
@@ -134,7 +190,6 @@ class DraconComposer(Composer):
         return CompositionResult(
             root=root_node,
             special_nodes=self.special_nodes,
-            anchor_paths=self.anchor_paths,
         )
 
     def add_special_node(self, category: SpecialNodeCategory, path: KeyPath):
@@ -301,39 +356,10 @@ class DraconComposer(Composer):
 ## {{{                           --     utils     --
 
 
-def walk_node(node, callback, start_path=None):
-    def __walk_node_no_path(node):
-        callback(node)
-        if isinstance(node, DraconMappingNode):
-            for k_node, v_node in node.value:
-                __walk_node_no_path(k_node)
-                __walk_node_no_path(v_node)
-        elif isinstance(node, DraconSequenceNode):
-            for v in node.value:
-                __walk_node_no_path(v)
-
-    def __walk_node(node, path):
-        callback(node, path)
-        path = path.removed_mapping_key()
-        if isinstance(node, DraconMappingNode):
-            for k_node, v_node in node.value:
-                __walk_node(k_node, path + MAPPING_KEY + k_node.value)
-                __walk_node(v_node, path + k_node.value)
-        elif isinstance(node, DraconSequenceNode):
-            for i, v in enumerate(node.value):
-                __walk_node(v, path + str(i))
-
-    if start_path is not None:
-        __walk_node(node, start_path)
-    else:
-        __walk_node_no_path(node)
-
-
 def is_merge_key(value: str) -> bool:
     return value.startswith('<<')
 
 
-@ftrace(watch=[])
 def delete_unset_nodes(comp_res: CompositionResult):
     # when we delete an unset node, we have to check if the parent is a mapping node
     # and if we just made it empty. If so, we have to replace it with an UnsetNode

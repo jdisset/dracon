@@ -48,6 +48,7 @@ def process_instructions(comp_res: CompositionResult, loader) -> CompositionResu
     def refresh_instruction_nodes():
         nonlocal instruction_nodes
         instruction_nodes = []
+        comp_res.make_map()
         comp_res.walk(find_instruction_nodes)
         instruction_nodes = sorted(instruction_nodes, key=lambda x: len(x[1]))
 
@@ -235,8 +236,8 @@ class Each(Instruction):
                     callback=partial(add_to_context, ctx),
                 )
 
-        comp_res.replace_node_at(path.parent, new_parent)
         del parent_node[key_node.value]
+        comp_res.replace_node_at(path.parent, new_parent)
 
         return comp_res
 
