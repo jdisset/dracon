@@ -54,7 +54,7 @@ class CompositionResult(BaseModel):
         )
 
     def __hash__(self):
-        return hash(id(self.root))
+        return hash(self.root)
 
     def model_post_init(self, *args, **kwargs):
         super().model_post_init(*args, **kwargs)

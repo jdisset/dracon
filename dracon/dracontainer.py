@@ -210,6 +210,10 @@ class Mapping(Dracontainer, MutableMapping[K, V], Generic[K, V]):
     def values(self):
         return self._data.values()
 
+    def copy(self):
+        # shallow copy
+        return Mapping(self._data.copy())
+
 
 class Sequence(Dracontainer, MutableSequence[V]):
     def __init__(self, data: Optional[ListLike[V]] = None):

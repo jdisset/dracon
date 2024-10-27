@@ -211,10 +211,10 @@ def _deepcopy(obj: T, memo=None) -> T:
         memo[obj_id] = result
         return result
 
-    result = _try_pickle(obj)
-    if result is not None:
-        memo[obj_id] = result
-        return result
+    # result = _try_pickle(obj)
+    # if result is not None:
+        # memo[obj_id] = result
+        # return result
 
     try:
         return copy.deepcopy(obj, memo)

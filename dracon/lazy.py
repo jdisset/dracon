@@ -59,13 +59,11 @@ class Lazy(Generic[T]):
         self.name = name
 
 
+T = TypeVar('T')
+
+
 class LazyInterpolable(Lazy[T]):
-    """
-    A lazy object that can be resolved (i.e. interpolated) to a value when needed.
-
-    The usual way of doing that is by
-
-    """
+    """A lazy object that can be resolved (i.e. interpolated) to a value when needed."""
 
     def __init__(
         self,
@@ -83,14 +81,49 @@ class LazyInterpolable(Lazy[T]):
         self.context = context
         self.current_path = current_path
         self.root_obj = root_obj
-        self.init_outermost_interpolations = (
-            init_outermost_interpolations  # to cache the result of the first parsing
-        )
+        self.init_outermost_interpolations = init_outermost_interpolations
         self.permissive = permissive
         if not self.permissive:
             assert isinstance(
                 value, (str, tuple)
             ), f"LazyInterpolable expected string, got {type(value)}. Did you mean to contruct with permissive=True?"
+
+    def __getstate__(self):
+        """Get the object's state for pickling."""
+        state = {
+            'value': self.value,
+            'name': self.name,
+            'current_path': self.current_path,
+            'permissive': self.permissive,
+            'context': self.context,
+            # Store init_outermost_interpolations if it's picklable
+            'init_outermost_interpolations': self.init_outermost_interpolations
+            if self.init_outermost_interpolations
+            else None,
+        }
+
+        # Handle root_obj specially if needed
+        if hasattr(self.root_obj, '__getstate__'):
+            state['root_obj'] = self.root_obj
+        else:
+            state['root_obj'] = None  # Will be reattached after unpickling
+
+        # Don't pickle the validator function - it will be reattached by the owner
+        return state
+
+    def __setstate__(self, state):
+        """Restore the object's state after unpickling."""
+        # Initialize with default values
+        self.__init__(
+            value=state['value'],
+            name=state['name'],
+            current_path=state['current_path'],
+            root_obj=state['root_obj'],
+            init_outermost_interpolations=state['init_outermost_interpolations'],
+            permissive=state['permissive'],
+            context=state['context'],
+            validator=None,  # Validator will be reattached by the owner if needed
+        )
 
     def __repr__(self):
         return f"LazyInterpolable({self.value})"
@@ -104,7 +137,6 @@ class LazyInterpolable(Lazy[T]):
                 init_outermost_interpolations=self.init_outermost_interpolations,
                 context=self.context,
             )
-
         return self.validate(self.value)
 
     def get(self, owner_instance, setval=False):
@@ -122,6 +154,10 @@ class LazyInterpolable(Lazy[T]):
             setattr(owner_instance, self.name, newval)
 
         return newval
+
+    def reattach_validator(self, validator: Optional[Callable[[Any], Any]]):
+        """Reattach a validator after unpickling."""
+        self._validator = validator
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
