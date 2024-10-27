@@ -23,6 +23,7 @@ from dracon.composer import (
 
 from dracon.draconstructor import Draconstructor
 from dracon.keypath import KeyPath, ROOTPATH
+from dracon.yaml import PicklableYAML
 
 from dracon.utils import (
     DictLike,
@@ -99,25 +100,19 @@ class DraconLoader:
         base_list_type: Type[ListLike] = dracontainer.Sequence,
         enable_interpolation: bool = False,
         context: Optional[Dict[str, Any]] = None,
-        deferred_paths: Optional[
-            list[KeyPath | str]
-        ] = None,  # list of paths to nodes that we need to force-defer
+        deferred_paths: Optional[list[KeyPath | str]] = None,
     ):
-        self.custom_loaders = DEFAULT_LOADERS
+        self.custom_loaders = DEFAULT_LOADERS.copy()
         self.custom_loaders.update(custom_loaders or {})
         self._context_arg = context
         self._enable_interpolation = enable_interpolation
         self.referenced_nodes = {}
-        self.deferred_paths = deferred_paths or []
-        self.deferred_paths = [KeyPath(p) for p in self.deferred_paths]
+        self.deferred_paths = [KeyPath(p) for p in (deferred_paths or [])]
+        self.base_dict_type = base_dict_type
+        self.base_list_type = base_list_type
 
-        self.yaml = YAML()
-        self.yaml.Composer = DraconComposer
-        self.yaml.Constructor = Draconstructor
-        self.yaml.Representer = DraconRepresenter
+        self._init_yaml()
 
-        self.yaml.composer.interpolation_enabled = enable_interpolation
-        self.yaml.constructor.yaml_base_dict_type = base_dict_type
         self.context = (
             ShallowDict[str, Any](self._context_arg)
             if self._context_arg
@@ -125,11 +120,20 @@ class DraconLoader:
         )
         self.reset_context()
 
+    def _init_yaml(self):
+        self.yaml = PicklableYAML()
+        self.yaml.Composer = DraconComposer
+        self.yaml.Constructor = Draconstructor
+        self.yaml.Representer = DraconRepresenter
+
+        self.yaml.composer.interpolation_enabled = self._enable_interpolation
+        self.yaml.constructor.yaml_base_dict_type = self.base_dict_type
+
     def reset_context(self):
         self.update_context(DEFAULT_CONTEXT)
         self.update_context(
             {
-                'construct': partial(  # from node to obj
+                'construct': partial(
                     construct,
                     custom_loaders=self.custom_loaders,
                     capture_globals=True,
@@ -144,16 +148,17 @@ class DraconLoader:
 
     def copy(self):
         new_loader = DraconLoader(
-            custom_loaders=self.custom_loaders,
+            custom_loaders=self.custom_loaders.copy(),
             capture_globals=False,
-            base_dict_type=self.yaml.constructor.yaml_base_dict_type,
-            base_list_type=self.yaml.constructor.yaml_base_list_type,
-            enable_interpolation=self.yaml.composer.interpolation_enabled,
+            base_dict_type=self.base_dict_type,
+            base_list_type=self.base_list_type,
+            enable_interpolation=self._enable_interpolation,
             context=self.context.copy() if self.context else None,
         )
-        new_loader.referenced_nodes = self.referenced_nodes
-        new_loader.yaml.constructor.yaml_constructors = self.yaml.constructor.yaml_constructors
-
+        new_loader.referenced_nodes = self.referenced_nodes.copy()
+        new_loader.yaml.constructor.yaml_constructors = (
+            self.yaml.constructor.yaml_constructors.copy()
+        )
         return new_loader
 
     def __deepcopy__(self, memo):

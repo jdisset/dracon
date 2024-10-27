@@ -3,8 +3,11 @@ import sys
 import importlib
 from ruamel.yaml.nodes import MappingNode, SequenceNode
 from ruamel.yaml.constructor import ConstructorError
+from typing import Dict, Any, Mapping, List
 from dracon.merge import merged, MergeKey
 import pydantic
+import types
+import pickle
 from dracon.keypath import KeyPath, ROOTPATH
 
 from pydantic import (
@@ -57,13 +60,6 @@ def pydantic_validate(tag, value, localns=None, root_obj=None, current_path=None
             raise ValueError(
                 f"Failed to validate {tag}, i.e {tag_type=} with {value=}. When trying as a simple construction, got {e2}. When trying as a Pydantic schema, got {e}"
             ) from e
-
-
-DEFAULT_TYPES = {
-    'Any': Any,
-    'Resolvable': Resolvable,
-    'DraconResolvable': Resolvable,
-}
 
 
 def resolve_type(
@@ -176,6 +172,12 @@ def collect_all_types(modules, capture_globals=True, globals_at_frame=15):
     return types
 
 
+DEFAULT_TYPES = {
+    'Any': Any,
+    'Resolvable': Resolvable,
+    'DraconResolvable': Resolvable,
+}
+
 DEFAULT_MODULES_FOR_TYPES = [
     'pydantic',
     'typing',
@@ -217,6 +219,7 @@ class Draconstructor(Constructor):
     def construct_object(self, node, deep=True):
         assert self.context is not None, "Context must be set before constructing objects"
 
+        self.localns.update(DEFAULT_TYPES)
         self.localns.update(get_all_types(self.context))
 
         is_root = False

@@ -49,6 +49,23 @@ class DeferredNode(DraconScalarNode, Generic[T]):
         self._loader: Optional[DraconLoader] = None
         self._full_composition: Optional[CompositionResult] = None
 
+    def __getstate__(self):
+        state = DraconScalarNode.__getstate__(self)
+        state['path'] = self.path
+        state['context'] = self.context
+        state['obj_type'] = self.obj_type
+        state['_loader'] = self._loader
+        state['_full_composition'] = self._full_composition
+        return state
+
+    def __setstate__(self, state):
+        DraconScalarNode.__setstate__(self, state)
+        self.path = state['path']
+        self.context = state['context']
+        self.obj_type = state['obj_type']
+        self._loader = state['_loader']
+        self._full_composition = state['_full_composition']
+
     def update_context(self, context):
         add_to_context(context, self)
 

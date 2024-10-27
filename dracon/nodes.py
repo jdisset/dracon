@@ -74,8 +74,26 @@ class DraconScalarNode(ScalarNode):
     def __repr__(self):
         return node_repr(self)
 
-    # def __hash__(self):
-    # return base_node_hash(self)
+    def __getstate__(self):
+        state = {
+            'tag': self.tag,
+            'value': self.value,
+            'start_mark': self.start_mark,
+            'end_mark': self.end_mark,
+            'style': self.style,
+            'comment': self.comment,
+            'anchor': self.anchor,
+        }
+        return state
+
+    def __setstate__(self, state):
+        self.tag = state['tag']
+        self.value = state['value']
+        self.start_mark = state['start_mark']
+        self.end_mark = state['end_mark']
+        self.style = state['style']
+        self.comment = state['comment']
+        self.anchor = state['anchor']
 
 
 class ContextNode(DraconScalarNode):
@@ -112,9 +130,14 @@ class ContextNode(DraconScalarNode):
                 context=self.context.copy(),
             )
 
-        # def __hash__(self):
-        # hashable_context = tuple(sorted(self.context.items()))
-        # return hash((base_node_hash(self), hashable_context))
+    def __getstate__(self):
+        state = DraconScalarNode.__getstate__(self)
+        state['context'] = self.context
+        return state
+
+    def __setstate__(self, state):
+        DraconScalarNode.__setstate__(self, state)
+        self.context = state['context']
 
 
 class IncludeNode(ContextNode):
@@ -146,6 +169,15 @@ class MergeNode(DraconScalarNode):
         DraconScalarNode.__init__(
             self, STR_TAG, value, start_mark, end_mark, comment=comment, anchor=anchor
         )
+
+    def __getstate__(self):
+        state = DraconScalarNode.__getstate__(self)
+        state['merge_key_raw'] = self.merge_key_raw
+        return state
+
+    def __setstate__(self, state):
+        DraconScalarNode.__setstate__(self, state)
+        self.merge_key_raw = state['merge_key_raw']
 
 
 class UnsetNode(DraconScalarNode):
@@ -304,8 +336,28 @@ class DraconMappingNode(MappingNode):
     def __repr__(self):
         return node_repr(self)
 
-    # def __hash__(self):
-    # return hash((tuple(self.value), base_node_hash(self)))
+    def __getstate__(self):
+        state = {
+            'tag': self.tag,
+            'value': self.value,
+            'start_mark': self.start_mark,
+            'end_mark': self.end_mark,
+            'flow_style': self.flow_style,
+            'comment': self.comment,
+            'anchor': self.anchor,
+            'map': self.map,
+        }
+        return state
+
+    def __setstate__(self, state):
+        self.tag = state['tag']
+        self.value = state['value']
+        self.start_mark = state['start_mark']
+        self.end_mark = state['end_mark']
+        self.flow_style = state['flow_style']
+        self.comment = state['comment']
+        self.anchor = state['anchor']
+        self.map = state['map']
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
@@ -353,6 +405,27 @@ class DraconSequenceNode(SequenceNode):
 
     def append(self, value: Node):
         self.value.append(value)
+
+    def __getstate__(self):
+        state = {
+            'tag': self.tag,
+            'value': self.value,
+            'start_mark': self.start_mark,
+            'end_mark': self.end_mark,
+            'flow_style': self.flow_style,
+            'comment': self.comment,
+            'anchor': self.anchor,
+        }
+        return state
+
+    def __setstate__(self, state):
+        self.tag = state['tag']
+        self.value = state['value']
+        self.start_mark = state['start_mark']
+        self.end_mark = state['end_mark']
+        self.flow_style = state['flow_style']
+        self.comment = state['comment']
+        self.anchor = state['anchor']
 
     @classmethod
     def from_mapping(cls, mapping: DraconMappingNode, empty=False, elt_tag=None):
