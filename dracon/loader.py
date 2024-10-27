@@ -239,7 +239,9 @@ class DraconLoader:
             if loader not in custom_loaders:
                 raise ValueError(f'Unknown loader: {loader}')
 
-            res = custom_loaders[loader](path, loader=self)
+            res, new_context = custom_loaders[loader](path)
+            self.update_context(new_context)
+
             if not isinstance(res, CompositionResult):
                 if not isinstance(res, str):
                     raise ValueError(f"Invalid result type from loader '{loader}': {type(res)}")
@@ -252,10 +254,8 @@ class DraconLoader:
             return res
         finally:
             if isinstance(res, CompositionResult) and node is not None:
-                walk_node(
-                    node=res.root,
-                    callback=partial(add_to_context, node.context),
-                )
+                res.make_map()
+                res.walk_no_path(callback=partial(add_to_context, node.context))
 
     def compose_config_from_str(self, content: str) -> CompositionResult:
         composed_content = deepcopy(cached_compose_config_from_str(self.yaml, content))
@@ -290,10 +290,9 @@ class DraconLoader:
     @ftrace(watch=[])
     def post_process_composed(self, comp: CompositionResult):
         # first we update the context of all context-containing nodes
-        walk_node(
-            node=comp.root,
-            callback=partial(add_to_context, self.context),
-        )
+
+        comp.make_map()
+        comp.walk_no_path(callback=partial(add_to_context, self.context))
 
         comp = preprocess_references(comp)
         comp = process_deferred(comp, force_deferred_at=self.deferred_paths)
@@ -301,12 +300,11 @@ class DraconLoader:
         comp = self.process_includes(comp)
         comp = process_merges(comp)
         comp = delete_unset_nodes(comp)
+        comp.make_map()
         comp = self.save_references(comp)
         comp = self.update_deferred_nodes(comp)
 
         return comp
-
-
 
     def update_deferred_nodes(self, comp_res: CompositionResult):
         # copies the loader into deferred nodes so they can resume their composition by themselves
@@ -350,6 +348,7 @@ class DraconLoader:
     @ftrace(watch=[])
     def process_includes(self, comp_res: CompositionResult):
         while True:  # we need to loop until there are no more includes (since some includes may bring other ones )
+            comp_res.make_map()
             comp_res.find_special_nodes('include', lambda n: isinstance(n, IncludeNode))
 
             if not comp_res.special_nodes['include']:
@@ -378,12 +377,18 @@ class DraconLoader:
             return self.yaml.dump(data, stream)
 
     def dump_to_node(self, data):
-        if isinstance(data, Node):
-            return data
-        return self.yaml.representer.represent_data(data)
+        return dump_to_node(data)
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
+
+
+@cached(LRUCache(maxsize=1e6), key=lambda data: hashkey(data))
+def dump_to_node(data):
+    if isinstance(data, Node):
+        return data
+    representer = DraconRepresenter()
+    return representer.represent_data(data)
 
 
 def load(config_path: str | Path, raw_dict=False, **kwargs):

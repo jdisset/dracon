@@ -49,6 +49,12 @@ def make_node(value: Any, tag=None, **kwargs):
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
+def base_node_hash(node):
+    return hash(
+        (node.tag, node.value, node.start_mark.line, node.start_mark.column, node.start_mark.name)
+    )
+
+
 class DraconScalarNode(ScalarNode):
     def __init__(
         self,
@@ -67,6 +73,9 @@ class DraconScalarNode(ScalarNode):
 
     def __repr__(self):
         return node_repr(self)
+
+    # def __hash__(self):
+    # return base_node_hash(self)
 
 
 class ContextNode(DraconScalarNode):
@@ -102,6 +111,10 @@ class ContextNode(DraconScalarNode):
                 comment=self.comment,
                 context=self.context.copy(),
             )
+
+        # def __hash__(self):
+        # hashable_context = tuple(sorted(self.context.items()))
+        # return hash((base_node_hash(self), hashable_context))
 
 
 class IncludeNode(ContextNode):
@@ -291,6 +304,9 @@ class DraconMappingNode(MappingNode):
     def __repr__(self):
         return node_repr(self)
 
+    # def __hash__(self):
+    # return hash((tuple(self.value), base_node_hash(self)))
+
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
@@ -380,6 +396,9 @@ class DraconSequenceNode(SequenceNode):
             comment=self.comment,
             anchor=self.anchor,
         )
+
+    # def __hash__(self):
+    # return hash((tuple(self.value), base_node_hash(self)))
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}

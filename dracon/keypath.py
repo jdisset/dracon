@@ -1,4 +1,5 @@
 from enum import Enum
+from functools import lru_cache
 from typing import List, Union, Hashable, Any, Optional, TypeVar, Type, Protocol, Tuple
 from typing_extensions import runtime_checkable
 from ruamel.yaml.nodes import Node
@@ -17,12 +18,101 @@ class KeyPathToken(Enum):
 MAPPING_KEY = KeyPathToken.MAPPING_KEY
 
 
+@lru_cache(maxsize=None)
 def escape_keypath_part(part: str) -> str:
     return part.replace('.', '\\.').replace('/', '\\/')
 
 
 def unescape_keypath_part(part: str) -> str:
     return part.replace('\\.', '.').replace('\\/', '/')
+
+
+def parse_part(part: str) -> Union[Hashable, KeyPathToken]:
+    if part == '*':
+        return KeyPathToken.SINGLE_WILDCARD
+    elif part == '**':
+        return KeyPathToken.MULTI_WILDCARD
+    return part
+
+
+@lru_cache(maxsize=None)
+def simplify_parts_recursive(
+    parts: Tuple[Union[Hashable, KeyPathToken], ...],
+) -> Tuple[Union[Hashable, KeyPathToken], ...]:
+    if not parts:
+        return tuple()
+
+    if len(parts) == 1:
+        return parts
+
+    if parts[-1] == KeyPathToken.ROOT:
+        return (KeyPathToken.ROOT,)
+
+    if parts[-1] == KeyPathToken.UP:
+        # Simplify everything before the UP token
+        prefix = simplify_parts_recursive(parts[:-1])
+
+        if not prefix:
+            # If nothing before UP, keep the UP
+            return (KeyPathToken.UP,)
+
+        if prefix[-1] == KeyPathToken.ROOT:
+            # Can't go up from root
+            return prefix
+
+        if prefix[-1] == KeyPathToken.UP:
+            # Multiple UPs stack
+            return prefix + (KeyPathToken.UP,)
+
+        # Remove the last element unless it's ROOT
+        if len(prefix) > 1 and prefix[-2] == KeyPathToken.MAPPING_KEY:
+            # If we're removing a mapping key, remove both tokens
+            return prefix[:-2]
+        return prefix[:-1]
+
+    # Simplify everything before current token and append current
+    return simplify_parts_recursive(parts[:-1]) + (parts[-1],)
+
+
+def simplify_parts(parts: Union[List, Tuple]) -> Tuple[Union[Hashable, KeyPathToken], ...]:
+    return simplify_parts_recursive(tuple(parts))
+
+
+@lru_cache(maxsize=None)
+def parse_string(path: str) -> List[Union[Hashable, KeyPathToken]]:
+    if not path:
+        return []
+
+    parts = []
+    dot_count = 0
+    current_part = ""
+
+    escaped = False
+
+    for char in path:
+        if char == '\\' and not escaped:
+            escaped = True
+            continue
+        elif char == '/' and not escaped:
+            if current_part:
+                parts.append(parse_part(current_part))
+                current_part = ""
+            parts.append(KeyPathToken.ROOT)
+            dot_count = 0
+        elif char == '.' and not escaped:
+            if current_part:
+                parts.append(parse_part(current_part))
+                current_part = ""
+            dot_count += 1
+            if dot_count > 1:
+                parts.append(KeyPathToken.UP)
+        else:
+            current_part += char
+            dot_count = 0
+        escaped = False
+    if current_part:
+        parts.append(parse_part(current_part))
+    return parts
 
 
 class KeyPath:
@@ -38,46 +128,7 @@ class KeyPath:
             self.simplify()
 
     def _parse_string(self, path: str) -> List[Union[Hashable, KeyPathToken]]:
-        if not path:
-            return []
-
-        parts = []
-        dot_count = 0
-        current_part = ""
-
-        escaped = False
-
-        for char in path:
-            if char == '\\' and not escaped:
-                escaped = True
-                continue
-            elif char == '/' and not escaped:
-                if current_part:
-                    parts.append(self._parse_part(current_part))
-                    current_part = ""
-                parts.append(KeyPathToken.ROOT)
-                dot_count = 0
-            elif char == '.' and not escaped:
-                if current_part:
-                    parts.append(self._parse_part(current_part))
-                    current_part = ""
-                dot_count += 1
-                if dot_count > 1:
-                    parts.append(KeyPathToken.UP)
-            else:
-                current_part += char
-                dot_count = 0
-            escaped = False
-        if current_part:
-            parts.append(self._parse_part(current_part))
-        return parts
-
-    def _parse_part(self, part: str) -> Union[Hashable, KeyPathToken]:
-        if part == '*':
-            return KeyPathToken.SINGLE_WILDCARD
-        elif part == '**':
-            return KeyPathToken.MULTI_WILDCARD
-        return part
+        return parse_string(path)
 
     def clear(self) -> 'KeyPath':
         self.parts = []
@@ -182,21 +233,7 @@ class KeyPath:
     def simplify(self) -> 'KeyPath':
         if self.is_simple:
             return self
-        simplified = []
-        for part in self.parts:
-            if part == KeyPathToken.ROOT:
-                simplified = [KeyPathToken.ROOT]
-            elif part == KeyPathToken.UP:
-                if simplified and simplified[-1] not in (KeyPathToken.ROOT, KeyPathToken.UP):
-                    if len(simplified) > 1 and simplified[-2] == KeyPathToken.MAPPING_KEY:
-                        simplified.pop()  # popping a mapping key
-                    simplified.pop()
-                elif not simplified or simplified[-1] != KeyPathToken.ROOT:
-                    simplified.append(KeyPathToken.UP)
-            else:
-                simplified.append(part)
-
-        self.parts = simplified
+        self.parts = list(simplify_parts(self.parts))
         self.is_simple = True
         return self
 
