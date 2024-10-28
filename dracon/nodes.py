@@ -185,7 +185,7 @@ class UnsetNode(DraconScalarNode):
         DraconScalarNode.__init__(
             self,
             tag=STR_TAG,
-            value=DRACON_UNSET_VALUE,
+            value='',
             start_mark=start_mark,
             end_mark=end_mark,
             comment=comment,
