@@ -8,14 +8,14 @@ from typing import Optional, Annotated, Any, TypeVar, Generic, Callable, Forward
 from dracon.resolvable import Resolvable, get_inner_type
 from dracon.keypath import KeyPath
 from dracon.loader import DEFAULT_LOADERS
-import logging
-logger = logging.getLogger("dracon.commandline")
 import traceback
+import logging
+
+logger = logging.getLogger("dracon.commandline")
 
 B = TypeVar("B", bound=BaseModel)
 
 ProgramType = ForwardRef("Program")
-
 
 
 class Arg:
@@ -123,9 +123,7 @@ class Program(BaseModel, Generic[T]):
             )
         )
 
-    def parse_args(
-        self, argv: List[str], context=None, **kwargs
-    ) -> tuple[Optional[T], Dict[str, Any]]:
+    def parse_args(self, argv: List[str], **kwargs) -> tuple[Optional[T], Dict[str, Any]]:
         self._positionals = [arg for arg in self._args if arg.positional]
         self._positionals.reverse()
         self._arg_map = {f'-{arg.short}': arg for arg in self._args if arg.short} | {
@@ -138,7 +136,7 @@ class Program(BaseModel, Generic[T]):
         while i < len(argv):
             i = self._parse_single_arg(argv, i, args, defined_vars, actions, confs_to_merge)
 
-        conf = self.generate_config(args, defined_vars, confs_to_merge, context, **kwargs)
+        conf = self.generate_config(args, defined_vars, confs_to_merge, **kwargs)
         if conf is not None:
             for action in actions:
                 action(self, conf)
@@ -171,7 +169,7 @@ class Program(BaseModel, Generic[T]):
     def _handle_define(self, argv: List[str], i: int, defined_vars: Dict) -> int:
         var_name = argv[i][9:]
         var_value, i = self._read_value(argv, i)
-        defined_vars[f'${var_name}'] = var_value
+        defined_vars[var_name] = var_value
         return i
 
     def _handle_positional(self, argv: List[str], i: int, args: Dict) -> int:
@@ -211,8 +209,6 @@ class Program(BaseModel, Generic[T]):
         DEFAULT_MERGE_ARGS = "{~<}[~<]"
         for i, conf in enumerate(confs_to_merge):
             key = f"<<{DEFAULT_MERGE_ARGS}_merge{i}"
-            # key = f"<<{DEFAULT_MERGE_ARGS}"
-            # if starts with any of DEFAULT_LOADERS.keys(), assume it's a loader
             if conf.startswith(tuple(DEFAULT_LOADERS.keys())):
                 yield f"{key}: !include \"{conf}\""
             else:  # assume it's a file
@@ -223,7 +219,6 @@ class Program(BaseModel, Generic[T]):
         args: dict[str, str],
         defined_vars: dict[str, str],
         confs_to_merge: list[str],
-        context=None,
         **kwargs,
     ) -> Optional[T]:
         def make_override(argname, value):
@@ -234,42 +229,36 @@ class Program(BaseModel, Generic[T]):
 
         override_str = "\n".join([make_override(k, v) for k, v in args.items()])
         custom_types = {self.conf_type.__name__: self.conf_type}
-        if context is not None:
-            custom_types.update(context)
         loader = DraconLoader(
             enable_interpolation=True,
             base_dict_type=dict,
             base_list_type=list,
-            context=custom_types,
             **kwargs,
         )
+        loader.update_context(custom_types)
+        loader.update_context(defined_vars)
 
         empty_model = self.conf_type.model_construct()
 
-        for field_name, field in self.conf_type.model_fields.items():
-            # If the field is missing in the instance, set it to "???"
-            if not hasattr(empty_model, field_name):
-                setattr(empty_model, field_name, DRACON_UNSET_VALUE)
+        as_dict = empty_model.model_dump()
 
-        dmp = loader.dump(empty_model)
+        for field_name, field in self.conf_type.model_fields.items():
+            if not hasattr(empty_model, field_name):
+                as_dict[field_name] = DRACON_UNSET_VALUE
+
+        dmp = loader.dump(as_dict)
 
         merge_str = "\n".join(list(self.make_merge_str(confs_to_merge)))
         if merge_str:
             dmp += '\n' + merge_str
         dmp += '\n' + override_str
 
-        print(f"Generated config:\n{dmp}\n")
-
         logger.debug(f"Parsed all args passed to commandline prog: {args}")
         logger.debug(f"Defined vars: {defined_vars}")
         logger.debug(f"Going to parse generated config:\n{dmp}\n")
 
         try:
-            loader.reset_context()
-            loader.update_context(defined_vars)
             comp = loader.compose_config_from_str(dmp)
-            # logger.debug(f"Composition result: {node_repr(comp.root)}")
-
             real_name_map = {arg.real_name: arg for arg in self._args}
             # then we wrap all resolvable args in a !Resolvable[...] tag
             for field_name, field in self.conf_type.model_fields.items():
@@ -285,6 +274,7 @@ class Program(BaseModel, Generic[T]):
                         resolvable_node.tag = new_tag
 
             res = loader.load_composition_result(comp)
+            res = self.conf_type(**res)
             if not isinstance(res, self.conf_type):
                 raise ArgParseError(f"Expected {self.conf_type} but got {type(res)}")
             return res
