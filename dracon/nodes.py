@@ -121,7 +121,7 @@ class ContextNode(DraconScalarNode):
         # deepcopy still shallows copy the context:
         def __deepcopy__(self, memo):
             return self.__class__(
-                value=self.value,
+                value=deepcopy(self.value, memo),
                 start_mark=self.start_mark,
                 end_mark=self.end_mark,
                 tag=self.tag,
@@ -161,6 +161,17 @@ class IncludeNode(ContextNode):
             anchor=anchor,
             context=context,
         )
+
+        def __deepcopy__(self, memo):
+            return IncludeNode(
+                value=deepcopy(self.value, memo),
+                start_mark=self.start_mark,
+                end_mark=self.end_mark,
+                tag=self.tag,
+                anchor=self.anchor,
+                comment=self.comment,
+                context=self.context.copy(),
+            )
 
 
 class MergeNode(DraconScalarNode):
@@ -473,5 +484,80 @@ class DraconSequenceNode(SequenceNode):
     # def __hash__(self):
     # return hash((tuple(self.value), base_node_hash(self)))
 
+
+##────────────────────────────────────────────────────────────────────────────}}}
+
+
+## {{{                          --     hashes     --
+def dracon_scalar_node_hash(self):
+    startmark_hash = (
+        hash((self.start_mark.line, self.start_mark.column, self.start_mark.name))
+        if self.start_mark
+        else 0
+    )
+
+    return hash(
+        (self.__class__.__name__, self.tag, self.value, self.anchor, startmark_hash, self.ctag)
+    )
+
+
+def context_node_hash(self):
+    base_hash = dracon_scalar_node_hash(self)
+
+    # Only include hashable context items
+    hashable_context = {}
+    for k, v in self.context.items():
+        try:
+            # Test if the value is hashable
+            hash(v)
+            hashable_context[k] = v
+        except TypeError:
+            # Skip unhashable items but include their keys
+            hashable_context[k] = f"<unhashable-{type(v).__name__}>"
+
+    context_items = frozenset(hashable_context.items())
+    return hash((base_hash, context_items))
+
+
+def include_node_hash(self):
+    """Hash function for IncludeNode."""
+    return context_node_hash(self)
+
+
+def merge_node_hash(self):
+    base_hash = dracon_scalar_node_hash(self)
+    return hash((base_hash, self.merge_key_raw))
+
+
+def unset_node_hash(self):
+    # UnsetNode hash is simpler since it has fixed value
+    return hash((self.__class__.__name__, self.tag, self.anchor))
+
+
+def dracon_mapping_node_hash(self):
+    items_hash = hash(
+        tuple((k.value, hash(v)) for k, v in sorted(self.value, key=lambda x: x[0].value))
+    )
+    return hash((self.__class__.__name__, self.tag, items_hash, self.anchor))
+
+
+def dracon_sequence_node_hash(self):
+    elements_hash = hash(tuple(hash(v) for v in self.value))
+    return hash((self.__class__.__name__, self.tag, elements_hash, self.anchor))
+
+
+# PLAN:
+# simplify by removing resolvable. It's redundant with deferred
+# that sould make the constructor not touch the nodes at all
+# which means their hash will be consistent
+
+
+# DraconScalarNode.__hash__ = dracon_scalar_node_hash
+# ContextNode.__hash__ = context_node_hash
+# IncludeNode.__hash__ = include_node_hash
+# MergeNode.__hash__ = merge_node_hash
+# UnsetNode.__hash__ = unset_node_hash
+# DraconMappingNode.__hash__ = dracon_mapping_node_hash
+# DraconSequenceNode.__hash__ = dracon_sequence_node_hash
 
 ##────────────────────────────────────────────────────────────────────────────}}}

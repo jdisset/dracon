@@ -56,7 +56,7 @@ class NodeLookup:
             )
         keypath = KeyPath(keypathstr)
         obj = keypath.get_obj(self.root_node)
-        return deepcopy(obj)
+        return obj
 
     def items(self):
         for keypathstr in self.available_paths:
@@ -77,7 +77,6 @@ class NodeLookup:
         return new
 
     def __deepcopy__(self, memo):
-        # don't deepcopy the root node!
         new = NodeLookup(self.root_node)
         new.available_paths = self.available_paths.copy()
         return new
@@ -283,6 +282,7 @@ class InterpolableNode(ContextNode):
         )
         self.referenced_nodes = NodeLookup()
         self.saved_references = {}
+
 
     def __getstate__(self):
         state = super().__getstate__()
