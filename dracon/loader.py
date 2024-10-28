@@ -79,7 +79,7 @@ def construct(node_or_val, **kwargs):
     try:
         if isinstance(node_or_val, Node):
             loader = DraconLoader(**kwargs)
-            compres = CompositionResult(root=deepcopy(node_or_val))
+            compres = CompositionResult(root=node_or_val)
             return loader.load_composition_result(compres, post_process=True)
     except Exception as e:
         # give much more context to the error, since this usually happens inside an asteval eval

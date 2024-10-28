@@ -186,7 +186,7 @@ def _try_pickle(obj: Any) -> Optional[Any]:
         import pickle
 
         return pickle.loads(pickle.dumps(obj))
-    except Exception:
+    except Exception as e:
         return None
 
 
@@ -211,17 +211,16 @@ def _deepcopy(obj: T, memo=None) -> T:
         memo[obj_id] = result
         return result
 
-    # result = _try_pickle(obj)
-    # if result is not None:
-        # memo[obj_id] = result
-        # return result
-
     try:
+        import copy
+
         return copy.deepcopy(obj, memo)
+
     except Exception as e:
         if isinstance(obj, (ModuleType, FunctionType, type)):
             return obj  # Return the object itself for modules, functions and types
         else:
+            print(f"Failed to deepcopy object of type {type(obj)}")
             return copy.copy(obj)  # Fallback to shallow copy for other types
 
 

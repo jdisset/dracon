@@ -215,6 +215,32 @@ class Draconstructor(Constructor):
         self.resolve_interpolations = resolve_interpolations
         self.context = None
 
+    def base_construct_object(self, node: Any, deep: bool = False) -> Any:
+        """deep is True when creating an object/mapping recursively,
+        in that case want the underlying elements available during construction
+        """
+        if node in self.constructed_objects:
+            return self.constructed_objects[node]
+        if deep:
+            old_deep = self.deep_construct
+            self.deep_construct = True
+        if node in self.recursive_objects:
+            return self.recursive_objects[node]
+        self.recursive_objects[node] = None
+        data = self.construct_non_recursive_object(node)
+
+        self.constructed_objects[node] = data
+        try:
+            del self.recursive_objects[node]
+        except KeyError as e:
+            msg = f"Failed to delete {node} from recursive objects: {e}"
+            msg += f"\navailable = \n{self.recursive_objects}"
+            logger.error(msg)
+
+        if deep:
+            self.deep_construct = old_deep
+        return data
+
     @ftrace()
     def construct_object(self, node, deep=True):
         assert self.context is not None, "Context must be set before constructing objects"
@@ -243,7 +269,7 @@ class Draconstructor(Constructor):
 
             if tag.startswith('!'):
                 reset_tag(node)
-            obj = super().construct_object(node, deep=True)
+            obj = self.base_construct_object(node, deep=True)
 
             node.tag = tag  # we don't want to permanently change the tag of the node because it might be referenced elsewhere
 

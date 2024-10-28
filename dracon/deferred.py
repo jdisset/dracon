@@ -12,7 +12,7 @@ from dracon.composer import (
     IncludeNode,
 )
 from ruamel.yaml.nodes import Node, ScalarNode
-from dracon.nodes import DraconScalarNode
+from dracon.nodes import DraconScalarNode, dracon_scalar_node_hash, ContextNode, context_node_hash
 
 from dracon.keypath import KeyPath, ROOTPATH
 from dracon.merge import merged, MergeKey, add_to_context
@@ -29,19 +29,17 @@ from functools import partial
 T = TypeVar('T')
 
 
-class DeferredNode(DraconScalarNode, Generic[T]):
+class DeferredNode(ContextNode, Generic[T]):
     def __init__(
         self,
         value: Node,
         path: Optional[KeyPath] = None,
-        context: Optional[Dict[str, Any]] = None,
         obj_type: Optional[Type[T]] = None,
         **kwargs,
     ):
         super().__init__(tag='', value=value, **kwargs)
 
         self.path = path
-        self.context = context or {}
         self.obj_type = obj_type
 
         from dracon.loader import DraconLoader
@@ -86,7 +84,8 @@ class DeferredNode(DraconScalarNode, Generic[T]):
         self._loader.update_context(context or {})
         self._loader.deferred_paths = deferred_paths or []
 
-        composition = deepcopy(self._full_composition)
+        # composition = deepcopy(self._full_composition)
+        composition = self._full_composition
 
         composition.replace_node_at(self.path, self.value)
         walk_node(
@@ -115,6 +114,22 @@ class DeferredNode(DraconScalarNode, Generic[T]):
         else:
             val.tag = '!deferred'
         return val
+
+    # def __hash__(self):
+    # return context_node_hash(self)
+
+    def __deepcopy__(self, memo):
+        new_obj = DeferredNode(
+            value=deepcopy(self.value, memo),
+            path=deepcopy(self.path, memo),
+            obj_type=self.obj_type,
+            start_mark=self.start_mark,
+            end_mark=self.end_mark,
+            anchor=self.anchor,
+            comment=self.comment,
+            context=self.context.copy(),
+        )
+        return new_obj
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
