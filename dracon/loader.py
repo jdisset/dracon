@@ -164,6 +164,13 @@ class DraconLoader:
     def __deepcopy__(self, memo):
         return self.copy()
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
     @ftrace(inputs=False, watch=[])
     def compose_from_include_str(
         self,
@@ -308,6 +315,8 @@ class DraconLoader:
         comp.make_map()
         comp = self.save_references(comp)
         comp = self.update_deferred_nodes(comp)
+        comp.make_map()
+        comp.update_paths()
 
         return comp
 
@@ -333,6 +342,9 @@ class DraconLoader:
         # the preprocessed refernces are stored as paths that point to refered nodes
         # however, after all the merging and including is done, we need to save
         # the nodes themselves so that they can't be affected by further changes (e.g. construction)
+
+        # TODO: should belong to CompositionResult, not the loader
+
         comp_res.find_special_nodes('interpolable', lambda n: isinstance(n, InterpolableNode))
 
         referenced_nodes = {}

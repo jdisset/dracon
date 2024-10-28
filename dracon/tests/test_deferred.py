@@ -276,6 +276,44 @@ def test_parallel_deferred_node_processing(process_pool):
     assert [r.value for r in results] == [11, 22, 33]
 
 
+def construct_deferred(node: DeferredNode) -> Any:
+    print(f"Constructing {node}")
+    print(f"{node.context=}")
+    return node.construct()
+
+
+def test_parallel_deferred_nodes(process_pool):
+    """Test processing multiple deferred nodes in parallel"""
+    yaml_content = """
+    nodes:
+        !each(val) ${VALUES}:
+            - !deferred
+              value: ${val + 1}
+              ainst: !ClassA
+                index: ${int(val) + 1}
+                name: "Item ${int(val) + 1}"
+    """
+
+    loader = DraconLoader(
+        enable_interpolation=True,
+        context={
+            'VALUES': [10, 20, 30],
+            'ClassA': ClassA,
+        },
+    )
+    config = loader.loads(yaml_content)
+
+    nodes = config.nodes
+    print(f"{nodes=}")
+
+    assert len(nodes) == 3
+
+    results = process_pool.map(construct_deferred, nodes)
+
+    assert [r.value for r in results] == [11, 21, 31]
+    assert all(isinstance(r.ainst, ClassA) for r in results)
+
+
 def test_complex_deferred_node_pickling():
     """Test pickling complex deferred nodes with cross-references"""
     yaml_content = """
@@ -568,9 +606,12 @@ def test_large_parallel_processing(process_pool):
         input: ${INPUT}
         result: ${INPUT * 2}
         batch: ${BATCH}
+        classAinst: !ClassA
+            index: ${INPUT}
+            name: "Item ${INPUT}"
     """
 
-    loader = DraconLoader(enable_interpolation=True)
+    loader = DraconLoader(enable_interpolation=True, context={'ClassA': ClassA})
     config = loader.loads(yaml_content)
 
     # Create a large number of nodes
@@ -590,3 +631,6 @@ def test_large_parallel_processing(process_pool):
         assert result.input == i
         assert result.result == i * 2
         assert result.batch == i // batch_size
+        assert isinstance(result.classAinst, ClassA)
+        assert result.classAinst.index == i
+        assert result.classAinst.name == f"Item {i}"
