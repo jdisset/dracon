@@ -130,11 +130,17 @@ class Program(BaseModel, Generic[T]):
             f'--{arg.long}': arg for arg in self._args if arg.long
         }
 
+        logger.debug(f"Positional args: {self._positionals}")
+        logger.debug(f"Arg map: {self._arg_map}")
+        logger.debug(f"Args: {self._args}")
+
         args, defined_vars, actions, confs_to_merge = {}, {}, [], []
 
         i = 0
         while i < len(argv):
             i = self._parse_single_arg(argv, i, args, defined_vars, actions, confs_to_merge)
+
+        logger.debug(f"Defined vars: {defined_vars}")
 
         conf = self.generate_config(args, defined_vars, confs_to_merge, **kwargs)
         if conf is not None:
@@ -180,6 +186,7 @@ class Program(BaseModel, Generic[T]):
         return i + 1
 
     def _handle_option(self, argv: List[str], i: int, args: Dict, actions: List) -> int:
+        logger.debug(f"Handling option {argv[i]}")
         argstr = argv[i]
         if argstr not in self._arg_map:
             raise ArgParseError(f"Unknown argument {argstr}")
@@ -188,15 +195,19 @@ class Program(BaseModel, Generic[T]):
 
         if arg_obj.action is not None:
             actions.append(arg_obj.action)
+            logger.debug(f"Adding action {arg_obj.action} to the list of actions")
             return i + 1
 
         if arg_obj.arg_type is bool:
             args[arg_obj.real_name] = True
+            logger.debug(f"Setting {arg_obj.real_name} to True")
             return i + 1
 
-        modifier = lambda x: f"*file:{x}" if arg_obj.is_file else lambda x: x
+        modifier = (lambda x: f"*file:{x}") if arg_obj.is_file else (lambda x: x)
         v, i = self._read_value(argv, i)
-        args[arg_obj.real_name] = modifier(v)
+        modified_v = modifier(v)
+        args[arg_obj.real_name] = modified_v
+        logger.debug(f"Setting {arg_obj.real_name} to {modified_v}")
         return i
 
     def _read_value(self, argv: List[str], i: int) -> tuple[str, int]:
