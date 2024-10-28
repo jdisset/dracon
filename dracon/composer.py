@@ -73,6 +73,11 @@ class CompositionResult(BaseModel):
 
         walk_node(self.root, _callback, start_path=ROOTPATH)
 
+    def update_paths(self):
+        for path, node in self.node_map.items():
+            if hasattr(node, 'path'):
+                node.path = path
+
     def rerooted(self, new_root_path: KeyPath):
         return CompositionResult(root=new_root_path.get_obj(self.root))
 
