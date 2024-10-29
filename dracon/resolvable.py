@@ -88,52 +88,5 @@ class Resolvable(Generic[T]):
     def __bool__(self):
         return not self.empty()
 
-    def merge_node(self, node, merge_key: str = '<<{+>}', loader=None):
-        from dracon.keypath import ROOTPATH
-        from dracon.composer import CompositionResult
-        from dracon.loader import DraconLoader
-
-        """
-        Merge a node with the current node.
-        """
-        assert self.ctor is not None
-        if loader is None:
-            loader = DraconLoader()
-
-        self.node = self.node or make_node({})
-        res = CompositionResult(root=self.node)
-        assert isinstance(res.root, DraconMappingNode)
-
-        res.root[MergeNode(merge_key)] = node
-
-        res.find_special_nodes('merge', lambda n: isinstance(n, MergeNode))
-        res.sort_special_nodes('merge')
-        res.special_nodes['merge'].extend([ROOTPATH + p for p in res.root.get_merge_nodes()])
-
-        res.find_special_nodes('include', lambda n: isinstance(n, IncludeNode))
-        res.sort_special_nodes('include')
-        res.special_nodes['include'].extend([ROOTPATH + p for p in res.root.get_include_nodes()])
-
-        new_resolvable = Resolvable(
-            node=loader.post_process_composed(res).root,
-            ctor=self.ctor,
-            inner_type=self.inner_type,  # type: ignore
-        )
-
-        return new_resolvable
-
-    def merge_with(self, other: 'Resolvable', merge_key: str = '<<{+>}'):
-        return self.merge_node(other.node, merge_key)
-
-    def merge_attrs(self, attr: str, subattrs: List[str], merge_key: str = '<<{+>}'):
-        """
-        Merge some attributes of the object into another attribute.
-        For example, say we have a class MyClass with attributes attr1, attr2, subattr_1, subattr_2
-        If we want attr1 to contain subattr_1 and subattr_2, we can do this with this method like so:
-        new_resolvable = resolvable_obj.merge_attrs('attr1', ['subattr_1', 'subattr_2'])
-        """
-        to_merge = make_node({attr: {subattr: IncludeNode(f'/{subattr}') for subattr in subattrs}})
-        return self.merge_node(to_merge, merge_key)
-
     def __repr__(self):
         return f"Resolvable(node={self.node}, inner_type={self.inner_type})"

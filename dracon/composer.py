@@ -178,11 +178,11 @@ def walk_node(node, callback, start_path=None):
         path = path.removed_mapping_key()
         if isinstance(node, DraconMappingNode):
             for k_node, v_node in node.value:
-                __walk_node(k_node, path + MAPPING_KEY + k_node.value)
-                __walk_node(v_node, path + k_node.value)
+                __walk_node(k_node, path.with_added_parts(MAPPING_KEY, k_node.value))
+                __walk_node(v_node, path.with_added_parts(k_node.value))
         elif isinstance(node, DraconSequenceNode):
             for i, v in enumerate(node.value):
-                __walk_node(v, path + str(i))
+                __walk_node(v, path.with_added_parts(str(i)))
 
     if start_path is not None:
         __walk_node(node, start_path)
