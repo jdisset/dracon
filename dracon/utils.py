@@ -1,6 +1,8 @@
 ## {{{                          --     imports     --
 import xxhash
 import types
+from typing import Any, Hashable
+from collections.abc import Mapping, Sequence, Set
 from ruamel.yaml.nodes import MappingNode, SequenceNode, ScalarNode, Node
 from collections import deque
 import base64
@@ -168,6 +170,105 @@ def list_like(obj) -> bool:
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
+
+
+def make_hashable(ctx):
+    hashable_dict = {}
+    for k, v in ctx.items():
+        try:
+            hash(v)
+            hashable_dict[k] = v
+        except TypeError:
+            # Skip unhashable items but include their keys
+            hashable_dict[k] = f"<unhashable-{type(v).__name__}>"
+
+    h = frozenset(hashable_dict.items())
+    return h
+
+
+def make_hashable(obj: Any) -> Hashable:
+    """
+    Recursively converts unhashable objects into hashable ones.
+
+    Handles:
+    - Basic hashable types (int, str, float, bool, etc.)
+    - Dictionaries -> frozenset of tuples
+    - Lists/Tuples -> tuple of hashable items
+    - Sets -> frozenset
+    - Custom objects -> string representation
+    - None -> None
+
+    Args:
+        obj: Any Python object
+
+    Returns:
+        A hashable version of the input object
+    """
+    # Handle None
+    if obj is None:
+        return None
+
+    # Try direct hashing first
+    try:
+        hash(obj)
+        return obj
+    except TypeError:
+        pass
+
+    # Handle mappings (dict-like objects)
+    if isinstance(obj, Mapping):
+        items = sorted((make_hashable(k), make_hashable(v)) for k, v in obj.items())
+        return frozenset(items)
+
+    # Handle sequences (list-like objects)
+    if isinstance(obj, Sequence) and not isinstance(obj, (str, bytes)):
+        return tuple(make_hashable(item) for item in obj)
+
+    # Handle sets
+    if isinstance(obj, Set):
+        return frozenset(make_hashable(item) for item in obj)
+
+    # Handle numpy arrays if present
+    try:
+        import numpy as np
+
+        if isinstance(obj, np.ndarray):
+            return hash(obj.tobytes())
+    except ImportError:
+        pass
+
+    # Handle pandas objects if present
+    try:
+        import pandas as pd
+
+        if isinstance(obj, (pd.DataFrame, pd.Series)):
+            return hash(obj.to_string())
+    except ImportError:
+        pass
+
+    # Fallback for other objects
+    try:
+        return str(obj)
+    except Exception:
+        return f"<unhashable-{type(obj).__name__}>"
+
+
+# Example usage:
+if __name__ == "__main__":
+    # Test with various types
+    test_data = {
+        "number": 42,
+        "text": "hello",
+        "list": [1, 2, [3, 4]],
+        "dict": {"a": 1, "b": [2, 3]},
+        "set": {1, 2, 3},
+        "tuple": (1, 2, {3, 4}),
+        "none": None,
+    }
+
+    hashable_result = make_hashable(test_data)
+    print(f"Hashable result: {hashable_result}")
+    print(f"Hash value: {hash(hashable_result)}")
 
 
 def _try_marshal(obj: T) -> Optional[T]:

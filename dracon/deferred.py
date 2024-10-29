@@ -115,8 +115,8 @@ class DeferredNode(ContextNode, Generic[T]):
             val.tag = '!deferred'
         return val
 
-    # def __hash__(self):
-    # return context_node_hash(self)
+    def __hash__(self):
+        return context_node_hash(self)
 
     def __deepcopy__(self, memo):
         new_obj = DeferredNode(

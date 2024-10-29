@@ -17,7 +17,7 @@ from pydantic import (
 
 import typing
 import inspect
-from dracon.utils import ShallowDict, ftrace
+from dracon.utils import ShallowDict, ftrace, deepcopy
 from dracon import dracontainer
 from dracon.dracontainer import Dracontainer
 from dracon.interpolation import outermost_interpolation_exprs, InterpolableNode
@@ -25,6 +25,7 @@ from dracon.lazy import LazyInterpolable, resolve_all_lazy, is_lazy_compatible
 from dracon.resolvable import Resolvable, get_inner_type
 from dracon.deferred import DeferredNode
 from dracon.nodes import reset_tag
+
 
 from typing import (
     Optional,
@@ -296,18 +297,19 @@ class Draconstructor(Constructor):
 
     @ftrace(watch=[])
     def construct_resolvable(self, node, tag_type):
+        newnode = deepcopy(node)
         inner_type = get_inner_type(tag_type)
         if inner_type is Any:
-            inner_type = parse_resolvable_tag(node.tag)
+            inner_type = parse_resolvable_tag(newnode.tag)
         if inner_type is Any:
-            reset_tag(node)
+            reset_tag(newnode)
         else:
             # check if it's a string or a type:
             if isinstance(inner_type, str):
-                node.tag = f"!{inner_type}"
+                newnode.tag = f"!{inner_type}"
             else:
-                node.tag = f"!{inner_type.__name__}"
-        res = Resolvable(node=node, ctor=self, inner_type=inner_type)
+                newnode.tag = f"!{inner_type.__name__}"
+        res = Resolvable(node=newnode, ctor=self, inner_type=inner_type)
         return res
 
     @ftrace(watch=[])

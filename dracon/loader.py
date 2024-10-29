@@ -1,24 +1,24 @@
 ## {{{                          --     imports     --
-from ruamel.yaml import YAML, Node
-from typing import Type, Callable
-import copy
+from ruamel.yaml import Node
 import os
+from typing import Any, Callable, Dict, Optional, Tuple, Type, Annotated, TypeVar
+from functools import partial
+import re
 
-# for cache stuff:
 from cachetools import cached, LRUCache
 from cachetools.keys import hashkey
-from functools import lru_cache
-import re
 from pathlib import Path
-from typing import Optional, Dict, Any, Annotated, TypeVar
 from pydantic import BeforeValidator, Field, PlainSerializer
+from pydantic.dataclasses import dataclass
+
+import dracon.include as drinc
+from dracon.include import DEFAULT_LOADERS, compose_from_include_str
 
 from dracon.composer import (
     IncludeNode,
     CompositionResult,
     DraconComposer,
     delete_unset_nodes,
-    walk_node,
 )
 
 from dracon.draconstructor import Draconstructor
@@ -32,32 +32,24 @@ from dracon.utils import (
     ShallowDict,
     ftrace,
     deepcopy,
+    make_hashable,
 )
+
 from dracon.interpolation_utils import resolve_interpolable_variables
 from dracon.interpolation import InterpolableNode
 from dracon.merge import process_merges, add_to_context, merged, MergeKey
 from dracon.instructions import process_instructions
-from dracon.loaders.file import read_from_file
-from dracon.loaders.pkg import read_from_pkg
 from dracon.deferred import DeferredNode, process_deferred
-from dracon.loaders.env import read_from_env
 from dracon.representer import DraconRepresenter
 
 from dracon.postprocess import preprocess_references
 
 from dracon import dracontainer
-from functools import partial
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 ## {{{                       --     DraconLoader     --
-
-DEFAULT_LOADERS: Dict[str, Callable] = {
-    'file': read_from_file,
-    'pkg': read_from_pkg,
-    'env': read_from_env,
-}
 
 
 DEFAULT_CONTEXT = {
@@ -143,6 +135,15 @@ class DraconLoader:
             }
         )
 
+    def __hash__(self):
+        return hash(
+            (
+                make_hashable(self.context),
+                tuple(self.deferred_paths),
+                self._enable_interpolation,
+            )
+        )
+
     def update_context(self, kwargs):
         add_to_context(kwargs, self)
 
@@ -171,109 +172,26 @@ class DraconLoader:
     def __setstate__(self, state):
         self.__dict__.update(state)
 
-    @ftrace(inputs=False, watch=[])
     def compose_from_include_str(
         self,
         include_str: str,
         include_node_path: KeyPath = ROOTPATH,
         composition_result: Optional[CompositionResult] = None,
-        custom_loaders: dict = DEFAULT_LOADERS,
         node: Optional[IncludeNode] = None,
-    ) -> Any:
-        # TODO [medium priority]:
-        # this resolve_interpolable_variables business is hacky and ugly.
-        # It's just a find + replace of $VAR with the value of VAR
-        # from the loader context (i.e. "./$FILE_STEM.png").
-        # It's weirdly independent from the rest of the interpolation system,
-        # and not even using the node.context.
-        # It's conflicting with the node include syntax (!include $var)
-        # which does use the node.context ...
-        # Need to clean this up, merge both (probably use comptime interpolation)
-        # and make it consistent.
-
-        context = self.context if not node else node.context
-
-        include_str = resolve_interpolable_variables(include_str, context)
-
-        res = None
-
-        try:
-            if '@' in include_str:
-                # split at the first unescaped @
-                mainpath, keypath = re.split(r'(?<!\\)@', include_str, maxsplit=1)
-            else:
-                mainpath, keypath = include_str, ''
-
-            if composition_result is not None:
-                if mainpath.startswith('$'):  # it's an in-memory node
-                    if not node:
-                        raise ValueError('Node not provided for in-memory include')
-                    name = mainpath[1:]
-                    if name in node.context:
-                        incl_node = node.context[name]
-                        incl_node = self.dump_to_node(incl_node)
-                        if keypath:
-                            incl_node = KeyPath(keypath).get_obj(incl_node)
-                        res = CompositionResult(root=incl_node)
-                        res.root = deepcopy(res.root)
-                        return res
-
-                    raise ValueError(f'Invalid in-memory include: {name} not found')
-
-                # it's a path starting with the root of the document
-                if include_str.startswith('/'):
-                    res = composition_result.rerooted(KeyPath(mainpath))
-                    res.root = deepcopy(res.root)
-                    return res
-
-                # it's a path relative to the current node
-                if include_str.startswith('@') or include_str.startswith(
-                    '.'
-                ):  # means relative to parent
-                    comb_path = include_node_path.parent.down(KeyPath(mainpath))
-                    res = composition_result.rerooted(comb_path)
-                    res.root = deepcopy(res.root)
-                    return res
-
-                anchors = composition_result.anchor_paths
-                if mainpath in anchors:
-                    res = composition_result.rerooted(anchors[mainpath] + keypath)
-                    res.root = deepcopy(res.root)
-                    return res
-
-                assert (
-                    ':' in mainpath
-                ), f'Invalid include path: anchor {mainpath} not found in document'
-
-            assert ':' in mainpath, f'Invalid include path: {mainpath}. No loader specified.'
-
-            loader, path = mainpath.split(':', 1)
-            if loader not in custom_loaders:
-                raise ValueError(f'Unknown loader: {loader}')
-
-            res, new_context = custom_loaders[loader](path)
-            self.update_context(new_context)
-
-            if not isinstance(res, CompositionResult):
-                if not isinstance(res, str):
-                    raise ValueError(f"Invalid result type from loader '{loader}': {type(res)}")
-                new_loader = self.copy()
-                if node is not None:
-                    add_to_context(node.context, new_loader)
-                res = new_loader.compose_config_from_str(res)
-            if keypath:
-                res = res.rerooted(KeyPath(keypath))
-            return res
-        finally:
-            if isinstance(res, CompositionResult) and node is not None:
-                res.make_map()
-                res.walk_no_path(callback=partial(add_to_context, node.context))
+    ) -> CompositionResult:
+        return compose_from_include_str(
+            self,
+            include_str,
+            include_node_path,
+            composition_result,
+            self.custom_loaders,
+            node,
+        )
 
     def compose_config_from_str(self, content: str) -> CompositionResult:
-        composed_content = deepcopy(cached_compose_config_from_str(self.yaml, content))
+        composed_content = cached_compose_config_from_str(self.yaml, content)
         return self.post_process_composed(composed_content)
 
-    @ftrace(watch=[])
     def load_node(self, node):
         self.yaml.constructor.referenced_nodes = self.referenced_nodes
         self.yaml.constructor.context = self.context.copy() or {}
@@ -284,7 +202,6 @@ class DraconLoader:
             compres = self.post_process_composed(compres)
         return self.load_node(compres.root)
 
-    @ftrace(watch=[])
     def load(self, config_path: str | Path):
         self.reset_context()
         if isinstance(config_path, Path):
@@ -294,28 +211,23 @@ class DraconLoader:
         comp = self.compose_from_include_str(config_path)
         return self.load_composition_result(comp)
 
-    @ftrace(watch=[])
     def loads(self, content: str):
         comp = self.compose_config_from_str(content)
         return self.load_composition_result(comp)
 
-    @ftrace(watch=[])
     def post_process_composed(self, comp: CompositionResult):
-        # first we update the context of all context-containing nodes
-
-        comp.make_map()
         comp.walk_no_path(callback=partial(add_to_context, self.context))
 
         comp = preprocess_references(comp)
         comp = process_deferred(comp, force_deferred_at=self.deferred_paths)
         comp = process_instructions(comp, self)
         comp = self.process_includes(comp)
-        comp = process_merges(comp)
-        comp = delete_unset_nodes(comp)
-        comp.make_map()
+        comp, merge_changed = process_merges(comp)
+        comp, delete_changed = delete_unset_nodes(comp)
+        if merge_changed or delete_changed:
+            comp.make_map()
         comp = self.save_references(comp)
         comp = self.update_deferred_nodes(comp)
-        comp.make_map()
         comp.update_paths()
 
         return comp
@@ -365,7 +277,6 @@ class DraconLoader:
     @ftrace(watch=[])
     def process_includes(self, comp_res: CompositionResult):
         while True:  # we need to loop until there are no more includes (since some includes may bring other ones )
-            comp_res.make_map()
             comp_res.find_special_nodes('include', lambda n: isinstance(n, IncludeNode))
 
             if not comp_res.special_nodes['include']:
@@ -379,7 +290,7 @@ class DraconLoader:
                 include_composed = new_loader.compose_from_include_str(
                     inode.value, inode_path, comp_res, node=inode
                 )
-                comp_res.replace_node_at(inode_path, include_composed.root)
+                comp_res.merge_composition_at(inode_path, include_composed)
 
         return comp_res
 
@@ -400,7 +311,7 @@ class DraconLoader:
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
-@cached(LRUCache(maxsize=1e6), key=lambda data: hashkey(data))
+# @cached(LRUCache(maxsize=256), key=lambda data: hashkey(data))
 def dump_to_node(data):
     if isinstance(data, Node):
         return data
@@ -445,12 +356,21 @@ def load_config_to_dict(maybe_config: str | DictLike) -> DictLike:
     return maybe_config
 
 
-@cached(LRUCache(maxsize=1e6), key=lambda yaml, content: hashkey(content))
-def cached_compose_config_from_str(yaml, content):
+def compose_config_from_str(yaml, content):
     yaml.compose(content)
     assert isinstance(yaml.composer, DraconComposer)
     res = yaml.composer.get_result()
     return res
+
+
+def cached_compose_config_from_str(yaml, content):
+    cop = deepcopy(_cached_compose_config_from_str(yaml, content))
+    return cop
+
+
+@cached(LRUCache(maxsize=128), key=lambda yaml, content: hashkey(content))
+def _cached_compose_config_from_str(yaml, content):
+    return compose_config_from_str(yaml, content)
 
 
 T = TypeVar('T')
