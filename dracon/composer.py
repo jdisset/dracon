@@ -95,6 +95,25 @@ class CompositionResult(BaseModel):
                 parent_node[idx] = new_node
             else:
                 raise ValueError(f'Invalid parent node type: {type(parent_node)}')
+        self.update_map_at(at_path)
+
+    def update_map_at(self, at_path: KeyPath):
+        if self.node_map is None:
+            self.node_map = {}
+        node = at_path.get_obj(self.root)
+        self.node_map[at_path] = node
+
+        def _callback(node, path):
+            self.node_map[path] = node
+
+        walk_node(node, _callback, start_path=at_path)
+
+    def merge_composition_at(self, at_path: KeyPath, new_comp: 'CompositionResult', reuse_map=True):
+        new_node = new_comp.root
+        self.replace_node_at(at_path, new_node)
+        # if reuse_map:
+        # for path, node in new_comp.node_map.items():
+        # self.node_map[at_path + path] = node
 
     def pop_all_special(self, category: SpecialNodeCategory):
         while self.special_nodes.get(category):
@@ -369,15 +388,19 @@ def delete_unset_nodes(comp_res: CompositionResult):
     # when we delete an unset node, we have to check if the parent is a mapping node
     # and if we just made it empty. If so, we have to replace it with an UnsetNode
     # and so on, until we reach the root
+    has_changed = False
 
     def _delete_unset_nodes(node: Node, parent: Optional[Node], key: Optional[Hashable]) -> Node:
+        nonlocal has_changed
         if isinstance(node, DraconMappingNode):
             new_value = []
             for k, v in node.value:
                 if isinstance(v, UnsetNode):
+                    has_changed = True
                     continue
                 new_value.append((k, _delete_unset_nodes(v, node, k)))
             if not new_value and not node.tag.startswith('!'):
+                has_changed = True
                 return UnsetNode()
             return DraconMappingNode(
                 tag=node.tag,
@@ -392,6 +415,7 @@ def delete_unset_nodes(comp_res: CompositionResult):
             new_value = []
             for v in node.value:
                 if isinstance(v, UnsetNode):
+                    has_changed = True
                     continue
                 new_value.append(_delete_unset_nodes(v, node, None))
             return DraconSequenceNode(
@@ -408,7 +432,7 @@ def delete_unset_nodes(comp_res: CompositionResult):
 
     comp_res.root = _delete_unset_nodes(comp_res.root, None, None)
 
-    return comp_res
+    return comp_res, has_changed
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}

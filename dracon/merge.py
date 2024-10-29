@@ -26,6 +26,7 @@ def make_default_empty_mapping_node():
 def process_merges(comp_res):
     comp_res.find_special_nodes('merge', lambda n: isinstance(n, MergeNode))
     comp_res.sort_special_nodes('merge')
+    has_merge = len(comp_res.special_nodes['merge']) > 0
 
     for merge_path in comp_res.pop_all_special('merge'):
         merge_path = merge_path.removed_mapping_key()
@@ -72,7 +73,8 @@ def process_merges(comp_res):
         assert isinstance(new_parent, Node)
         comp_res.replace_node_at(parent_path, new_parent)
 
-    return comp_res
+
+    return comp_res, has_merge
 
 
 class MergeMode(Enum):

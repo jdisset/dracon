@@ -1,7 +1,14 @@
 ## {{{                          --     imports     --
 from ruamel.yaml.nodes import Node, MappingNode, SequenceNode, ScalarNode
 from ruamel.yaml.tag import Tag
-from dracon.utils import dict_like, list_like, generate_unique_id, node_repr, deepcopy
+from dracon.utils import (
+    dict_like,
+    list_like,
+    generate_unique_id,
+    node_repr,
+    deepcopy,
+    make_hashable,
+)
 from typing import Any, Hashable, Optional
 from dracon.keypath import KeyPath, escape_keypath_part
 ##────────────────────────────────────────────────────────────────────────────}}}
@@ -503,19 +510,7 @@ def dracon_scalar_node_hash(self):
 
 def context_node_hash(self):
     base_hash = dracon_scalar_node_hash(self)
-
-    # Only include hashable context items
-    hashable_context = {}
-    for k, v in self.context.items():
-        try:
-            # Test if the value is hashable
-            hash(v)
-            hashable_context[k] = v
-        except TypeError:
-            # Skip unhashable items but include their keys
-            hashable_context[k] = f"<unhashable-{type(v).__name__}>"
-
-    context_items = frozenset(hashable_context.items())
+    context_items = make_hashable(self.context)
     return hash((base_hash, context_items))
 
 
@@ -544,12 +539,6 @@ def dracon_mapping_node_hash(self):
 def dracon_sequence_node_hash(self):
     elements_hash = hash(tuple(hash(v) for v in self.value))
     return hash((self.__class__.__name__, self.tag, elements_hash, self.anchor))
-
-
-# PLAN:
-# simplify by removing resolvable. It's redundant with deferred
-# that sould make the constructor not touch the nodes at all
-# which means their hash will be consistent
 
 
 # DraconScalarNode.__hash__ = dracon_scalar_node_hash
