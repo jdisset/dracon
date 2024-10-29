@@ -1,7 +1,8 @@
 from enum import Enum
 from functools import lru_cache
-from typing import List, Union, Hashable, Any, Optional, TypeVar, Type, Protocol, Tuple
+from typing import List, Union, Hashable, Any, Optional, TypeVar, Type, Protocol, Tuple, Deque
 from typing_extensions import runtime_checkable
+from collections import deque
 from ruamel.yaml.nodes import Node
 from dracon.utils import node_repr, list_like, dict_like, ftrace
 import re
@@ -18,11 +19,12 @@ class KeyPathToken(Enum):
 MAPPING_KEY = KeyPathToken.MAPPING_KEY
 
 
-@lru_cache(maxsize=None)
+@lru_cache(maxsize=512)
 def escape_keypath_part(part: str) -> str:
     return part.replace('.', '\\.').replace('/', '\\/')
 
 
+@lru_cache(maxsize=512)
 def unescape_keypath_part(part: str) -> str:
     return part.replace('\\.', '.').replace('\\/', '/')
 
@@ -35,7 +37,7 @@ def parse_part(part: str) -> Union[Hashable, KeyPathToken]:
     return part
 
 
-@lru_cache(maxsize=None)
+@lru_cache(maxsize=1000)
 def simplify_parts_recursive(
     parts: Tuple[Union[Hashable, KeyPathToken], ...],
 ) -> Tuple[Union[Hashable, KeyPathToken], ...]:
@@ -74,11 +76,66 @@ def simplify_parts_recursive(
     return simplify_parts_recursive(parts[:-1]) + (parts[-1],)
 
 
-def simplify_parts(parts: Union[List, Tuple]) -> Tuple[Union[Hashable, KeyPathToken], ...]:
-    return simplify_parts_recursive(tuple(parts))
+# def simplify_parts(parts: Union[List, Tuple]) -> Tuple[Union[Hashable, KeyPathToken], ...]:
+# return simplify_parts_recursive(tuple(parts))
 
 
-@lru_cache(maxsize=None)
+@lru_cache(maxsize=1000)
+def simplify_parts_cached(parts: Tuple) -> Tuple[Union[Hashable, KeyPathToken], ...]:
+    """
+    Non-recursive version of simplify_parts that processes parts from left to right using a stack.
+    This version maintains the same logic but eliminates recursion for better performance with deep paths.
+    """
+    if not parts:
+        return tuple()
+
+    # Convert input to tuple if it's a list
+    parts = tuple(parts)
+
+    # Special cases for simple inputs
+    if len(parts) == 1:
+        return parts
+
+    # Initialize stack for processing
+    stack: Deque[Union[Hashable, KeyPathToken]] = deque()
+
+    for part in parts:
+        if part == KeyPathToken.ROOT:
+            # ROOT token clears the stack and becomes the only element
+            stack.clear()
+            stack.append(KeyPathToken.ROOT)
+
+        elif part == KeyPathToken.UP:
+            if not stack:
+                # If stack is empty, just add UP token
+                stack.append(KeyPathToken.UP)
+            elif stack[-1] == KeyPathToken.ROOT:
+                # Can't go up from root, keep the root
+                continue
+            elif stack[-1] == KeyPathToken.UP:
+                # Multiple UPs stack
+                stack.append(KeyPathToken.UP)
+            else:
+                # Remove the last element unless it's ROOT
+                if len(stack) >= 2 and stack[-2] == KeyPathToken.MAPPING_KEY:
+                    # If we're removing a mapping key, remove both tokens
+                    stack.pop()
+                    stack.pop()
+                else:
+                    stack.pop()
+
+        else:
+            # For any other token, just append it to the stack
+            stack.append(part)
+
+    return tuple(stack)
+
+
+def simplify_parts(parts):
+    return simplify_parts_cached(tuple(parts))
+
+
+@lru_cache(maxsize=512)
 def parse_string(path: str) -> List[Union[Hashable, KeyPathToken]]:
     if not path:
         return []
@@ -157,6 +214,11 @@ class KeyPath:
 
     def front_pop(self) -> Union[Hashable, KeyPathToken]:
         return self.parts.pop(0)
+
+    def with_added_parts(self, *parts) -> 'KeyPath':
+        kcopy = self.copy()
+        kcopy.parts.extend(parts)
+        return kcopy
 
     def down(self, path: "str | KeyPath | KeyPathToken") -> 'KeyPath':
         self.is_simple = False
@@ -333,10 +395,10 @@ class KeyPath:
             res = _get_obj_impl(res, part, create_path_if_not_exists, default_mapping_constructor)
         return res
 
-    def is_mapping_key(self) -> bool:
-        if not self.is_simple:
+    def is_mapping_key(self, simplify=False) -> bool:
+        if simplify and not self.is_simple:
             simplified = self.simplified()
-            return simplified.is_mapping_key()
+            return simplified.is_mapping_key(simplify=False)
         if len(self.parts) < 2:
             return False
         return self.parts[-2] == KeyPathToken.MAPPING_KEY
@@ -344,7 +406,9 @@ class KeyPath:
     def removed_mapping_key(self) -> 'KeyPath':
         if not self.is_mapping_key():
             return self
-        return KeyPath(self.parts[:-2]) + self.parts[-1]
+        kcopy = self.copy()
+        kcopy.parts.pop(-2)
+        return kcopy
 
 
 def _get_obj_impl(

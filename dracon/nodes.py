@@ -313,30 +313,6 @@ class DraconMappingNode(MappingNode):
             anchor=self.anchor,
         )
 
-    def get_include_nodes(self) -> list[KeyPath]:
-        res = []
-
-        for key, value in self.value:
-            curpath = KeyPath(escape_keypath_part(key.value))
-            if isinstance(value, IncludeNode):
-                res.append(curpath)
-            elif isinstance(value, DraconMappingNode):
-                res.extend([curpath + p for p in value.get_include_nodes()])
-
-        return res
-
-    def get_merge_nodes(self) -> list[KeyPath]:
-        res = []
-
-        for key, value in self.value:
-            curpath = KeyPath(escape_keypath_part(key.value))
-            if isinstance(key, MergeNode):
-                res.append(curpath)
-            if isinstance(value, DraconMappingNode):
-                res.extend([curpath + p for p in value.get_merge_nodes()])
-
-        return res
-
     def append(self, newvalue: tuple[Node, Node]):
         key, _ = newvalue
         self.value.append(newvalue)

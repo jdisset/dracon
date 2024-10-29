@@ -4,6 +4,7 @@ from typing import (
     Literal,
 )
 from pydantic.dataclasses import dataclass
+from functools import lru_cache
 
 import pyparsing as pp
 import re
@@ -39,6 +40,7 @@ def fast_prescreen_interpolation_exprs_check(  # 5000x faster prescreen but very
     return False
 
 
+@lru_cache(maxsize=1024)
 def outermost_interpolation_exprs(
     text: str, interpolation_start_char='$', interpolation_boundary_chars=('{}', '()')
 ) -> list[InterpolationMatch]:
