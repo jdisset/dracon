@@ -287,10 +287,13 @@ class KeyPath:
         return self.copy().down(other)
 
     def copy(self) -> 'KeyPath':
-        return KeyPath(self.parts, simplify=False)
+        kc = KeyPath([])
+        kc.parts = self.parts.copy()
+        kc.is_simple = self.is_simple
+        return kc
 
     def __deepcopy__(self, memo) -> 'KeyPath':
-        return KeyPath(self.parts, simplify=False)
+        return self.copy()
 
     def simplify(self) -> 'KeyPath':
         if self.is_simple:

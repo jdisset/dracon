@@ -102,6 +102,20 @@ class DraconScalarNode(ScalarNode):
         self.comment = state['comment']
         self.anchor = state['anchor']
 
+    # def __deepcopy__(self, memo):
+        # n = DraconScalarNode(
+            # tag=self.tag,
+            # value=deepcopy(self.value, memo),
+            # start_mark=self.start_mark,
+            # end_mark=self.end_mark,
+            # style=self.style,
+            # comment=self.comment,
+            # anchor=self.anchor,
+        # )
+        # n.ctag = self.ctag
+        # n.id = self.id
+        # return n
+
 
 class ContextNode(DraconScalarNode):
     def __init__(
@@ -169,16 +183,16 @@ class IncludeNode(ContextNode):
             context=context,
         )
 
-        def __deepcopy__(self, memo):
-            return IncludeNode(
-                value=deepcopy(self.value, memo),
-                start_mark=self.start_mark,
-                end_mark=self.end_mark,
-                tag=self.tag,
-                anchor=self.anchor,
-                comment=self.comment,
-                context=self.context.copy(),
-            )
+        # def __deepcopy__(self, memo):
+        # return IncludeNode(
+        # value=deepcopy(self.value, memo),
+        # start_mark=self.start_mark,
+        # end_mark=self.end_mark,
+        # tag=self.tag,
+        # anchor=self.anchor,
+        # comment=self.comment,
+        # context=self.context.copy(),
+        # )
 
 
 class MergeNode(DraconScalarNode):
@@ -197,6 +211,16 @@ class MergeNode(DraconScalarNode):
         DraconScalarNode.__setstate__(self, state)
         self.merge_key_raw = state['merge_key_raw']
 
+    # def __deepcopy__(self, memo):
+    # return MergeNode(
+    # value=deepcopy(self.value, memo),
+    # start_mark=self.start_mark,
+    # end_mark=self.end_mark,
+    # tag=self.tag,
+    # anchor=self.anchor,
+    # comment=self.comment,
+    # )
+
 
 class UnsetNode(DraconScalarNode):
     def __init__(self, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
@@ -208,6 +232,15 @@ class UnsetNode(DraconScalarNode):
             end_mark=end_mark,
             comment=comment,
             anchor=anchor,
+        )
+
+    def __deepcopy__(self, memo):
+        return UnsetNode(
+            start_mark=self.start_mark,
+            end_mark=self.end_mark,
+            tag=self.tag,
+            anchor=self.anchor,
+            comment=self.comment,
         )
 
 
@@ -303,7 +336,7 @@ class DraconMappingNode(MappingNode):
 
     def __deepcopy__(self, memo):
         copied_value = deepcopy(self.value, memo)
-        return self.__class__(
+        n = self.__class__(
             tag=self.tag,
             value=copied_value,
             start_mark=self.start_mark,
@@ -312,6 +345,9 @@ class DraconMappingNode(MappingNode):
             comment=self.comment,
             anchor=self.anchor,
         )
+        n.ctag = self.ctag
+        n.id = self.id
+        return n
 
     def append(self, newvalue: tuple[Node, Node]):
         key, _ = newvalue
@@ -454,7 +490,7 @@ class DraconSequenceNode(SequenceNode):
         return node_repr(self)
 
     def __deepcopy__(self, memo):
-        return self.__class__(
+        n = self.__class__(
             tag=self.tag,
             value=deepcopy(self.value, memo),
             start_mark=self.start_mark,
@@ -463,6 +499,9 @@ class DraconSequenceNode(SequenceNode):
             comment=self.comment,
             anchor=self.anchor,
         )
+        n.ctag = self.ctag
+        n.id = self.id
+        return n
 
     # def __hash__(self):
     # return hash((tuple(self.value), base_node_hash(self)))

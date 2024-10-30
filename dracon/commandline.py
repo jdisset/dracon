@@ -1,15 +1,37 @@
 import argparse
 from pydantic import BaseModel, Field, ValidationError, ConfigDict
+from pydantic_core import PydanticUndefined
 from typing import List, Dict, Any
 from dracon import DraconLoader, with_indent
 from dracon.composer import DRACON_UNSET_VALUE
 from dracon.utils import node_repr
-from typing import Optional, Annotated, Any, TypeVar, Generic, Callable, ForwardRef
+import sys
+from rich.console import Console, Group
+from rich.box import ROUNDED
+from rich.text import Text
+from rich.panel import Panel
+from rich.rule import Rule
+import os
+from typing import (
+    Optional,
+    Annotated,
+    Any,
+    TypeVar,
+    Generic,
+    Callable,
+    ForwardRef,
+    Union,
+    Type,
+    Tuple,
+)
+from types import NoneType
 from dracon.resolvable import Resolvable, get_inner_type
+from dracon.deferred import DeferredNode
 from dracon.keypath import KeyPath
 from dracon.loader import DEFAULT_LOADERS
 import traceback
 import logging
+
 
 logger = logging.getLogger("dracon.commandline")
 
@@ -57,16 +79,6 @@ class Arg:
         )
         return arg
 
-    def help_str(self):
-        names = []
-        if self.positional:
-            return f"{self.real_name.upper()}: {self.help}"
-        if self.short:
-            names.append(f"-{self.short}")
-        if self.long:
-            names.append(f"--{self.long}")
-        return f"{', '.join(names)}: {self.help}"
-
 
 def getArg(name, field):
     arg = Arg(real_name=name)
@@ -87,14 +99,171 @@ def getArg(name, field):
     return arg
 
 
-def print_help(prg, _):
-    print(f"Usage: {prg.name} [options]")
-    print("Options:")
-    for arg in prg._args:
-        print(with_indent(arg.help_str(), 2))
-
-
 T = TypeVar("T")
+
+
+## {{{                        --     print help     --
+
+console = Console()
+
+
+def format_type_str(arg_type: type) -> str:
+    if arg_type is None:
+        return ""
+    if hasattr(arg_type, "__origin__"):
+        if (
+            arg_type.__origin__ is Annotated
+            or arg_type.__origin__ is Resolvable
+            or arg_type.__origin__ is DeferredNode
+        ):
+            return format_type_str(arg_type.__args__[0])
+        elif arg_type.__origin__ is Union:
+            types = [t for t in arg_type.__args__ if t is not type(None)]
+            if len(types) == 1:
+                return format_type_str(types[0])
+            return arg_type.__origin__.__name__.upper()
+        return format_type_str(arg_type.__args__[0])
+    return arg_type.__name__.upper()
+
+
+def format_default_value(value: Any) -> str:
+    if value is PydanticUndefined:
+        return None
+    if isinstance(value, str):
+        return f'"{value}"'
+    return str(value)
+
+
+def is_optional_field(field) -> bool:
+    return (
+        (field.default is not None and field.default is not PydanticUndefined)
+        or field.default_factory is not None
+        or (
+            hasattr(field.annotation, "__origin__")
+            and field.annotation.__origin__ is Union
+            and type(None) in field.annotation.__args__
+        )
+    )
+
+
+def format_type_display(name: str, arg_type: str, text: Text) -> None:
+    text.append(f"  {name}", style="yellow")
+    if arg_type:
+        text.append(f" ")
+        text.append(arg_type, style="blue")
+    text.append("\n")
+
+
+def print_help(prg: "Program", _) -> None:
+    positionals = []
+    options = []
+    flags = []
+
+    for arg in prg._args:
+        if arg.positional:
+            positionals.append(arg)
+        elif arg.arg_type is bool:
+            flags.append(arg)
+        else:
+            options.append(arg)
+
+    content = Text()
+
+    if prg.description:
+        content.append("\n" + prg.description + "\n\n", style="italic")
+        content.append("─" * min(console.width - 4, 80) + "\n\n", style="bright_black")
+
+    usage = [prg.name or "command"]
+    if options or flags:
+        usage.append("[OPTIONS]")
+    for pos in positionals:
+        usage.append(pos.real_name.upper())
+
+    content.append("Usage: ", style="bold")
+    content.append(" ".join(usage) + "\n\n", style="yellow")
+
+    if positionals:
+        content.append("Arguments:\n", style="bold green")
+        for arg in positionals:
+            name = arg.real_name.upper()
+            help_text = arg.help or ""
+            arg_type = format_type_str(arg.arg_type)
+
+            field = prg.conf_type.model_fields.get(arg.real_name)
+            default = None
+            required = False
+
+            if field:
+                if field.default is not None and field.default is not PydanticUndefined:
+                    default = format_default_value(field.default)
+                elif field.default_factory is not None:
+                    default = "<factory>"
+                else:
+                    required = not is_optional_field(field)
+
+            content.append(f"  {name}\n", style="yellow")
+            content.append(f"    type: ", style="bright_black")
+            content.append(f"{arg_type}\n", style="blue")
+            if required:
+                content.append("    REQUIRED\n", style="red")
+            elif default:
+                content.append("    default: ", style="bright_black")
+                content.append(f"{default}\n", style="dim")
+            if help_text:
+                content.append(f"    {help_text}\n", style="default")
+            content.append("\n")
+
+    if options or flags:
+        content.append("Options:\n", style="bold green")
+        for arg in options + flags:
+            parts = []
+            if arg.short:
+                parts.append(f"-{arg.short}")
+            if arg.long:
+                parts.append(f"--{arg.long}")
+
+            option_str = ", ".join(parts)
+            if not arg.arg_type is bool:
+                name = option_str
+                type_str = format_type_str(arg.arg_type)
+                format_type_display(name, type_str, content)
+            else:
+                content.append(f"  {option_str}\n", style="yellow")
+
+            help_text = arg.help or ""
+            field = prg.conf_type.model_fields.get(arg.real_name)
+            default = None
+            required = False
+
+            if field:
+                if field.default is not None and field.default is not PydanticUndefined:
+                    default = format_default_value(field.default)
+                elif field.default_factory is not None:
+                    default = "<factory>"
+                else:
+                    required = not is_optional_field(field)
+
+            if help_text:
+                content.append(f"    {help_text}\n")
+            if required:
+                content.append("    REQUIRED\n", style="red")
+            elif default:
+                content.append("    default: ", style="bright_black")
+                content.append(f"{default}\n", style="dim")
+            content.append("\n")
+
+    title = Text()
+    title.append(prg.name if prg.name else "Command", style="bold cyan")
+    if prg.version:
+        title.append(f" (v{prg.version})", style="cyan")
+
+    console.print(
+        Panel(content, title=title, box=ROUNDED, border_style="bright_black", expand=False)
+    )
+    sys.exit(0)
+
+
+##────────────────────────────────────────────────────────────────────────────}}}
 
 
 class ArgParseError(Exception):

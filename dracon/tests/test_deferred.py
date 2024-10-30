@@ -3,7 +3,7 @@ import re
 import pytest
 from dracon import dump, loads
 from dracon.loader import DraconLoader
-from dracon.deferred import DeferredNode
+from dracon.deferred import DeferredNode, make_deferred
 from dracon.dracontainer import Dracontainer, Mapping, Sequence, resolve_all_lazy
 from dracon.interpolation import InterpolationError, InterpolationMatch
 from typing import Generic, TypeVar, Any, Optional, Annotated, cast, List
@@ -634,3 +634,17 @@ def test_large_parallel_processing(process_pool):
         assert isinstance(result.classAinst, ClassA)
         assert result.classAinst.index == i
         assert result.classAinst.name == f"Item {i}"
+
+def test_make_deferred():
+
+    inode = make_deferred(42)
+    assert inode.construct() == 42
+
+    snode = make_deferred("hello")
+    assert snode.construct() == "hello"
+
+
+
+
+
+
