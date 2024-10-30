@@ -242,6 +242,13 @@ class Draconstructor(Constructor):
             self.deep_construct = old_deep
         return data
 
+    def construct_scalar(self, node):
+        if isinstance(node.value, str):
+            # Convert the string value to a raw string interpretation
+            rawstr = rf"{node.value}"
+            return rawstr
+        return super().construct_scalar(node)
+
     @ftrace()
     def construct_object(self, node, deep=True):
         assert self.context is not None, "Context must be set before constructing objects"
