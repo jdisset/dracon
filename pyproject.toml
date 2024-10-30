@@ -10,12 +10,11 @@ description = "A configuration library that extends yaml's alias, anchor and mer
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "hydra-core",
-    "omegaconf",
     "pydantic",
     "ruamel.yaml",
 	"xxhash",
 	"asteval",
+	"cachetools",
 	"regex"
 ]
 

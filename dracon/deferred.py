@@ -19,6 +19,7 @@ from dracon.merge import merged, MergeKey, add_to_context
 
 from dracon.interpolation import evaluate_expression, InterpolableNode
 from functools import partial
+from dracon.nodes import make_node
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
@@ -84,7 +85,6 @@ class DeferredNode(ContextNode, Generic[T]):
         self._loader.update_context(context or {})
         self._loader.deferred_paths = deferred_paths or []
 
-        # composition = deepcopy(self._full_composition)
         composition = self._full_composition
 
         composition.replace_node_at(self.path, self.value)
@@ -130,6 +130,22 @@ class DeferredNode(ContextNode, Generic[T]):
             context=self.context.copy(),
         )
         return new_obj
+
+
+def make_deferred(value: Any, loader=None, **kwargs) -> DeferredNode:
+    from dracon.loader import DraconLoader
+
+    if loader is None:
+        loader = DraconLoader()
+
+    n = DeferredNode(value=make_node(value, **kwargs))
+    comp = CompositionResult(root=n)
+
+    n.path = ROOTPATH
+    n._loader = loader
+    n._full_composition = comp
+
+    return n
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
