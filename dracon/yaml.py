@@ -7,9 +7,11 @@ import copyreg
 class PicklableYAML(YAML):
     """A picklable version of ruamel.yaml.YAML"""
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, *args, typ='rt', **kwargs):
+        super().__init__(*args, typ=typ, **kwargs)
         self._registered_types = {}  # Store registered types
+        self.allow_unicode = True
+        self.escape_char = None
 
     def register_class(self, cls):
         """Override register_class to keep track of registered types"""
