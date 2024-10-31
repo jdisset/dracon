@@ -38,6 +38,11 @@ class InterpolationError(Exception):
 
 BASE_DRACON_SYMBOLS: Dict[str, Any] = {}
 
+def debug_string_state(label: str, s: str):
+    print(f"\n=== {label} ===")
+    print(f"Raw string: {repr(s)}")
+    print("Backslash count: ", {s.count('\\')})
+    print("=" * 40)
 
 ## {{{                        --     NodeLookup     --
 
@@ -381,3 +386,4 @@ class InterpolableNode(ContextNode):
 
 
 ##───────────────────────────────────────────────────────────────────────────}}}
+
