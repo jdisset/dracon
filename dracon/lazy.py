@@ -88,6 +88,8 @@ class LazyInterpolable(Lazy[T]):
                 value, (str, tuple)
             ), f"LazyInterpolable expected string, got {type(value)}. Did you mean to contruct with permissive=True?"
 
+        print(f"Created LazyInterpolable with value {value}")
+
     def __getstate__(self):
         """Get the object's state for pickling."""
         state = {
@@ -129,6 +131,7 @@ class LazyInterpolable(Lazy[T]):
         return f"LazyInterpolable({self.value})"
 
     def resolve(self) -> T:
+        print(f"Resolving {self.value}")
         if isinstance(self.value, str):
             self.value = evaluate_expression(
                 self.value,
@@ -137,6 +140,8 @@ class LazyInterpolable(Lazy[T]):
                 init_outermost_interpolations=self.init_outermost_interpolations,
                 context=self.context,
             )
+        print(f"Resolved to {self.value}")
+
         return self.validate(self.value)
 
     def get(self, owner_instance, setval=False):
