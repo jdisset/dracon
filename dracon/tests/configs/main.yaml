@@ -29,6 +29,3 @@ new_simple:
   root:
     a: 'new_a'
 
-
-plot_config:
-  <<: *pkg:biocomptools:configs/plot_config/default_plotconf

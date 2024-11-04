@@ -47,7 +47,7 @@ logger = logging.getLogger("dracon")
 def pydantic_validate(tag, value, localns=None, root_obj=None, current_path=None):
     tag_type = resolve_type(tag, localns=localns or {})
 
-    if not is_lazy_compatible(tag_type) and isinstance(value, Dracontainer) and tag_type is not Any:
+    if not is_lazy_compatible(tag_type) and tag_type is not Any:
         resolve_all_lazy(value)
 
     try:
@@ -243,11 +243,11 @@ class Draconstructor(Constructor):
         return data
 
     # def construct_scalar(self, node):
-        # if isinstance(node.value, str):
-            # # Convert the string value to a raw string interpretation
-            # rawstr = rf"{node.value}"
-            # return rawstr
-        # return super().construct_scalar(node)
+    # if isinstance(node.value, str):
+    # # Convert the string value to a raw string interpretation
+    # rawstr = rf"{node.value}"
+    # return rawstr
+    # return super().construct_scalar(node)
 
     @ftrace()
     def construct_object(self, node, deep=True):
