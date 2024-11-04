@@ -43,6 +43,20 @@ class Dracontainer:
         self._dracon_lazy_resolve = True
         self._data = None
 
+    def cleanup(self):
+        """Clear internal references and caches"""
+        if self._data:
+            self._data.clear()
+        if hasattr(self, '_metadata'):
+            if self._metadata:
+                self._metadata.clear()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.cleanup()
+
     def __deepcopy__(self, memo):
         new_obj = self.__class__()
         new_obj._auto_interp = self._auto_interp

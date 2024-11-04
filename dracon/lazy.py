@@ -88,7 +88,6 @@ class LazyInterpolable(Lazy[T]):
                 value, (str, tuple)
             ), f"LazyInterpolable expected string, got {type(value)}. Did you mean to contruct with permissive=True?"
 
-
     def __getstate__(self):
         """Get the object's state for pickling."""
         state = {
@@ -183,9 +182,24 @@ def num_array_like(obj):
     return hasattr(obj, 'dtype') and hasattr(obj, 'shape') and obj.dtype.kind in 'iuf'
 
 
-@ftrace()
-def resolve_all_lazy(obj, root_obj=None, current_path=None):
-    """will do its best to resolve all lazy objects in the object"""
+def resolve_all_lazy(obj, root_obj=None, current_path=None, visited=None):
+    """
+    Resolves all lazy objects in the object (handles cyclic references).
+
+    Args:
+        obj: The object to resolve lazy references in
+        root_obj: The root object containing all references
+        current_path: The current path in the object tree
+        visited: Set of object ids that have already been processed
+    """
+    if visited is None:
+        visited = set()
+
+    # If we've already visited this object, skip it to prevent infinite recursion
+    obj_id = id(obj)
+    if obj_id in visited:
+        return
+    visited.add(obj_id)
 
     if root_obj is None:
         if hasattr(obj, '_dracon_root_obj'):  # if the object has a root object, use that
@@ -198,31 +212,36 @@ def resolve_all_lazy(obj, root_obj=None, current_path=None):
         else:
             current_path = ROOTPATH
 
-    # recursively call resolve_all_lazy on all items in the object (including keys in mappings)
-    if isinstance(obj, BaseModel):
-        for key, value in obj:
-            resolve_all_lazy(value, root_obj, current_path + KeyPath(str(key)))
+    try:
+        # recursively call resolve_all_lazy on all items in the object (including keys in mappings)
+        if isinstance(obj, BaseModel):
+            for key, value in obj:
+                resolve_all_lazy(value, root_obj, current_path + KeyPath(str(key)), visited)
 
-    elif dict_like(obj):
-        for key, value in obj.items():
-            resolve_all_lazy(key, root_obj, current_path + MAPPING_KEY + str(key))
-            resolve_all_lazy(value, root_obj, current_path + key)
+        elif dict_like(obj):
+            for key, value in obj.items():
+                resolve_all_lazy(key, root_obj, current_path + MAPPING_KEY + str(key), visited)
+                resolve_all_lazy(value, root_obj, current_path + key, visited)
 
-    elif list_like(obj) and not isinstance(obj, (str, bytes)) and not num_array_like(obj):
-        for i, item in enumerate(obj):
-            resolve_all_lazy(item, root_obj, current_path + KeyPath(str(i)))
+        elif list_like(obj) and not isinstance(obj, (str, bytes)) and not num_array_like(obj):
+            for i, item in enumerate(obj):
+                resolve_all_lazy(item, root_obj, current_path + KeyPath(str(i)), visited)
 
-    # now check if we have a lazy interpolable object
-    elif isinstance(obj, LazyInterpolable):
-        if current_path.is_mapping_key():
-            raise NotImplementedError("Lazy objects in key mappings are not supported")
-        parent = current_path.parent.get_obj(root_obj)
-        obj.root_obj = root_obj
-        obj.current_path = current_path
-        val = obj.resolve()
-        set_val(parent, current_path.stem, val)
-        # recurse (if the value is itself a lazy object or contain lazy objects)
-        resolve_all_lazy(current_path.get_obj(root_obj), root_obj, current_path)
+        # now check if we have a lazy interpolable object
+        elif isinstance(obj, LazyInterpolable):
+            if current_path.is_mapping_key():
+                raise NotImplementedError("Lazy objects in key mappings are not supported")
+            parent = current_path.parent.get_obj(root_obj)
+            obj.root_obj = root_obj
+            obj.current_path = current_path
+            val = obj.resolve()
+            set_val(parent, current_path.stem, val)
+            # recurse (if the value is itself a lazy object or contains lazy objects)
+            resolve_all_lazy(current_path.get_obj(root_obj), root_obj, current_path, visited)
+
+    except Exception as e:
+        # Optionally, you might want to add logging here
+        raise type(e)(f"Error while resolving path {current_path}: {str(e)}") from e
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
