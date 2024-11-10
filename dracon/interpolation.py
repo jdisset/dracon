@@ -11,15 +11,9 @@ from copy import copy
 from typing import (
     Protocol,
     runtime_checkable,
-    Optional,
-    Any,
-    Generic,
-    TypeVar,
-    MutableMapping,
-    MutableSequence,
 )
-from dracon.utils import DictLike, generate_unique_id, ShallowDict, ftrace, deepcopy
-from dracon.nodes import DraconMappingNode, DraconSequenceNode, IncludeNode, ContextNode
+from dracon.utils import DictLike, ftrace, deepcopy
+from dracon.nodes import DraconMappingNode, ContextNode
 
 from dracon.interpolation_utils import (
     outermost_interpolation_exprs,
@@ -38,11 +32,13 @@ class InterpolationError(Exception):
 
 BASE_DRACON_SYMBOLS: Dict[str, Any] = {}
 
+
 def debug_string_state(label: str, s: str):
     print(f"\n=== {label} ===")
     print(f"Raw string: {repr(s)}")
     print("Backslash count: ", {s.count('\\')})
     print("=" * 40)
+
 
 ## {{{                        --     NodeLookup     --
 
@@ -88,7 +84,6 @@ class NodeLookup:
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
-
 
 ## {{{                           --     eval utils    --
 
@@ -260,7 +255,6 @@ def evaluate_expression(
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
-
 ## {{{                     --     InterpolableNode     --
 class InterpolableNode(ContextNode):
     def __init__(
@@ -287,7 +281,6 @@ class InterpolableNode(ContextNode):
         )
         self.referenced_nodes = NodeLookup()
         self.saved_references = {}
-
 
     def __getstate__(self):
         state = super().__getstate__()
@@ -387,3 +380,14 @@ class InterpolableNode(ContextNode):
 
 ##───────────────────────────────────────────────────────────────────────────}}}
 
+
+def preprocess_references(comp_res):
+    comp_res.find_special_nodes('interpolable', lambda n: isinstance(n, InterpolableNode))
+    comp_res.sort_special_nodes('interpolable')
+
+    for path in comp_res.pop_all_special('interpolable'):
+        node = path.get_obj(comp_res.root)
+        assert isinstance(node, InterpolableNode), f"Invalid node type: {type(node)}  => {node}"
+        node.preprocess_references(comp_res, path)
+
+    return comp_res

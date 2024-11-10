@@ -4,13 +4,11 @@ from ruamel.yaml.tag import Tag
 from dracon.utils import (
     dict_like,
     list_like,
-    generate_unique_id,
     node_repr,
     deepcopy,
     make_hashable,
 )
 from typing import Any, Hashable, Optional
-from dracon.keypath import KeyPath, escape_keypath_part
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 ## {{{                           --     utils     --
@@ -102,20 +100,6 @@ class DraconScalarNode(ScalarNode):
         self.comment = state['comment']
         self.anchor = state['anchor']
 
-    # def __deepcopy__(self, memo):
-        # n = DraconScalarNode(
-            # tag=self.tag,
-            # value=deepcopy(self.value, memo),
-            # start_mark=self.start_mark,
-            # end_mark=self.end_mark,
-            # style=self.style,
-            # comment=self.comment,
-            # anchor=self.anchor,
-        # )
-        # n.ctag = self.ctag
-        # n.id = self.id
-        # return n
-
 
 class ContextNode(DraconScalarNode):
     def __init__(
@@ -183,17 +167,6 @@ class IncludeNode(ContextNode):
             context=context,
         )
 
-        # def __deepcopy__(self, memo):
-        # return IncludeNode(
-        # value=deepcopy(self.value, memo),
-        # start_mark=self.start_mark,
-        # end_mark=self.end_mark,
-        # tag=self.tag,
-        # anchor=self.anchor,
-        # comment=self.comment,
-        # context=self.context.copy(),
-        # )
-
 
 class MergeNode(DraconScalarNode):
     def __init__(self, value, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
@@ -210,16 +183,6 @@ class MergeNode(DraconScalarNode):
     def __setstate__(self, state):
         DraconScalarNode.__setstate__(self, state)
         self.merge_key_raw = state['merge_key_raw']
-
-    # def __deepcopy__(self, memo):
-    # return MergeNode(
-    # value=deepcopy(self.value, memo),
-    # start_mark=self.start_mark,
-    # end_mark=self.end_mark,
-    # tag=self.tag,
-    # anchor=self.anchor,
-    # comment=self.comment,
-    # )
 
 
 class UnsetNode(DraconScalarNode):

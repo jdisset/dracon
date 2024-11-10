@@ -71,8 +71,7 @@ def process_merges(comp_res):
 
         new_parent = merged(new_parent, merge_node, merge_key)
         assert isinstance(new_parent, Node)
-        comp_res.replace_node_at(parent_path, new_parent)
-
+        comp_res.set_at(parent_path, new_parent)
 
     return comp_res, has_merge
 

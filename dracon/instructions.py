@@ -17,7 +17,6 @@ from dracon.merge import merged, MergeKey, add_to_context
 from dracon.interpolation import evaluate_expression, InterpolableNode
 from functools import partial
 
-
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 ## {{{                      --     instruct utils     --
@@ -159,10 +158,6 @@ class SetDefault(Define):
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
-
-##────────────────────────────────────────────────────────────────────────────}}}
-
-
 ## {{{                           --     each     --
 class Each(Instruction):
     PATTERN = r"!each\(([a-zA-Z_]\w*)\)"
@@ -241,7 +236,7 @@ class Each(Instruction):
                 )
 
         del parent_node[key_node.value]
-        comp_res.replace_node_at(path.parent, new_parent)
+        comp_res.set_at(path.parent, new_parent)
 
         return comp_res
 
@@ -327,7 +322,7 @@ class If(Instruction):
                 assert isinstance(
                     parent_node, DraconMappingNode
                 ), 'if statement with scalar-like must appear in a mapping'
-                comp_res.replace_node_at(parent_path, value_node)
+                comp_res.set_at(parent_path, value_node)
 
         del parent_node[key_node.value]
         return comp_res

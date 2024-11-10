@@ -11,9 +11,8 @@ from dracon.interpolation_utils import resolve_interpolable_variables
 from dracon.utils import (
     deepcopy,
 )
-import copy
 
-from dracon.merge import process_merges, add_to_context, merged, MergeKey
+from dracon.merge import add_to_context
 from dracon.loaders.file import read_from_file
 from dracon.loaders.pkg import read_from_pkg
 from dracon.loaders.env import read_from_env

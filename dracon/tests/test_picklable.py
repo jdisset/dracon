@@ -11,6 +11,7 @@ from dracon.resolvable import Resolvable
 from dracon.deferred import DeferredNode
 from dracon.lazy import LazyInterpolable
 from dracon.keypath import ROOTPATH
+from dracon.include import compose_from_include_str
 import os
 
 # Set a dummy environment variable for testing purposes
@@ -229,7 +230,7 @@ def test_loaded_config_pickling():
 def test_composition_result_pickling():
     """Test that composition results can be pickled and unpickled"""
     loader = DraconLoader()
-    compres = loader.compose_from_include_str(f"pkg:{main_config_path}")
+    compres = compose_from_include_str(loader, f"pkg:{main_config_path}")
 
     # Pickle and unpickle the composition result
     unpickled_compres = pickle_unpickle(compres)

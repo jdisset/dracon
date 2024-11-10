@@ -39,7 +39,6 @@ INSTRUCTION: Final = 'instruction'
 
 INCLUDE_TAG = '!include'
 
-
 class CompositionResult(BaseModel):
     root: Node
     special_nodes: dict[SpecialNodeCategory, list[KeyPath]] = {}
@@ -69,19 +68,20 @@ class CompositionResult(BaseModel):
         self.node_map = {}
 
         def _callback(node, path):
-            self.node_map[path] = node
+            self.node_map[path] = node  # type: ignore
 
         walk_node(self.root, _callback, start_path=ROOTPATH)
 
     def update_paths(self):
+        assert self.node_map is not None
         for path, node in self.node_map.items():
             if hasattr(node, 'path'):
-                node.path = path
+                node.path = path  # type: ignore
 
     def rerooted(self, new_root_path: KeyPath):
         return CompositionResult(root=new_root_path.get_obj(self.root))
 
-    def replace_node_at(self, at_path: KeyPath, new_node: Node):
+    def set_at(self, at_path: KeyPath, new_node: Node):
         if at_path == ROOTPATH:
             self.root = new_node
         else:
@@ -91,7 +91,7 @@ class CompositionResult(BaseModel):
                 key = at_path[-1]
                 parent_node[key] = new_node
             elif isinstance(parent_node, DraconSequenceNode):
-                idx = int(at_path[-1])
+                idx = int(at_path[-1])  # type: ignore
                 parent_node[idx] = new_node
             else:
                 raise ValueError(f'Invalid parent node type: {type(parent_node)}')
@@ -104,13 +104,14 @@ class CompositionResult(BaseModel):
         self.node_map[at_path] = node
 
         def _callback(node, path):
+            assert self.node_map is not None
             self.node_map[path] = node
 
         walk_node(node, _callback, start_path=at_path)
 
     def merge_composition_at(self, at_path: KeyPath, new_comp: 'CompositionResult', reuse_map=True):
         new_node = new_comp.root
-        self.replace_node_at(at_path, new_node)
+        self.set_at(at_path, new_node)
         # if reuse_map:
         # for path, node in new_comp.node_map.items():
         # self.node_map[at_path + path] = node
@@ -127,6 +128,7 @@ class CompositionResult(BaseModel):
         self,
         callback: Callable[[Node], None],
     ):
+        assert self.node_map is not None
         for _, node in self.node_map.items():
             callback(node)
 
@@ -134,6 +136,7 @@ class CompositionResult(BaseModel):
         self,
         callback: Callable[[Node, KeyPath], None],
     ):
+        assert self.node_map is not None
         for path, node in self.node_map.items():
             callback(node, path)
 
@@ -143,6 +146,7 @@ class CompositionResult(BaseModel):
         is_special: Callable[[Node], bool],
     ):
         special_nodes = []
+        assert self.node_map is not None
 
         for path, node in self.node_map.items():
             if is_special(node):
@@ -151,6 +155,8 @@ class CompositionResult(BaseModel):
         self.special_nodes[category] = special_nodes
 
     def find_anchors(self):
+        assert self.node_map is not None
+
         def is_anchor(node):
             return hasattr(node, 'anchor') and (node.anchor is not None)
 
@@ -226,8 +232,8 @@ class DraconComposer(Composer):
             node = self.compose_alias_event()
         else:
             event = self.parser.peek_event()
-            self.resolver.descend_resolver(parent, index)
 
+            self.resolver.descend_resolver(parent, index)
             if self.parser.check_event(ScalarEvent):
                 if event.ctag == INCLUDE_TAG:
                     node = self.compose_include_node()

@@ -1,17 +1,14 @@
 ## {{{                          --     imports     --
 from ruamel.yaml import Node
 import os
-from typing import Any, Callable, Dict, Optional, Tuple, Type, Annotated, TypeVar
+from typing import Any, Callable, Dict, Optional, Type, Annotated, TypeVar
 from functools import partial
-import re
 
 from cachetools import cached, LRUCache
 from cachetools.keys import hashkey
 from pathlib import Path
 from pydantic import BeforeValidator, Field, PlainSerializer
-from pydantic.dataclasses import dataclass
 
-import dracon.include as drinc
 from dracon.include import DEFAULT_LOADERS, compose_from_include_str
 
 from dracon.composer import (
@@ -35,14 +32,12 @@ from dracon.utils import (
     make_hashable,
 )
 
-from dracon.interpolation_utils import resolve_interpolable_variables
-from dracon.interpolation import InterpolableNode
+from dracon.interpolation import InterpolableNode, preprocess_references
 from dracon.merge import process_merges, add_to_context, merged, MergeKey
 from dracon.instructions import process_instructions
 from dracon.deferred import DeferredNode, process_deferred
 from dracon.representer import DraconRepresenter
 
-from dracon.postprocess import preprocess_references
 
 from dracon import dracontainer
 
@@ -172,22 +167,6 @@ class DraconLoader:
     def __setstate__(self, state):
         self.__dict__.update(state)
 
-    def compose_from_include_str(
-        self,
-        include_str: str,
-        include_node_path: KeyPath = ROOTPATH,
-        composition_result: Optional[CompositionResult] = None,
-        node: Optional[IncludeNode] = None,
-    ) -> CompositionResult:
-        return compose_from_include_str(
-            self,
-            include_str,
-            include_node_path,
-            composition_result,
-            self.custom_loaders,
-            node,
-        )
-
     def compose_config_from_str(self, content: str) -> CompositionResult:
         composed_content = cached_compose_config_from_str(self.yaml, content)
         return self.post_process_composed(composed_content)
@@ -208,18 +187,20 @@ class DraconLoader:
             config_path = config_path.resolve().as_posix()
         if ":" not in config_path:
             config_path = f"file:{config_path}"
-        comp = self.compose_from_include_str(config_path)
+        comp = compose_from_include_str(self, config_path, custom_loaders=self.custom_loaders)
         return self.load_composition_result(comp)
 
     def loads(self, content: str):
         comp = self.compose_config_from_str(content)
         return self.load_composition_result(comp)
 
-    def post_process_composed(self, comp: CompositionResult):
-        comp.walk_no_path(callback=partial(add_to_context, self.context))
 
+
+    def post_process_composed(self, comp: CompositionResult):
+
+        comp.walk_no_path(callback=partial(add_to_context, self.context))
         comp = preprocess_references(comp)
-        comp = process_deferred(comp, force_deferred_at=self.deferred_paths)
+        comp = process_deferred(comp, force_deferred_at=self.deferred_paths)  # type: ignore
         comp = process_instructions(comp, self)
         comp = self.process_includes(comp)
         comp, merge_changed = process_merges(comp)
@@ -229,7 +210,6 @@ class DraconLoader:
         comp = self.save_references(comp)
         comp = self.update_deferred_nodes(comp)
         comp.update_paths()
-
         return comp
 
     def update_deferred_nodes(self, comp_res: CompositionResult):
@@ -287,8 +267,13 @@ class DraconLoader:
                 inode = inode_path.get_obj(comp_res.root)
                 assert isinstance(inode, IncludeNode), f"Invalid node type: {type(inode)}"
                 new_loader = self.copy()
-                include_composed = new_loader.compose_from_include_str(
-                    inode.value, inode_path, comp_res, node=inode
+                include_composed = compose_from_include_str(
+                    new_loader,
+                    include_str=inode.value,
+                    include_node_path=inode_path,
+                    composition_result=comp_res,
+                    custom_loaders=self.custom_loaders,
+                    node=inode,
                 )
                 comp_res.merge_composition_at(inode_path, include_composed)
 
@@ -311,7 +296,6 @@ class DraconLoader:
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
-# @cached(LRUCache(maxsize=256), key=lambda data: hashkey(data))
 def dump_to_node(data):
     if isinstance(data, Node):
         return data
