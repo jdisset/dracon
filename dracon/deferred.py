@@ -1,23 +1,21 @@
 ## {{{                          --     imports     --
-from typing import Optional, Any, List, Dict, Union, TypeVar, Generic, Type
-import re
-from pydantic import BaseModel
-from enum import Enum
-from dracon.utils import dict_like, DictLike, ListLike, ftrace, deepcopy
+from typing import Optional, Any, List, Dict, TypeVar, Generic, Type
+from dracon.utils import ftrace, deepcopy
 from dracon.composer import (
     CompositionResult,
     walk_node,
-    DraconMappingNode,
-    DraconSequenceNode,
-    IncludeNode,
 )
-from ruamel.yaml.nodes import Node, ScalarNode
-from dracon.nodes import DraconScalarNode, dracon_scalar_node_hash, ContextNode, context_node_hash
+from ruamel.yaml.nodes import Node
+from dracon.nodes import (
+    DraconScalarNode,
+    ContextNode,
+    context_node_hash,
+)
+
 
 from dracon.keypath import KeyPath, ROOTPATH
-from dracon.merge import merged, MergeKey, add_to_context
+from dracon.merge import add_to_context
 
-from dracon.interpolation import evaluate_expression, InterpolableNode
 from functools import partial
 from dracon.nodes import make_node
 
@@ -31,6 +29,12 @@ T = TypeVar('T')
 
 
 class DeferredNode(ContextNode, Generic[T]):
+    """
+    Allows to "pause" the composition of the contained node until construct is called
+    All of dracons tree walking functions see this node as a leaf, i.e. it will not
+    be traversed further.
+    """
+
     def __init__(
         self,
         value: Node,
@@ -87,7 +91,7 @@ class DeferredNode(ContextNode, Generic[T]):
 
         composition = self._full_composition
 
-        composition.replace_node_at(self.path, self.value)
+        composition.set_at(self.path, self.value)
         walk_node(
             node=self.path.get_obj(composition.root),
             callback=partial(add_to_context, self.context),
@@ -155,6 +159,8 @@ def make_deferred(value: Any, loader=None, **kwargs) -> DeferredNode:
 
 @ftrace(watch=[])
 def process_deferred(comp: CompositionResult, force_deferred_at: List[KeyPath | str] | None = None):
+    """Wraps any node with a tag starting with '!deferred' in a DeferredNode"""
+
     from dracon.nodes import reset_tag
 
     force_deferred_at = force_deferred_at or []
@@ -200,7 +206,7 @@ def process_deferred(comp: CompositionResult, force_deferred_at: List[KeyPath | 
 
         new_node = DeferredNode(value=node)
 
-        comp.replace_node_at(path, new_node)
+        comp.set_at(path, new_node)
 
     return comp
 

@@ -7,6 +7,7 @@ from dracon.lazy import LazyInterpolable
 from dracon.keypath import KeyPath
 import copy
 from dracon.interpolation_utils import find_field_references
+from dracon.include import compose_from_include_str
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
@@ -569,7 +570,7 @@ def test_include():
     loader = DraconLoader(enable_interpolation=True, context={'ClassA': ClassA})
     loader.context['get_index'] = lambda obj: obj.index
     loader.context['get_nameindex'] = lambda obj: obj.name_index
-    compres = loader.compose_from_include_str('pkg:dracon:tests/configs/interp_include.yaml')
+    compres = compose_from_include_str(loader, 'pkg:dracon:tests/configs/interp_include.yaml')
     config = loader.load_composition_result(compres)
     config.resolve_all_lazy()
     assert config.nested.a_index == 2

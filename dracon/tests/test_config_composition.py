@@ -5,6 +5,7 @@ from ruamel.yaml import YAML
 from dracon.loader import DraconLoader
 from dracon.resolvable import Resolvable
 from pydantic import BaseModel
+from dracon.include import compose_from_include_str
 
 # Set a dummy environment variable for testing purposes
 os.environ["TESTVAR1"] = "test_var_1"
@@ -23,7 +24,7 @@ override_config_path = 'dracon:tests/configs/override.yaml'
 
 def get_config(config_path):
     loader = DraconLoader()
-    compres = loader.compose_from_include_str(f"pkg:{config_path}")
+    compres = compose_from_include_str(loader, f"pkg:{config_path}")
     config = loader.load_composition_result(compres)
     return config
 
