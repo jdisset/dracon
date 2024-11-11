@@ -47,7 +47,7 @@ def generate_unique_id() -> int:
     return uuid.uuid4().int
 
 
-## {{{                      --     dict/list like     --{{{
+## {{{                      --     dict/list like     --
 K = TypeVar('K')
 V = TypeVar('V')
 
@@ -172,18 +172,19 @@ def list_like(obj) -> bool:
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
-def make_hashable(ctx):
-    hashable_dict = {}
-    for k, v in ctx.items():
-        try:
-            hash(v)
-            hashable_dict[k] = v
-        except TypeError:
-            # Skip unhashable items but include their keys
-            hashable_dict[k] = f"<unhashable-{type(v).__name__}>"
+def full_flatten(d: list) -> list:
+    """
+    Flatten a list of lists recursively.
+    """
+    flat = []
+    for item in d:
+        if isinstance(item, list):
+            flat.extend(full_flatten(item))
+        else:
+            flat.append(item)
+    return flat
 
-    h = frozenset(hashable_dict.items())
-    return h
+
 
 
 def make_hashable(obj: Any) -> Hashable:

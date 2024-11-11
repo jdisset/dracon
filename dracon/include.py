@@ -98,68 +98,92 @@ def compose_from_include_str(
     composition_result: Optional[CompositionResult] = None,
     custom_loaders: dict = DEFAULT_LOADERS,
     node: Optional[IncludeNode] = None,
-) -> Any:
+) -> list[CompositionResult]:
     context = draconloader.context if not node else node.context
     include_str = resolve_interpolable_variables(include_str, context)  # type: ignore
-
     components = parse_include_str(include_str)
-    result = None
-
+    results = []
     try:
         if composition_result is not None:
             assert isinstance(composition_result.anchor_paths, dict)
-
             if components.main_path.startswith('$'):
                 assert node is not None
                 result = handle_in_memory_include(
                     components.main_path[1:], node, components.key_path, draconloader.dump_to_node
                 )
-
+                results = [result] if result else []
             elif components.main_path.startswith('/'):
                 assert not components.key_path, 'Invalid key path for relative path include'
                 result = handle_absolute_path(components.main_path, composition_result)
-
+                results = [result] if result else []
             elif components.main_path.startswith('@') or components.main_path.startswith('.'):
                 assert not components.key_path, 'Invalid key path for relative path include'
                 result = handle_relative_path(
                     components.main_path, include_node_path, composition_result
                 )
+                results = [result] if result else []
             elif components.main_path in composition_result.anchor_paths:
                 result = handle_anchor_path(
                     components, composition_result.anchor_paths, composition_result
                 )
-
-            if result is not None:
-                result.root = deepcopy(result.root)
-                return result
-
+                results = [result] if result else []
+            
+            if results:
+                # Deep copy each result
+                results = [CompositionResult(root=deepcopy(r.root)) for r in results]
+                return results
+                
             assert (
                 ':' in components.main_path
             ), f'Invalid include path: anchor {components.main_path} not found in document'
-
+        
         assert (
             ':' in components.main_path
         ), f'Invalid include path: {components.main_path}. No loader specified.'
-
+        
         loader_name, path = components.main_path.split(':', 1)
         if loader_name not in custom_loaders:
             raise ValueError(f'Unknown loader: {loader_name}')
-
-        result, new_context = custom_loaders[loader_name](path)
+        
+        loader_result, new_context = custom_loaders[loader_name](path)
         draconloader.update_context(new_context)
-
-        if not isinstance(result, CompositionResult):
-            if not isinstance(result, str):
-                raise ValueError(f"Invalid result type from loader '{loader_name}': {type(result)}")
-            new_loader = draconloader.copy()
-            if node is not None:
-                add_to_context(node.context, new_loader)
-            result = new_loader.compose_config_from_str(result)
+        
+        if isinstance(loader_result, list):
+            # Handle case where loader returns multiple results
+            results = loader_result
+        else:
+            results = [loader_result]
+            
+        processed_results = []
+        for result in results:
+            if not isinstance(result, CompositionResult):
+                if not isinstance(result, str):
+                    raise ValueError(f"Invalid result type from loader '{loader_name}': {type(result)}")
+                new_loader = draconloader.copy()
+                if node is not None:
+                    add_to_context(node.context, new_loader)
+                result = new_loader.compose_config_from_str(result)
+                
+                # when compose_config_from_str returns multiple variants
+                if isinstance(result, list):
+                    processed_results.extend(result)
+                else:
+                    processed_results.append(result)
+            else:
+                processed_results.append(result)
+        
         if components.key_path:
-            result = result.rerooted(KeyPath(components.key_path))
-        return result
-
+            processed_results = [
+                result.rerooted(KeyPath(components.key_path)) 
+                for result in processed_results
+            ]
+        
+        return processed_results
+        
     finally:
-        if isinstance(result, CompositionResult) and node is not None:
-            result.make_map()
-            result.walk_no_path(callback=partial(add_to_context, node.context))
+        # Apply context to all results
+        if node is not None:
+            for result in results:
+                if isinstance(result, CompositionResult):
+                    result.make_map()
+                    result.walk_no_path(callback=partial(add_to_context, node.context))

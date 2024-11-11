@@ -1,4 +1,5 @@
-## {{{                          --     imports     --{{{}}}
+## {{{                          --     imports     --
+
 from ruamel.yaml.composer import Composer
 from ruamel.yaml.nodes import Node, MappingNode, SequenceNode, ScalarNode
 
@@ -39,11 +40,18 @@ INSTRUCTION: Final = 'instruction'
 
 INCLUDE_TAG = '!include'
 
+class CompositionVariantOrigin(BaseModel):
+    path: KeyPath
+    value: Any
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
 class CompositionResult(BaseModel):
     root: Node
     special_nodes: dict[SpecialNodeCategory, list[KeyPath]] = {}
     anchor_paths: Optional[dict[str, KeyPath]] = None
     node_map: Optional[dict[KeyPath, Node]] = None
+    variant_origin: Optional[CompositionVariantOrigin] = None
 
     def __deepcopy__(self, memo=None):
         return CompositionResult(
@@ -63,6 +71,14 @@ class CompositionResult(BaseModel):
             self.make_map()
         if self.anchor_paths is None:
             self.find_anchors()
+
+
+    def make_duplicates(self, n:int, except_if_single=True):
+        if except_if_single and n == 1:
+            return [self]
+        return [deepcopy(self) for _ in range(n)]
+
+
 
     def make_map(self):
         self.node_map = {}
@@ -113,8 +129,8 @@ class CompositionResult(BaseModel):
         new_node = new_comp.root
         self.set_at(at_path, new_node)
         # if reuse_map:
-        # for path, node in new_comp.node_map.items():
-        # self.node_map[at_path + path] = node
+        #     for path, node in new_comp.node_map.items():
+        #         self.node_map[at_path + path] = node
 
     def pop_all_special(self, category: SpecialNodeCategory):
         while self.special_nodes.get(category):

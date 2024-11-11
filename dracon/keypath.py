@@ -8,6 +8,19 @@ from dracon.utils import node_repr, list_like, dict_like, ftrace
 import re
 
 
+from weakref import WeakKeyDictionary
+
+_keypath_cache = WeakKeyDictionary()
+
+
+def clear_keypath_caches():
+    """Clear all keypath-related caches"""
+    escape_keypath_part.cache_clear()
+    unescape_keypath_part.cache_clear()
+    simplify_parts_cached.cache_clear()
+    _keypath_cache.clear()
+
+
 class KeyPathToken(Enum):
     ROOT = 0
     UP = 1

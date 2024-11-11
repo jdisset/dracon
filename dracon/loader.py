@@ -27,6 +27,7 @@ from dracon.utils import (
     MetadataDictLike,
     ListLike,
     ShallowDict,
+    full_flatten,
     ftrace,
     deepcopy,
     make_hashable,
@@ -36,10 +37,14 @@ from dracon.interpolation import InterpolableNode, preprocess_references
 from dracon.merge import process_merges, add_to_context, merged, MergeKey
 from dracon.instructions import process_instructions
 from dracon.deferred import DeferredNode, process_deferred
+from dracon.generator import process_generators
 from dracon.representer import DraconRepresenter
 
 
 from dracon import dracontainer
+
+import logging
+log = logging.getLogger(__name__)
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
@@ -167,8 +172,9 @@ class DraconLoader:
     def __setstate__(self, state):
         self.__dict__.update(state)
 
-    def compose_config_from_str(self, content: str) -> CompositionResult:
+    def compose_config_from_str(self, content: str) -> list[CompositionResult]:
         composed_content = cached_compose_config_from_str(self.yaml, content)
+        assert isinstance(composed_content, CompositionResult), f"Invalid type: {type(composed_content)}"
         return self.post_process_composed(composed_content)
 
     def load_node(self, node):
@@ -176,41 +182,100 @@ class DraconLoader:
         self.yaml.constructor.context = self.context.copy() or {}
         return self.yaml.constructor.construct_document(node)
 
-    def load_composition_result(self, compres: CompositionResult, post_process=True):
+    def load_composition_result(self, compres: CompositionResult, post_process=True) -> list[Any]:
+        """Post-process and construct a CompositionResult"""
         if post_process:
-            compres = self.post_process_composed(compres)
-        return self.load_node(compres.root)
+            all_comp = self.post_process_composed(compres)
 
-    def load(self, config_path: str | Path):
+        return full_flatten([self.load_node(c.root) for c in all_comp])
+
+    def load(self, config_path: str | Path, all=False) -> Any | list[Any]:
         self.reset_context()
         if isinstance(config_path, Path):
             config_path = config_path.resolve().as_posix()
         if ":" not in config_path:
             config_path = f"file:{config_path}"
-        comp = compose_from_include_str(self, config_path, custom_loaders=self.custom_loaders)
-        return self.load_composition_result(comp)
+        comps = compose_from_include_str(self, config_path, custom_loaders=self.custom_loaders)
+        loaded = full_flatten([self.load_composition_result(comp) for comp in comps])
 
-    def loads(self, content: str):
-        comp = self.compose_config_from_str(content)
-        return self.load_composition_result(comp)
+        if len(loaded) > 1 and not all:
+            log.warning('Configuration yielded multiple results. Call load(..., all=True) to get them.')
+        return loaded if all else loaded[0]
 
 
 
-    def post_process_composed(self, comp: CompositionResult):
+    def loads(self, content: str, all=False):
+        comps = self.compose_config_from_str(content)
+        loaded = full_flatten([self.load_composition_result(comp) for comp in comps])
+
+        if len(loaded) > 1 and not all:
+            log.warning('Configuration yielded multiple results. Call loads(..., all=True) to get them.')
+        return loaded if all else loaded[0]
+
+
+    def post_process_composed(self, comp: CompositionResult) -> list[CompositionResult]:
+        assert isinstance(comp, CompositionResult), f"Invalid type in postprocess: {type(comp)}"
 
         comp.walk_no_path(callback=partial(add_to_context, self.context))
+
         comp = preprocess_references(comp)
         comp = process_deferred(comp, force_deferred_at=self.deferred_paths)  # type: ignore
-        comp = process_instructions(comp, self)
-        comp = self.process_includes(comp)
-        comp, merge_changed = process_merges(comp)
-        comp, delete_changed = delete_unset_nodes(comp)
-        if merge_changed or delete_changed:
-            comp.make_map()
-        comp = self.save_references(comp)
-        comp = self.update_deferred_nodes(comp)
-        comp.update_paths()
-        return comp
+
+        comps = full_flatten(process_instructions(comp, self)) #  instructions can fork the composition
+        # from now on we deal with a list of compositions
+        print(f'After instructions: {type(comps)=}')
+        for comp in comps:
+            assert isinstance(comp, CompositionResult), f"Invalid type in post_process_composed after instructions: {type(comp)}"
+
+        comps = full_flatten([self.process_includes(comp) for comp in comps])
+
+        processed_comps = []
+        for comp in comps:
+            comp, merge_changed = process_merges(comp)
+            comp, delete_changed = delete_unset_nodes(comp)
+
+            # recompute the map if any merge or delete happened
+            if merge_changed or delete_changed:
+                comp.make_map()
+
+            comp = self.save_references(comp)
+            comp = self.update_deferred_nodes(comp)
+            comp.update_paths()
+            processed_comps.append(comp)
+
+        return processed_comps
+
+    # def post_process_composed(self, comp: CompositionResult) -> list[CompositionResult]:
+    #
+    #     assert isinstance(comp, CompositionResult), f"Invalid type in postprocess: {type(comp)}"
+    #
+    #     comp.walk_no_path(callback=partial(add_to_context, self.context))
+    #
+    #     comp = preprocess_references(comp)
+    #     comp = process_deferred(comp, force_deferred_at=self.deferred_paths)  # type: ignore
+    #
+    #     comps = full_flatten(process_instructions(comp, self)) #  instructions can fork the composition
+    #     # from now on we deal with a list of compositions
+    #     print(f'After instructions: {type(comps)=}')
+    #     for comp in comps:
+    #         assert isinstance(comp, CompositionResult), f"Invalid type in post_process_composed after instructions: {type(comp)}"
+    #
+    #     comps = full_flatten([self.process_includes(comp) for comp in comps])
+    #
+    #     comps, merge_changed = zip(*[process_merges(comp) for comp in comps])
+    #     comps, delete_changed = zip(*[delete_unset_nodes(comp) for comp in comps])
+    #
+    #     # recompute the map if any merge or delete happened
+    #     for merge, delete in zip(merge_changed, delete_changed):
+    #         if merge or delete:
+    #             comp.make_map()
+    #
+    #     comps = [self.save_references(comp) for comp in comps]
+    #     comps = [self.update_deferred_nodes(comp) for comp in comps]
+    #     for comp in comps:
+    #         comp.update_paths()
+    #
+    #     return comps
 
     def update_deferred_nodes(self, comp_res: CompositionResult):
         # copies the loader into deferred nodes so they can resume their composition by themselves
@@ -254,32 +319,49 @@ class DraconLoader:
         )
         return comp_res
 
-    def process_includes(self, comp_res: CompositionResult) -> CompositionResult:
+
+    def process_includes(self, comp_res: CompositionResult) -> list[CompositionResult]:
+        assert isinstance(comp_res, CompositionResult), f"Invalid type: {type(comp_res)}"
         comp_res.find_special_nodes('include', lambda n: isinstance(n, IncludeNode))
         
         if not comp_res.special_nodes['include']:
-            return comp_res
+            return [comp_res]
         
-        # Process the current batch of includes
         comp_res.sort_special_nodes('include')
-        for inode_path in comp_res.pop_all_special('include'):
-            inode = inode_path.get_obj(comp_res.root)
-            assert isinstance(inode, IncludeNode), f"Invalid node type: {type(inode)}"
-            
-            new_loader = self.copy()
-            include_composed = compose_from_include_str(
-                new_loader,
-                include_str=inode.value,
-                include_node_path=inode_path,
-                composition_result=comp_res,
-                custom_loaders=self.custom_loaders,
-                node=inode,
-            )
-            comp_res.merge_composition_at(inode_path, include_composed)
+        current_variants = [comp_res] 
         
-        # Recursive call to process any new includes that were brought in
-        return self.process_includes(comp_res)
-
+        for inode_path in comp_res.pop_all_special('include'):
+            new_variants = [] 
+            
+            for variant in current_variants:
+                inode = inode_path.get_obj(variant.root)
+                assert isinstance(inode, IncludeNode), f"Invalid node type: {type(inode)}"
+                
+                new_loader = self.copy()
+                include_composed = compose_from_include_str(
+                    new_loader,
+                    include_str=inode.value,
+                    include_node_path=inode_path,
+                    composition_result=variant,
+                    custom_loaders=self.custom_loaders,
+                    node=inode,
+                )
+                
+                # new variant for each included composition
+                duplicates = variant.make_duplicates(len(include_composed))
+                for dup, incl in zip(duplicates, include_composed):
+                    dup.merge_composition_at(inode_path, incl)
+                    new_variants.append(dup)
+            
+            current_variants = new_variants
+        
+        # process each variant recursively to handle nested includes
+        all_processed_variants = []
+        for variant in current_variants:
+            processed_variants = self.process_includes(variant)
+            all_processed_variants.extend(processed_variants)
+        
+        return all_processed_variants
 
 
     def dump(self, data, stream=None):
@@ -297,6 +379,8 @@ class DraconLoader:
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
+
+
 
 
 def dump_to_node(data):

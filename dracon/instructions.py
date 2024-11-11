@@ -18,7 +18,6 @@ from dracon.interpolation import evaluate_expression, InterpolableNode
 from functools import partial
 
 ##────────────────────────────────────────────────────────────────────────────}}}
-
 ## {{{                      --     instruct utils     --
 
 
@@ -27,40 +26,57 @@ class Instruction:
     def match(value: Optional[str]) -> Optional['Instruction']:
         raise NotImplementedError
 
-    def process(self, comp_res: CompositionResult, path: KeyPath, loader) -> CompositionResult:
+    def process(self, comp_res: CompositionResult, path: KeyPath, loader) -> list[CompositionResult]:
         raise NotImplementedError
 
 
 @ftrace(watch=[])
-def process_instructions(comp_res: CompositionResult, loader) -> CompositionResult:
-    # then all other instructions
-    instruction_nodes = []
+def process_instructions(comp_res: CompositionResult, loader) -> list[CompositionResult]:
+    # Initialize with the input composition result
+    current_variants = [comp_res]
     seen_paths = set()
 
     def find_instruction_nodes(node: Node, path: KeyPath):
-        nonlocal instruction_nodes
-        nonlocal seen_paths
         if hasattr(node, 'tag') and node.tag:
             if (path not in seen_paths) and (inst := match_instruct(node.tag)):
                 instruction_nodes.append((inst, path))
 
-    def refresh_instruction_nodes():
+    def refresh_instruction_nodes(comp):
         nonlocal instruction_nodes
         instruction_nodes = []
-        comp_res.make_map()
-        comp_res.walk(find_instruction_nodes)
+        comp.make_map()
+        comp.walk(find_instruction_nodes)
         instruction_nodes = sorted(instruction_nodes, key=lambda x: len(x[1]))
 
-    refresh_instruction_nodes()
+    while True:
+        # Find instructions in all current variants
+        all_instructions = []
+        for variant in current_variants:
+            instruction_nodes = []
+            refresh_instruction_nodes(variant)
+            if instruction_nodes:
+                all_instructions.append((variant, instruction_nodes))
 
-    while instruction_nodes:
-        inst, path = instruction_nodes.pop(0)
-        assert path not in seen_paths, f"Instruction {inst} at {path} already processed"
-        seen_paths.add(path)
-        comp_res = inst.process(comp_res, path.copy(), loader)
-        refresh_instruction_nodes()
+        # If no more instructions found in any variant, we're done
+        if not all_instructions:
+            break
 
-    return comp_res
+        # Process the next instruction for each variant
+        new_variants = []
+        for variant, variant_instructions in all_instructions:
+            inst, path = variant_instructions[0]
+            assert path not in seen_paths, f"Instruction {inst} at {path} already processed"
+            seen_paths.add(path)
+            
+            # Process instruction and collect resulting variants
+            processed_variants = inst.process(variant, path.copy(), loader)
+            new_variants.extend(processed_variants)
+
+        # Update current variants for next iteration
+        current_variants = new_variants if new_variants else current_variants
+
+    return current_variants
+
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
@@ -85,7 +101,7 @@ class Define(Instruction):
             return Define()
         return None
 
-    def get_name_and_value(self, comp_res, path, loader):
+    def _process(self, comp_res, path, loader, context_merge_key) -> list[CompositionResult]:
         if not path.is_mapping_key():
             raise ValueError(
                 f"instruction {self.__class__.__name__} must be a mapping key, but got {path}"
@@ -96,34 +112,41 @@ class Define(Instruction):
         assert isinstance(parent_node, DraconMappingNode)
 
         if isinstance(value_node, InterpolableNode):
-            value = evaluate_expression(
-                value_node.value,
-                current_path=path,
-                root_obj=comp_res.root,
-                context=value_node.context,
-            )
+            values = [
+                evaluate_expression(
+                    value_node.value,
+                    current_path=path,
+                    root_obj=comp_res.root,
+                    context=value_node.context,
+                )
+            ]
+
         else:
-            value = loader.load_composition_result(CompositionResult(root=value_node))
+            # It's a "raw" node. We construct it.
+            values = [loader.load_composition_result(CompositionResult(root=value_node))]
 
         var_name = key_node.value
+
         assert (
             var_name.isidentifier()
         ), f"Invalid variable name in {self.__class__.__name__} instruction: {var_name}"
 
-        del parent_node[var_name]
+        del parent_node[var_name]  # delete this instruction node. We're just populating the context
 
-        return var_name, value, parent_node
+        print(f"defining {var_name} as {values}")
+        all_comps = comp_res.duplicate(len(values))
 
-    @ftrace(False, watch=[])
+        for comp, value in zip(all_comps, values):
+            comp_parent_node = path.parent.get_obj(comp.root)
+            walk_node(
+                node=comp_parent_node,
+                callback=partial(add_to_context, {var_name: value}, merge_key=context_merge_key),
+            )
+
+        return all_comps
+
     def process(self, comp_res: CompositionResult, path: KeyPath, loader):
-        var_name, value, parent_node = self.get_name_and_value(comp_res, path, loader)
-
-        walk_node(
-            node=parent_node,
-            callback=partial(add_to_context, {var_name: value}),
-        )
-
-        return comp_res
+        return self._process(comp_res, path, loader, context_merge_key=MergeKey(raw='<<{<~}[<~]'))
 
 
 class SetDefault(Define):
@@ -145,16 +168,7 @@ class SetDefault(Define):
 
     @ftrace(False, watch=[])
     def process(self, comp_res: CompositionResult, path: KeyPath, loader):
-        var_name, value, parent_node = self.get_name_and_value(comp_res, path, loader)
-
-        walk_node(
-            node=parent_node,
-            callback=partial(
-                add_to_context, {var_name: value}, merge_key=MergeKey(raw='<<{>~}[>~]')
-            ),
-        )
-
-        return comp_res
+        return self._process(comp_res, path, loader, context_merge_key=MergeKey(raw='<<{>~}[>~]'))
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
@@ -188,7 +202,7 @@ class Each(Instruction):
         return None
 
     @ftrace(inputs=False, watch=[])
-    def process(self, comp_res: CompositionResult, path: KeyPath, loader):
+    def process(self, comp_res: CompositionResult, path: KeyPath, loader) -> list[CompositionResult]:
         if not path.is_mapping_key():
             raise ValueError(f"instruction 'each' must be a mapping key, but got {path}")
 
@@ -238,7 +252,7 @@ class Each(Instruction):
         del parent_node[key_node.value]
         comp_res.set_at(path.parent, new_parent)
 
-        return comp_res
+        return [comp_res]
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
@@ -325,7 +339,7 @@ class If(Instruction):
                 comp_res.set_at(parent_path, value_node)
 
         del parent_node[key_node.value]
-        return comp_res
+        return [comp_res]
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}

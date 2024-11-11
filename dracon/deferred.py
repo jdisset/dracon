@@ -18,9 +18,11 @@ from dracon.merge import add_to_context
 
 from functools import partial
 from dracon.nodes import make_node
+import logging
 
-
+logger = logging.getLogger(__name__)
 ##────────────────────────────────────────────────────────────────────────────}}}
+
 
 ## {{{                         --     DeferredNode     --
 
@@ -76,7 +78,8 @@ class DeferredNode(ContextNode, Generic[T]):
         self,
         context: Optional[Dict[str, Any]] = None,
         deferred_paths: Optional[list[KeyPath | str]] = None,
-    ) -> Node:
+    ) -> list[Node]:
+
         # rather than composing just this node, we can hold a copy of the entire composition
         # and simply unlock the deferred node when we need to compose it. This way we can
         # have references to other nodes in the entire conf
@@ -96,14 +99,23 @@ class DeferredNode(ContextNode, Generic[T]):
             node=self.path.get_obj(composition.root),
             callback=partial(add_to_context, self.context),
         )
-        compres = self._loader.post_process_composed(composition)
 
-        return self.path.get_obj(compres.root)
+        all_comp = self._loader.post_process_composed(composition)
+
+        return [self.path.get_obj(comp.root) for comp in all_comp]
+
+
+    def construct_all(self, **kwargs) -> list[T]:  # type: ignore
+        assert self._loader, "DeferredNode must have a loader to be constructed"
+        all_compres = self.compose(**kwargs)
+        return [self._loader.load_node(compres) for compres in all_compres]
 
     def construct(self, **kwargs) -> T:  # type: ignore
-        assert self._loader, "DeferredNode must have a loader to be constructed"
-        compres = self.compose(**kwargs)
-        return self._loader.load_node(compres)
+        all_nodes = self.construct_all(**kwargs)
+        if len(all_nodes) > 1:
+            logger.warning("DeferredNode.construct created more than one node. Use construct_all to get all nodes")
+        return all_nodes[0]
+
 
     @property
     def keypath_passthrough(self):
