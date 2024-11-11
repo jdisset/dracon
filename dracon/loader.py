@@ -254,30 +254,33 @@ class DraconLoader:
         )
         return comp_res
 
-    @ftrace(watch=[])
-    def process_includes(self, comp_res: CompositionResult):
-        while True:  # we need to loop until there are no more includes (since some includes may bring other ones )
-            comp_res.find_special_nodes('include', lambda n: isinstance(n, IncludeNode))
+    def process_includes(self, comp_res: CompositionResult) -> CompositionResult:
+        comp_res.find_special_nodes('include', lambda n: isinstance(n, IncludeNode))
+        
+        if not comp_res.special_nodes['include']:
+            return comp_res
+        
+        # Process the current batch of includes
+        comp_res.sort_special_nodes('include')
+        for inode_path in comp_res.pop_all_special('include'):
+            inode = inode_path.get_obj(comp_res.root)
+            assert isinstance(inode, IncludeNode), f"Invalid node type: {type(inode)}"
+            
+            new_loader = self.copy()
+            include_composed = compose_from_include_str(
+                new_loader,
+                include_str=inode.value,
+                include_node_path=inode_path,
+                composition_result=comp_res,
+                custom_loaders=self.custom_loaders,
+                node=inode,
+            )
+            comp_res.merge_composition_at(inode_path, include_composed)
+        
+        # Recursive call to process any new includes that were brought in
+        return self.process_includes(comp_res)
 
-            if not comp_res.special_nodes['include']:
-                break
 
-            comp_res.sort_special_nodes('include')
-            for inode_path in comp_res.pop_all_special('include'):
-                inode = inode_path.get_obj(comp_res.root)
-                assert isinstance(inode, IncludeNode), f"Invalid node type: {type(inode)}"
-                new_loader = self.copy()
-                include_composed = compose_from_include_str(
-                    new_loader,
-                    include_str=inode.value,
-                    include_node_path=inode_path,
-                    composition_result=comp_res,
-                    custom_loaders=self.custom_loaders,
-                    node=inode,
-                )
-                comp_res.merge_composition_at(inode_path, include_composed)
-
-        return comp_res
 
     def dump(self, data, stream=None):
         if stream is None:
