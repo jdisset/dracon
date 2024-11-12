@@ -18,7 +18,7 @@ from dracon.interpolation_utils import (
 )
 from dracon.interpolation import evaluate_expression
 from dracon.utils import list_like, dict_like, ftrace
-
+from dracon.interpolation_utils import find_field_references
 
 class InterpolationError(Exception):
     pass
@@ -182,66 +182,70 @@ def num_array_like(obj):
     return hasattr(obj, 'dtype') and hasattr(obj, 'shape') and obj.dtype.kind in 'iuf'
 
 
+
 def resolve_all_lazy(obj, root_obj=None, current_path=None, visited=None):
     """
-    Resolves all lazy objects in the object (handles cyclic references).
-
-    Args:
-        obj: The object to resolve lazy references in
-        root_obj: The root object containing all references
-        current_path: The current path in the object tree
-        visited: Set of object ids that have already been processed
+    Resolves all lazy objects in the object (handles cyclic references) using breadth-first traversal.
     """
     if visited is None:
         visited = set()
-
-    # If we've already visited this object, skip it to prevent infinite recursion
-    obj_id = id(obj)
-    if obj_id in visited:
-        return
-    visited.add(obj_id)
-
+        
     if root_obj is None:
-        if hasattr(obj, '_dracon_root_obj'):  # if the object has a root object, use that
-            root_obj = obj._dracon_root_obj
+        if hasattr(obj, '_dracon_root_obj'):
+            root_obj = obj._dracon_root_obj 
         else:
             root_obj = obj
+            
     if current_path is None:
         if hasattr(obj, '_dracon_current_path'):
             current_path = obj._dracon_current_path
         else:
             current_path = ROOTPATH
 
-    try:
-        # recursively call resolve_all_lazy on all items in the object (including keys in mappings)
-        if isinstance(obj, BaseModel):
-            for key, value in obj:
-                resolve_all_lazy(value, root_obj, current_path + KeyPath(str(key)), visited)
+    # queue for breadth-first traversal
+    from collections import deque
+    queue = deque([(obj, current_path)])
+    
+    while queue:
+        current_obj, path = queue.popleft()
+        obj_id = id(current_obj)
+        
+        if obj_id in visited:
+            continue
+            
+        visited.add(obj_id)
+        
+        try:
+            if isinstance(current_obj, LazyInterpolable):
+                if path.is_mapping_key():
+                    raise NotImplementedError("Lazy objects in key mappings are not supported")
+                parent = path.parent.get_obj(root_obj)
+                current_obj.root_obj = root_obj
+                current_obj.current_path = path
+                val = current_obj.resolve()
+                set_val(parent, path.stem, val)
+                # Get the resolved object for further processing 
+                current_obj = path.get_obj(root_obj)
 
-        elif dict_like(obj):
-            for key, value in obj.items():
-                resolve_all_lazy(key, root_obj, current_path + MAPPING_KEY + str(key), visited)
-                resolve_all_lazy(value, root_obj, current_path + key, visited)
-
-        elif list_like(obj) and not isinstance(obj, (str, bytes)) and not num_array_like(obj):
-            for i, item in enumerate(obj):
-                resolve_all_lazy(item, root_obj, current_path + KeyPath(str(i)), visited)
-
-        # now check if we have a lazy interpolable object
-        elif isinstance(obj, LazyInterpolable):
-            if current_path.is_mapping_key():
-                raise NotImplementedError("Lazy objects in key mappings are not supported")
-            parent = current_path.parent.get_obj(root_obj)
-            obj.root_obj = root_obj
-            obj.current_path = current_path
-            val = obj.resolve()
-            set_val(parent, current_path.stem, val)
-            # recurse (if the value is itself a lazy object or contains lazy objects)
-            resolve_all_lazy(current_path.get_obj(root_obj), root_obj, current_path, visited)
-
-    except Exception as e:
-        # Optionally, you might want to add logging here
-        raise type(e)(f"Error while resolving path {current_path}: {str(e)}") from e
+            if isinstance(current_obj, BaseModel):
+                for key, value in current_obj:
+                    child_path = path + KeyPath(str(key))
+                    queue.append((value, child_path))
+                    
+            elif dict_like(current_obj):
+                for key, value in current_obj.items():
+                    key_path = path + MAPPING_KEY + str(key)
+                    value_path = path + KeyPath(str(key))
+                    queue.append((key, key_path))
+                    queue.append((value, value_path))
+                    
+            elif list_like(current_obj) and not isinstance(current_obj, (str, bytes)):
+                for i, item in enumerate(current_obj):
+                    item_path = path + KeyPath(str(i))
+                    queue.append((item, item_path))
+                    
+        except Exception as e:
+            raise type(e)(f"Error while resolving path {path}: {str(e)}") from e
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
