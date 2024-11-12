@@ -85,6 +85,7 @@ class NodeLookup:
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
+
 ## {{{                           --     eval utils    --
 
 
@@ -255,6 +256,7 @@ def evaluate_expression(
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
+
 ## {{{                     --     InterpolableNode     --
 class InterpolableNode(ContextNode):
     def __init__(
@@ -280,20 +282,17 @@ class InterpolableNode(ContextNode):
             context=context,
         )
         self.referenced_nodes = NodeLookup()
-        self.saved_references = {}
 
     def __getstate__(self):
         state = super().__getstate__()
         state['init_outermost_interpolations'] = self.init_outermost_interpolations
         state['referenced_nodes'] = self.referenced_nodes
-        state['saved_references'] = self.saved_references
         return state
 
     def __setstate__(self, state):
         super().__setstate__(state)
         self.init_outermost_interpolations = state['init_outermost_interpolations']
         self.referenced_nodes = state['referenced_nodes']
-        self.saved_references = state['saved_references']
 
     def evaluate(self, path='/', root_obj=None, context=None):
         context = context or {}
