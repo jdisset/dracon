@@ -8,6 +8,7 @@ from dracon.keypath import KeyPath
 import copy
 from dracon.interpolation_utils import find_field_references
 from dracon.include import compose_from_include_str
+import pytest
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
@@ -164,8 +165,8 @@ def test_ampersand_interpolation_simple():
 # 6.5
 # removed deepcopy in merge -> 4.6
 
-
-def test_recursive_interpolation():
+@pytest.mark.parametrize('n', range(4))
+def test_recursive_interpolation(n):
     yaml_content = """
     base: &base_anchor
         key1: value1
@@ -199,14 +200,17 @@ def test_recursive_interpolation():
         'key8': 'value1',
     }
 
+    print(f"config: {config}")
+
+
     assert config['base2'] == config['base']
     assert config['base3'] == config['base']
     assert config['base4'] == config['base']
     assert config['base5'] == config['base']
     assert config['base6'] == config['base']
 
-
-def test_ampersand_interpolation_complex():
+@pytest.mark.parametrize('n', range(15))
+def test_ampersand_interpolation_complex(n):
     yaml_content = """
         __dracon__:
           simple_obj: &smpl
@@ -221,6 +225,8 @@ def test_ampersand_interpolation_complex():
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
     assert '__dracon__' not in config
+    print(f"config: {config}")
+
 
     assert config['all_objs'] == [
         {'index': 1, 'name': 'Name 1'},
@@ -231,6 +237,54 @@ def test_ampersand_interpolation_complex():
     ]
 
     assert config['all_objs_by_anchor'] == config['all_objs']
+
+@pytest.mark.parametrize('n', range(10))
+def test_ampersand_interpolation_complex_copy(n):
+    yaml_content = """
+        __dracon__:
+          simple_obj: &smpl
+            index: ${i + 1}
+            name: "Name ${&index}"
+
+        all_objs: ${[&/__dracon__.simple_obj:i=j for j in range(5)]}
+        all_objs_by_anchor: ${[&smpl:i=i for i in range(5)]}
+    """
+
+    loader = DraconLoader(enable_interpolation=True)
+    comp = loader.compose_config_from_str(yaml_content)
+
+    from dracon.utils import deepcopy
+
+    loader_copy = deepcopy(loader)
+    comp_copy = deepcopy(comp)
+
+    config = loader.load_composition_result(comp)
+    config_copy = loader_copy.load_composition_result(comp_copy)
+
+    config.resolve_all_lazy()
+    config_copy.resolve_all_lazy()
+
+
+    print(f"config: {config}")
+
+    assert '__dracon__' not in config
+    assert '__dracon__' not in config_copy
+    expected =     [
+        {'index': 1, 'name': 'Name 1'},
+        {'index': 2, 'name': 'Name 2'},
+        {'index': 3, 'name': 'Name 3'},
+        {'index': 4, 'name': 'Name 4'},
+        {'index': 5, 'name': 'Name 5'},
+    ]
+
+    assert config['all_objs'] == expected
+    assert config_copy['all_objs'] == expected
+
+    assert config['all_objs_by_anchor'] == expected
+    assert config_copy['all_objs_by_anchor'] == expected
+
+
+
 
 
 def test_obj_references():

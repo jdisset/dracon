@@ -17,7 +17,7 @@ from dracon.interpolation_utils import (
     InterpolationMatch,
 )
 from dracon.interpolation import evaluate_expression
-from dracon.utils import list_like, dict_like, ftrace
+from dracon.utils import list_like, dict_like, ftrace, deepcopy
 from dracon.interpolation_utils import find_field_references
 
 class InterpolationError(Exception):
@@ -183,10 +183,12 @@ def num_array_like(obj):
 
 
 
-def resolve_all_lazy(obj, root_obj=None, current_path=None, visited=None):
+def resolve_all_lazy(obj, root_obj=None, current_path=None, visited=None, iteration=0, max_iterations=5):
     """
-    Resolves all lazy objects in the object (handles cyclic references) using breadth-first traversal.
+    Resolves all lazy objects in the object using breadth-first traversal.
+    Added iteration limit and verification to ensure all lazy values are resolved.
     """
+    
     if visited is None:
         visited = set()
         
@@ -202,7 +204,8 @@ def resolve_all_lazy(obj, root_obj=None, current_path=None, visited=None):
         else:
             current_path = ROOTPATH
 
-    # queue for breadth-first traversal
+    unresolved_count = 0
+
     from collections import deque
     queue = deque([(obj, current_path)])
     
@@ -224,6 +227,7 @@ def resolve_all_lazy(obj, root_obj=None, current_path=None, visited=None):
                 current_obj.current_path = path
                 val = current_obj.resolve()
                 set_val(parent, path.stem, val)
+                unresolved_count += 1
                 # Get the resolved object for further processing 
                 current_obj = path.get_obj(root_obj)
 
@@ -246,6 +250,11 @@ def resolve_all_lazy(obj, root_obj=None, current_path=None, visited=None):
                     
         except Exception as e:
             raise type(e)(f"Error while resolving path {path}: {str(e)}") from e
+
+    # a bit hacky, but some resolutions trigger new lazy values in unexpected places, so, we recurse
+    if unresolved_count > 0 and iteration < max_iterations:
+        resolve_all_lazy(obj, root_obj, current_path, None, iteration + 1, max_iterations)
+
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}

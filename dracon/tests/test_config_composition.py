@@ -6,6 +6,7 @@ from dracon.loader import DraconLoader
 from dracon.resolvable import Resolvable
 from pydantic import BaseModel
 from dracon.include import compose_from_include_str
+from dracon.utils import deepcopy
 
 # Set a dummy environment variable for testing purposes
 os.environ["TESTVAR1"] = "test_var_1"
@@ -69,6 +70,24 @@ def test_main_config_composition():
         3,
         "item_lol",
     ]
+
+
+def test_copy_composition_result():
+
+    loader = DraconLoader()
+    composition = compose_from_include_str(loader, f"pkg:{main_config_path}")
+
+    # Copy the composition result and the loader
+    comp_copy = deepcopy(composition)
+    loader_copy = deepcopy(loader)
+
+
+    origconf = loader.load_composition_result(composition)
+    confcopy = loader_copy.load_composition_result(comp_copy)
+
+    assert origconf == confcopy
+
+
 
 
 def test_simple_config_inclusion():
