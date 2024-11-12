@@ -280,8 +280,6 @@ class DraconLoader:
         # Recursive call to process any new includes that were brought in
         return self.process_includes(comp_res)
 
-
-
     def dump(self, data, stream=None):
         if stream is None:
             from io import StringIO
@@ -297,7 +295,6 @@ class DraconLoader:
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
-
 
 def dump_to_node(data):
     if isinstance(data, Node):

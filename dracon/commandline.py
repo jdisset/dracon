@@ -458,7 +458,11 @@ class Program(BaseModel, Generic[T]):
                 if error['type'] == 'missing':
                     print(f"Error: '{error['loc'][0]}' is required but was not provided.")
                 else:
-                    print(f"Validation Error: {error['loc'][0]} - {error['msg']}")
+                    print(f"Validation Error: {error['loc']} - {error['msg']} - {error['type']}")
+                    if 'ctx' in error:
+                        print(f"Context: {error['ctx']}")
+            print()
+
             print_help(self, None)
             print()
         except Exception as e:
