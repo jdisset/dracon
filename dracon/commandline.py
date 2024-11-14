@@ -18,6 +18,7 @@ from typing import (
     ForwardRef,
     Union,
 )
+from dracon.lazy import resolve_all_lazy
 from dracon.resolvable import Resolvable, get_inner_type
 from dracon.deferred import DeferredNode
 from dracon.keypath import KeyPath
@@ -447,6 +448,7 @@ class Program(BaseModel, Generic[T]):
                         resolvable_node.tag = new_tag
 
             res = loader.load_composition_result(comp)
+            resolve_all_lazy(res)
             res = self.conf_type(**res)
             if not isinstance(res, self.conf_type):
                 raise ArgParseError(f"Expected {self.conf_type} but got {type(res)}")
