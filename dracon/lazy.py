@@ -20,6 +20,7 @@ from dracon.interpolation import evaluate_expression
 from dracon.utils import list_like, dict_like, ftrace, deepcopy
 from dracon.interpolation_utils import find_field_references
 
+
 class InterpolationError(Exception):
     pass
 
@@ -182,22 +183,23 @@ def num_array_like(obj):
     return hasattr(obj, 'dtype') and hasattr(obj, 'shape') and obj.dtype.kind in 'iuf'
 
 
-
-def resolve_all_lazy(obj, root_obj=None, current_path=None, visited=None, iteration=0, max_iterations=5):
+def resolve_all_lazy(
+    obj, root_obj=None, current_path=None, visited=None, iteration=0, max_iterations=5
+):
     """
     Resolves all lazy objects in the object using breadth-first traversal.
     Added iteration limit and verification to ensure all lazy values are resolved.
     """
-    
+
     if visited is None:
         visited = set()
-        
+
     if root_obj is None:
         if hasattr(obj, '_dracon_root_obj'):
-            root_obj = obj._dracon_root_obj 
+            root_obj = obj._dracon_root_obj
         else:
             root_obj = obj
-            
+
     if current_path is None:
         if hasattr(obj, '_dracon_current_path'):
             current_path = obj._dracon_current_path
@@ -207,17 +209,18 @@ def resolve_all_lazy(obj, root_obj=None, current_path=None, visited=None, iterat
     unresolved_count = 0
 
     from collections import deque
+
     queue = deque([(obj, current_path)])
-    
+
     while queue:
         current_obj, path = queue.popleft()
         obj_id = id(current_obj)
-        
+
         if obj_id in visited:
             continue
-            
+
         visited.add(obj_id)
-        
+
         try:
             if isinstance(current_obj, LazyInterpolable):
                 if path.is_mapping_key():
@@ -228,26 +231,30 @@ def resolve_all_lazy(obj, root_obj=None, current_path=None, visited=None, iterat
                 val = current_obj.resolve()
                 set_val(parent, path.stem, val)
                 unresolved_count += 1
-                # Get the resolved object for further processing 
+                # Get the resolved object for further processing
                 current_obj = path.get_obj(root_obj)
 
             if isinstance(current_obj, BaseModel):
                 for key, value in current_obj:
                     child_path = path + KeyPath(str(key))
                     queue.append((value, child_path))
-                    
+
             elif dict_like(current_obj):
                 for key, value in current_obj.items():
                     key_path = path + MAPPING_KEY + str(key)
                     value_path = path + KeyPath(str(key))
                     queue.append((key, key_path))
                     queue.append((value, value_path))
-                    
-            elif list_like(current_obj) and not isinstance(current_obj, (str, bytes)):
+
+            elif (
+                list_like(current_obj)
+                and not isinstance(current_obj, (str, bytes))
+                and not num_array_like(current_obj)
+            ):
                 for i, item in enumerate(current_obj):
                     item_path = path + KeyPath(str(i))
                     queue.append((item, item_path))
-                    
+
         except Exception as e:
             raise type(e)(f"Error while resolving path {path}: {str(e)}") from e
 
@@ -256,30 +263,36 @@ def resolve_all_lazy(obj, root_obj=None, current_path=None, visited=None, iterat
         resolve_all_lazy(obj, root_obj, current_path, None, iteration + 1, max_iterations)
 
 
-
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 ## {{{              --     recursive lazy container update     --
 
 
-def recursive_update_lazy_container(obj, root_obj, current_path):
+def recursive_update_lazy_container(obj, root_obj, current_path, seen=None):
     """
-    Recursively update the root and current path of all nested lazy objects,
-    so that later they can be interpolated correctly.
+    Recursively update the root object and current path of all nested lazy objects.
     """
+    if seen is None:
+        seen = set()
+
+    obj_id = id(obj)
+    if obj_id in seen:
+        return  # skip already processed objects to break cycles
+    seen.add(obj_id)
+
     if is_lazy_compatible(obj):
         obj._dracon_root_obj = root_obj
         obj._dracon_current_path = current_path
 
-    if isinstance(obj, cabc.Mapping):  # also handles pydantic models
+    if dict_like(obj):
         for key, value in obj.items():
-            new_path = current_path + KeyPath(str(key))
-            recursive_update_lazy_container(value, root_obj, new_path)
+            new_path = current_path + str(key)
+            recursive_update_lazy_container(value, root_obj, new_path, seen)
 
-    elif isinstance(obj, cabc.Iterable) and not isinstance(obj, (str, bytes)):
+    elif list_like(obj):
         for i, item in enumerate(obj):
-            new_path = current_path + KeyPath(str(i))
-            recursive_update_lazy_container(item, root_obj, new_path)
+            new_path = current_path + str(i)
+            recursive_update_lazy_container(item, root_obj, new_path, seen)
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
