@@ -193,16 +193,7 @@ class MergeKey(BaseModel):
 DEFAULT_ADD_TO_CONTEXT_MERGE_KEY = MergeKey(raw='<<{+<}[~<]')
 
 
-def add_to_context(context, item, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
-    if hasattr(item, 'context'):
-        item.context = context_add(item.context, context, merge_key)
-
-
-def context_add(base, newcontext, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
-    return merged(base, newcontext, merge_key)
-
-
-def merged(existing: Any, new: Any, k: MergeKey) -> DictLike:
+def merged(existing: Any, new: Any, k: MergeKey = DEFAULT_ADD_TO_CONTEXT_MERGE_KEY) -> DictLike:
     def merge_value(v1: Any, v2: Any, depth: int = 0) -> Any:
         if type(v1) is type(v2) and hasattr(v1, 'merged_with') and hasattr(v2, 'merged_with'):
             return v1.merged_with(v2, depth + 1)
@@ -247,6 +238,15 @@ def merged(existing: Any, new: Any, k: MergeKey) -> DictLike:
         return list1 + list2 if k.list_priority == MergePriority.EXISTING else list2 + list1
 
     return merge_value(existing, new)
+
+def add_to_context(context, item, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
+    if hasattr(item, 'context'):
+        item.context = context_add(item.context, context, merge_key)
+
+
+def context_add(base, newcontext, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
+    return merged(base, newcontext, merge_key)
+
 
 
 # ideal syntax:
