@@ -10,7 +10,7 @@ description = "A configuration library that extends yaml's alias, anchor and mer
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "pydantic",
+    "pydantic>=2.0",
     "ruamel.yaml",
 	"xxhash",
 	"asteval",

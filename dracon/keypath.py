@@ -280,6 +280,10 @@ class KeyPath:
 
     @property
     def stem(self):
+        if self.is_mapping_key():
+            return self.parts[:-2]
+        if len(self.parts) <= 1:
+            return '/'
         return self.parts[-1]
 
     # same as down but not in place
