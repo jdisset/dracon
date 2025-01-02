@@ -229,7 +229,10 @@ def resolve_all_lazy(
                 current_obj.root_obj = root_obj
                 current_obj.current_path = path
                 val = current_obj.resolve()
-                set_val(parent, path.stem, val)
+                stem = path.stem
+                if stem == '/' or stem == ROOTPATH:
+                    raise ValueError("Cannot resolve root path")
+                set_val(parent, stem, val)
                 unresolved_count += 1
                 # Get the resolved object for further processing
                 current_obj = path.get_obj(root_obj)
@@ -272,6 +275,7 @@ def recursive_update_lazy_container(obj, root_obj, current_path, seen=None):
     """
     Recursively update the root object and current path of all nested lazy objects.
     """
+
     if seen is None:
         seen = set()
 
@@ -289,7 +293,7 @@ def recursive_update_lazy_container(obj, root_obj, current_path, seen=None):
             new_path = current_path + str(key)
             recursive_update_lazy_container(value, root_obj, new_path, seen)
 
-    elif list_like(obj):
+    elif list_like(obj) and not isinstance(obj, (str, bytes)) and not num_array_like(obj):
         for i, item in enumerate(obj):
             new_path = current_path + str(i)
             recursive_update_lazy_container(item, root_obj, new_path, seen)
