@@ -211,7 +211,6 @@ class UnsetNode(DraconScalarNode):
 
 
 class DraconMappingNode(MappingNode):
-    # simply keep map the keys to the nodes...
     def __init__(
         self,
         tag: Any,
@@ -230,23 +229,26 @@ class DraconMappingNode(MappingNode):
         for idx, (key, _) in enumerate(self.value):
             if not hasattr(key, 'value'):
                 raise ValueError(f'Key {key!r} has no value attribute')
-            if key.value in self.map:
-                raise ValueError(f'Duplicate key: {key.value!r}')
-            self.map[key.value] = idx
+            key_val = str(key.value)
+            if key_val in self.map:
+                raise ValueError(f'Duplicate key: {key_val!r}')
+            self.map[key_val] = idx
 
     # and implement a get[] (and set) method
     def __getitem__(self, key: Hashable) -> Node:
         if isinstance(key, Node):
             key = key.value
-        return self.value[self.map[key]][1]
+        key_str = str(key)
+        return self.value[self.map[key_str]][1]
 
     def __setitem__(self, key: Hashable, value: Node):
         if isinstance(key, Node):
             keyv = key.value
         else:
             keyv = key
-        if keyv in self.map:
-            idx = self.map[keyv]
+        key_str = str(keyv)
+        if key_str in self.map:
+            idx = self.map[key_str]
             realkey, _ = self.value[idx]
             self.value[idx] = (realkey, value)
         else:
@@ -257,16 +259,18 @@ class DraconMappingNode(MappingNode):
     def __delitem__(self, key: Hashable):
         if isinstance(key, Node):
             key = key.value
-        idx = self.map[key]
+        # Convert key to string for lookup
+        key_str = str(key)
+        idx = self.map[key_str]
         del self.value[idx]
         self._recompute_map()
 
     def __contains__(self, key: Hashable) -> bool:
         if isinstance(key, Node):
             key = key.value
-        return key in self.map
+        key_str = str(key)
+        return key_str in self.map
 
-    # all dict-like methods
     def keys(self):
         return self.map.keys()
 
@@ -280,7 +284,8 @@ class DraconMappingNode(MappingNode):
         return self[key] if key in self else default
 
     def get_key(self, key: Hashable):
-        idx = self.map[key]
+        key_str = str(key)
+        idx = self.map[key_str]
         return self.value[idx][0]
 
     def __len__(self):
@@ -315,9 +320,10 @@ class DraconMappingNode(MappingNode):
     def append(self, newvalue: tuple[Node, Node]):
         key, _ = newvalue
         self.value.append(newvalue)
-        if key.value in self.map:
-            raise ValueError(f'Duplicate key: {key.value}')
-        self.map[key.value] = len(self.value) - 1
+        key_str = str(key.value)
+        if key_str in self.map:
+            raise ValueError(f'Duplicate key: {key_str}')
+        self.map[key_str] = len(self.value) - 1
 
     def clear(self):
         self.value = []

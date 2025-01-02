@@ -194,10 +194,7 @@ class DraconLoader:
         comp = self.compose_config_from_str(content)
         return self.load_composition_result(comp)
 
-
-
     def post_process_composed(self, comp: CompositionResult):
-
         comp.walk_no_path(callback=partial(add_to_context, self.context))
         comp = preprocess_references(comp)
         comp = process_deferred(comp, force_deferred_at=self.deferred_paths)  # type: ignore
@@ -256,16 +253,16 @@ class DraconLoader:
 
     def process_includes(self, comp_res: CompositionResult) -> CompositionResult:
         comp_res.find_special_nodes('include', lambda n: isinstance(n, IncludeNode))
-        
+
         if not comp_res.special_nodes['include']:
             return comp_res
-        
+
         # Process the current batch of includes
         comp_res.sort_special_nodes('include')
         for inode_path in comp_res.pop_all_special('include'):
             inode = inode_path.get_obj(comp_res.root)
             assert isinstance(inode, IncludeNode), f"Invalid node type: {type(inode)}"
-            
+
             new_loader = self.copy()
             include_composed = compose_from_include_str(
                 new_loader,
@@ -276,7 +273,7 @@ class DraconLoader:
                 node=inode,
             )
             comp_res.merge_composition_at(inode_path, include_composed)
-        
+
         # Recursive call to process any new includes that were brought in
         return self.process_includes(comp_res)
 
@@ -296,6 +293,7 @@ class DraconLoader:
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
+
 def dump_to_node(data):
     if isinstance(data, Node):
         return data
@@ -307,6 +305,7 @@ def load(config_path: str | Path, raw_dict=False, **kwargs):
     loader = DraconLoader(**kwargs)
     if raw_dict:
         loader.yaml.constructor.yaml_base_dict_type = dict
+        loader.yaml.constructor.yaml_base_list_type = list
     return loader.load(config_path)
 
 
