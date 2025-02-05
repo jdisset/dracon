@@ -8,6 +8,7 @@ from dracon.composer import (
     CompositionResult,
 )
 from dracon.interpolation_utils import resolve_interpolable_variables
+from dracon.interpolation import evaluate_expression
 from dracon.utils import (
     deepcopy,
 )
@@ -100,6 +101,17 @@ def compose_from_include_str(
     node: Optional[IncludeNode] = None,
 ) -> Any:
     context = draconloader.context if not node else node.context
+
+    # there are 2 syntaxes for include string interpolations:
+    # first is any variable that starts with $, like $DIR (which is set by the file loader)
+    # second is the usual interpolation syntax, like ${some_expression}.
+    # we resolve both of them here.
+    include_str = evaluate_expression(
+        include_str,
+        current_path=include_node_path,
+        root_obj=composition_result.root if composition_result else None,
+        context=context,
+    )
     include_str = resolve_interpolable_variables(include_str, context)  # type: ignore
 
     components = parse_include_str(include_str)

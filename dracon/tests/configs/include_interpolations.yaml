@@ -1,0 +1,7 @@
+!define filename: "base"
+base:
+  <<: !include file:$DIR/${filename}.yaml
+
+!define addsettings: "additional_settings"
+
+just_simple: !include file:$DIR/params@simple_params.${addsettings}
