@@ -7,6 +7,7 @@ from dracon.resolvable import Resolvable
 from pydantic import BaseModel
 from dracon.include import compose_from_include_str
 from dracon.utils import deepcopy
+import tempfile
 
 # Set a dummy environment variable for testing purposes
 os.environ["TESTVAR1"] = "test_var_1"
@@ -73,7 +74,6 @@ def test_main_config_composition():
 
 
 def test_copy_composition_result():
-
     loader = DraconLoader()
     composition = compose_from_include_str(loader, f"pkg:{main_config_path}")
 
@@ -81,13 +81,10 @@ def test_copy_composition_result():
     comp_copy = deepcopy(composition)
     loader_copy = deepcopy(loader)
 
-
     origconf = loader.load_composition_result(composition)
     confcopy = loader_copy.load_composition_result(comp_copy)
 
     assert origconf == confcopy
-
-
 
 
 def test_simple_config_inclusion():
@@ -191,6 +188,15 @@ def test_resolvable():
     assert type(ned) is Person
     assert ned.name == "Eddard"
     assert ned.age == 40
+
+
+def test_include_interpolation():
+    config = get_config('dracon:tests/configs/include_interpolations.yaml')
+    # check that config.base is the base config:
+    assert config.base.default_settings.setting1 == "default_value1"
+    assert config.base.default_settings.simple_params.root.a == 3
+    assert config.just_simple.setting3 == "additional_value3"
+    assert config.just_simple.setting_list == ["item_lol", 3, "item_lol"]
 
 
 if __name__ == "__main__":
