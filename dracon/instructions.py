@@ -16,6 +16,7 @@ from dracon.keypath import KeyPath, ROOTPATH
 from dracon.merge import merged, MergeKey, add_to_context
 from dracon.interpolation import evaluate_expression, InterpolableNode
 from functools import partial
+from dracon.nodes import DraconScalarNode
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
@@ -159,17 +160,26 @@ class SetDefault(Define):
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 ## {{{                           --     each     --
+
+
 class Each(Instruction):
     PATTERN = r"!each\(([a-zA-Z_]\w*)\)"
 
     """
     `!each(var_name) list-like-expr : value`
 
-    Duplicate the value node for each item in the list-like node
-    and assign the item to the variable var_name (which is added to the context)
-
+    Duplicate the value node for each item in the list-like node and assign the item 
+    to the variable var_name (which is added to the context).
+    
     If list-like-expr is an interpolation, this node triggers its composition-time evaluation.
 
+    For sequence values:
+        !each(i) ${range(3)}:
+            - value_${i}
+    
+    For mapping values with dynamic keys:
+        !each(i) ${range(3)}:
+            key_${i}: value_${i}
 
     Removed from final composition.
     """
@@ -194,8 +204,8 @@ class Each(Instruction):
 
         key_node = deepcopy(path.get_obj(comp_res.root))
         value_node = deepcopy(path.removed_mapping_key().get_obj(comp_res.root))
-
         parent_node = path.parent.get_obj(comp_res.root)
+
         assert isinstance(parent_node, DraconMappingNode)
         assert isinstance(
             key_node, InterpolableNode
@@ -212,28 +222,47 @@ class Each(Instruction):
 
         ctx = merged(ctx, key_node.context, MergeKey(raw='{<+}'))
 
+        # Remove the original each instruction node
         new_parent = deepcopy(parent_node)
         del new_parent[key_node.value]
 
+        # Handle sequence values
         if isinstance(value_node, DraconSequenceNode):
             assert len(parent_node) == 1, "Cannot use !each with a sequence node in a mapping"
             new_parent = DraconSequenceNode.from_mapping(parent_node, empty=True)
-            new_nodes = value_node.value
+
+            for item in list_like:
+                item_ctx = merged(ctx, {self.var_name: item}, MergeKey(raw='{<+}'))
+                for node in value_node.value:
+                    new_value_node = deepcopy(node)
+                    new_parent.append(new_value_node)
+                    walk_node(
+                        node=new_value_node,
+                        callback=partial(add_to_context, item_ctx),
+                    )
+
+        # Handle mapping values
         elif isinstance(value_node, DraconMappingNode):
-            new_nodes = value_node.value
+            for item in list_like:
+                item_ctx = merged(ctx, {self.var_name: item}, MergeKey(raw='{<+}'))
+                for knode, vnode in value_node.items():
+                    new_vnode = deepcopy(vnode)
+                    # can't add the knode directly to the new_parent, as that would result in duplicate keys
+                    # we need to evaluate the key node first
+                    assert isinstance(
+                        knode, InterpolableNode
+                    ), f"Keys inside an !each instruction must be interpolable (so that they're unique), but got {knode}"
+                    new_knode = deepcopy(knode)
+                    add_to_context(item_ctx, new_knode)
+                    scalar_knode = DraconScalarNode(tag=new_knode.tag, value=new_knode.evaluate())
+                    new_parent.append((scalar_knode, new_vnode))
+                    walk_node(
+                        node=new_vnode,
+                        callback=partial(add_to_context, item_ctx),
+                    )
+
         else:
-            new_nodes = [value_node]
-
-        for item in list_like:
-            for node in new_nodes:
-                new_node = deepcopy(node)
-                new_parent.append(new_node)
-
-                ctx = merged(ctx, {self.var_name: item}, MergeKey(raw='{<+}'))
-                walk_node(
-                    node=new_node,
-                    callback=partial(add_to_context, ctx),
-                )
+            raise ValueError(f"Invalid value node for 'each' instruction: {value_node}")
 
         del parent_node[key_node.value]
         comp_res.set_at(path.parent, new_parent)
