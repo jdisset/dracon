@@ -165,6 +165,7 @@ def test_ampersand_interpolation_simple():
 # 6.5
 # removed deepcopy in merge -> 4.6
 
+
 @pytest.mark.parametrize('n', range(4))
 def test_recursive_interpolation(n):
     yaml_content = """
@@ -202,12 +203,12 @@ def test_recursive_interpolation(n):
 
     print(f"config: {config}")
 
-
     assert config['base2'] == config['base']
     assert config['base3'] == config['base']
     assert config['base4'] == config['base']
     assert config['base5'] == config['base']
     assert config['base6'] == config['base']
+
 
 @pytest.mark.parametrize('n', range(15))
 def test_ampersand_interpolation_complex(n):
@@ -227,7 +228,6 @@ def test_ampersand_interpolation_complex(n):
     assert '__dracon__' not in config
     print(f"config: {config}")
 
-
     assert config['all_objs'] == [
         {'index': 1, 'name': 'Name 1'},
         {'index': 2, 'name': 'Name 2'},
@@ -237,6 +237,7 @@ def test_ampersand_interpolation_complex(n):
     ]
 
     assert config['all_objs_by_anchor'] == config['all_objs']
+
 
 @pytest.mark.parametrize('n', range(10))
 def test_ampersand_interpolation_complex_copy(n):
@@ -264,12 +265,11 @@ def test_ampersand_interpolation_complex_copy(n):
     config.resolve_all_lazy()
     config_copy.resolve_all_lazy()
 
-
     print(f"config: {config}")
 
     assert '__dracon__' not in config
     assert '__dracon__' not in config_copy
-    expected =     [
+    expected = [
         {'index': 1, 'name': 'Name 1'},
         {'index': 2, 'name': 'Name 2'},
         {'index': 3, 'name': 'Name 3'},
@@ -282,9 +282,6 @@ def test_ampersand_interpolation_complex_copy(n):
 
     assert config['all_objs_by_anchor'] == expected
     assert config_copy['all_objs_by_anchor'] == expected
-
-
-
 
 
 def test_obj_references():
@@ -560,6 +557,43 @@ def test_instruct_on_nodes():
         ClassA(index=43, name='new_name 43'),
         ClassA(index=44, name='new_name 44'),
     ]
+
+
+def test_each_with_mapping():
+    yaml_content = """
+    # Test with dynamic keys
+    simple_map:
+        !each(i) ${range(3)}:
+            key_${i}: value_${i}
+
+    # Test with object references
+    __dracon__:
+        obj: &obj !ClassA
+            index: ${i}
+            name: "Name ${i}"
+
+    objects:
+        !each(i) ${range(2)}:
+            obj_${i}:
+                <<: *obj
+                <<{+}: 
+                    name: "Modified ${i}"
+    """
+
+    loader = DraconLoader(enable_interpolation=True, context={'ClassA': ClassA})
+    config = loader.loads(yaml_content)
+    config.resolve_all_lazy()
+
+    # Check simple map with dynamic keys
+    assert config['simple_map'] == {'key_0': 'value_0', 'key_1': 'value_1', 'key_2': 'value_2'}
+
+    # Check objects map
+    assert isinstance(config['objects']['obj_0'], ClassA)
+    assert config['objects']['obj_0'].index == 0
+    assert config['objects']['obj_0'].name == 'Modified 0'
+    assert isinstance(config['objects']['obj_1'], ClassA)
+    assert config['objects']['obj_1'].index == 1
+    assert config['objects']['obj_1'].name == 'Modified 1'
 
 
 def test_defines():
