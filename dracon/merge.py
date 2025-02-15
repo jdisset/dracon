@@ -22,58 +22,78 @@ def make_default_empty_mapping_node():
 
 
 @ftrace(inputs=False, watch=[])
-@lru_cache
+@ftrace(inputs=False, watch=[])
 def process_merges(comp_res):
-    comp_res.find_special_nodes('merge', lambda n: isinstance(n, MergeNode))
-    comp_res.sort_special_nodes('merge')
-    has_merge = len(comp_res.special_nodes['merge']) > 0
+    """
+    Process all merge nodes in the composition result recursively until there are no more merges to process.
+    Returns the modified composition result and whether any merges were performed.
+    """
+    any_merges = False
 
-    for merge_path in comp_res.pop_all_special('merge'):
-        merge_path = merge_path.removed_mapping_key()
-        merge_node = merge_path.get_obj(comp_res.root)
-        parent_path = merge_path.copy().up()
-        node_key = merge_path[-1]
-        parent_node = parent_path.get_obj(comp_res.root)
+    while True:
+        # Find all merge nodes
+        comp_res.find_special_nodes('merge', lambda n: isinstance(n, MergeNode))
+        comp_res.sort_special_nodes('merge')
 
-        if not dict_like(parent_node):
-            raise ValueError(
-                'While processing merge node',
-                merge_node.start_mark,
-                'Parent of merge node must be a dictionary',
-                f'but got {type(parent_node)} at {parent_node.start_mark}',
-            )
+        # Check if we found any merge nodes
+        if not comp_res.special_nodes['merge']:
+            break
 
-        assert node_key in parent_node, f'Key {node_key} not found in parent node'
+        any_merges = True
 
-        key_node = parent_node.get_key(
-            node_key
-        )  # the scalar node that contains the merge instruction
-        assert isinstance(
-            key_node, MergeNode
-        ), f'Invalid merge node type: {type(key_node)} at {node_key}. {merge_path=}'
+        # Process each merge node
+        for merge_path in comp_res.pop_all_special('merge'):
+            # Get value path (remove mapping key)
+            merge_path = merge_path.removed_mapping_key()
+            merge_node = merge_path.get_obj(comp_res.root)
+            parent_path = merge_path.copy().up()
+            node_key = merge_path[-1]
+            parent_node = parent_path.get_obj(comp_res.root)
 
-        try:
-            merge_key = MergeKey(raw=key_node.merge_key_raw)
-        except Exception as e:
-            raise ValueError(
-                'While processing merge node',
-                merge_node.start_mark,
-                f'Error: {str(e)}',
-            ) from e
-        # we want to do parent_node = merged(parent_node, merge_node, merge_key)
+            # Validate parent node is a dictionary
+            if not dict_like(parent_node):
+                raise ValueError(
+                    'While processing merge node',
+                    merge_node.start_mark,
+                    'Parent of merge node must be a dictionary',
+                    f'but got {type(parent_node)} at {parent_node.start_mark}',
+                )
 
-        del parent_node[node_key]
+            # Get the merge key node and validate
+            assert node_key in parent_node, f'Key {node_key} not found in parent node'
+            key_node = parent_node.get_key(node_key)
+            assert isinstance(
+                key_node, MergeNode
+            ), f'Invalid merge node type: {type(key_node)} at {node_key}. {merge_path=}'
 
-        if merge_key.keypath:
-            parent_path = parent_path + KeyPath(merge_key.keypath)
+            try:
+                merge_key = MergeKey(raw=key_node.merge_key_raw)
+            except Exception as e:
+                raise ValueError(
+                    'While processing merge node',
+                    merge_node.start_mark,
+                    f'Error: {str(e)}',
+                ) from e
 
-        new_parent = parent_path.get_obj(comp_res.root)
+            # Remove the merge node key
+            del parent_node[node_key]
 
-        new_parent = merged(new_parent, merge_node, merge_key)
-        assert isinstance(new_parent, Node)
-        comp_res.set_at(parent_path, new_parent)
+            # Handle keypath in merge key
+            if merge_key.keypath:
+                parent_path = parent_path + KeyPath(merge_key.keypath)
 
-    return comp_res, has_merge
+            # Get parent node and merge
+            new_parent = parent_path.get_obj(comp_res.root)
+            new_parent = merged(new_parent, merge_node, merge_key)
+            assert isinstance(new_parent, Node)
+
+            # Update the composition with merged result
+            comp_res.set_at(parent_path, new_parent)
+
+        # Update the node map after processing all merges in this round
+        comp_res.make_map()
+
+    return comp_res, any_merges
 
 
 class MergeMode(Enum):
@@ -239,6 +259,7 @@ def merged(existing: Any, new: Any, k: MergeKey = DEFAULT_ADD_TO_CONTEXT_MERGE_K
 
     return merge_value(existing, new)
 
+
 def add_to_context(context, item, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
     if hasattr(item, 'context'):
         item.context = context_add(item.context, context, merge_key)
@@ -246,7 +267,6 @@ def add_to_context(context, item, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
 
 def context_add(base, newcontext, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
     return merged(base, newcontext, merge_key)
-
 
 
 # ideal syntax:
