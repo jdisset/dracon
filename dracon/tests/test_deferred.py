@@ -6,6 +6,8 @@ from dracon.loader import DraconLoader
 from dracon.deferred import DeferredNode, make_deferred
 from dracon.dracontainer import Dracontainer, Mapping, Sequence, resolve_all_lazy
 from dracon.interpolation import InterpolationError, InterpolationMatch
+from dracon.include import compose_from_include_str
+from dracon.tests.test_config_composition import get_config, main_config_ok
 from typing import Generic, TypeVar, Any, Optional, Annotated, cast, List
 from pydantic import (
     BaseModel,
@@ -59,7 +61,20 @@ def get_index(obj):
     return obj.index
 
 
-def test_deferred():
+def test_deferred_file():
+    config = get_config('dracon:tests/configs/deferred.yaml')
+    assert type(config.main_content) is DeferredNode
+    main_content = config.main_content.construct()
+
+    main_config_ok(main_content)
+
+    assert type(config.simple_merge) is DeferredNode
+    simple_merge = config.simple_merge.construct()
+    assert simple_merge.root.a == "new_a"
+    assert simple_merge.additional_settings.setting_list[1] == 3
+
+
+def test_deferred_basic():
     yaml_content = """
     !define i42 : !int 42
 
@@ -89,7 +104,6 @@ def test_deferred():
 
     assert type(config['nested']) is DeferredNode
 
-    nested_comp = config.nested.compose()
     nested = config.nested.construct()
 
     assert nested.a_index == 42
@@ -635,16 +649,10 @@ def test_large_parallel_processing(process_pool):
         assert result.classAinst.index == i
         assert result.classAinst.name == f"Item {i}"
 
-def test_make_deferred():
 
+def test_make_deferred():
     inode = make_deferred(42)
     assert inode.construct() == 42
 
     snode = make_deferred("hello")
     assert snode.construct() == "hello"
-
-
-
-
-
-

@@ -24,16 +24,7 @@ resolvable_config_path = 'dracon:tests/configs/resolvable.yaml'
 override_config_path = 'dracon:tests/configs/override.yaml'
 
 
-def get_config(config_path):
-    loader = DraconLoader()
-    compres = compose_from_include_str(loader, f"pkg:{config_path}")
-    config = loader.load_composition_result(compres)
-    return config
-
-
-def test_main_config_composition():
-    config = get_config(main_config_path)
-
+def main_config_ok(config):
     # Check if the composition result matches the expected values
     assert config["base"]["setting.with.dot"] == "baseval3"
     assert config["config"]["setting1"] == "newval1"
@@ -71,6 +62,18 @@ def test_main_config_composition():
         3,
         "item_lol",
     ]
+
+
+def get_config(config_path):
+    loader = DraconLoader()
+    compres = compose_from_include_str(loader, f"pkg:{config_path}")
+    config = loader.load_composition_result(compres)
+    return config
+
+
+def test_main_config_composition():
+    config = get_config(main_config_path)
+    main_config_ok(config)
 
 
 def test_copy_composition_result():
