@@ -209,7 +209,7 @@ class Each(Instruction):
         assert isinstance(parent_node, DraconMappingNode)
         assert isinstance(
             key_node, InterpolableNode
-        ), f"Expected an interpolable node for 'each' instruction, but got {key_node}"
+        ), f"Expected an interpolable node for 'each' instruction, but got {key_node}, a {type(key_node)}"
 
         ctx = {}
 
