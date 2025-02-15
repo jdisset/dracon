@@ -1,0 +1,10 @@
+some_basic_key: "ok"
+
+main_content: !deferred
+  <<: !include file:$DIR/main
+
+simple_merge: !deferred
+  <<: !include file:$DIR/simple
+  <<{<+}:
+    root:
+      a: "new_a"
