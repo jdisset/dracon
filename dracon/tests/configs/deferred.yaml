@@ -8,3 +8,5 @@ simple_merge: !deferred
   <<{<+}:
     root:
       a: "new_a"
+
+deferred_root: !include file:$DIR/sub/deferred_root

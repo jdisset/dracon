@@ -38,6 +38,7 @@ from dracon.instructions import process_instructions
 from dracon.deferred import DeferredNode, process_deferred
 from dracon.representer import DraconRepresenter
 
+from dracon.lazy import InterpolationError, DraconError
 
 from dracon import dracontainer
 
@@ -105,6 +106,7 @@ class DraconLoader:
             if self._context_arg
             else ShallowDict[str, Any]()
         )
+        self.yaml.constructor.context = self.context.copy()
         self.reset_context()
 
     def _init_yaml(self):
@@ -172,9 +174,13 @@ class DraconLoader:
         return self.post_process_composed(composed_content)
 
     def load_node(self, node):
-        self.yaml.constructor.referenced_nodes = self.referenced_nodes
-        self.yaml.constructor.context = self.context.copy() or {}
-        return self.yaml.constructor.construct_document(node)
+        try:
+            self.yaml.constructor.referenced_nodes = self.referenced_nodes
+            if self.yaml.constructor.context is None:
+                self.yaml.constructor.context = self.context.copy() or {}
+            return self.yaml.constructor.construct_document(node)
+        except Exception as e:
+            raise DraconError(f"Error loading node") from e
 
     def load_composition_result(self, compres: CompositionResult, post_process=True):
         if post_process:
@@ -224,6 +230,7 @@ class DraconLoader:
         for node, _ in deferred_nodes:
             node._loader = self
             node._full_composition = comp_res
+
         return comp_res
 
     @ftrace(watch=[])

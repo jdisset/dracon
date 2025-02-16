@@ -26,7 +26,19 @@ from dracon.interpolation_utils import (
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
-class InterpolationError(Exception):
+class DraconError(Exception):
+    def __init__(self, message, traceback=None):
+        self.message = message
+        self.traceback = traceback
+        super().__init__(message)
+
+    def __str__(self):
+        if self.traceback:
+            return f"{self.traceback}"
+        return self.message
+
+
+class InterpolationError(DraconError):
     pass
 
 
@@ -127,16 +139,36 @@ def preprocess_expr(expr: str, symbols: Optional[dict] = None):
     return expr
 
 
-def do_safe_eval(expr: str, symbols: Optional[dict] = None):
+USE_SAFE_EVAL = False
+
+
+def do_safe_eval(expr: str, symbols: Optional[dict] = None) -> Any:
     expr = preprocess_expr(expr, symbols)
-    safe_eval = Interpreter(user_symbols=symbols or {}, max_string_length=1000)
-    res = safe_eval.eval(expr, raise_errors=False)
-    errors = safe_eval.error
-    if errors:
-        errors = [': '.join(e.get_error()) for e in errors]
-        errormsg = '\n'.join(errors)
-        raise InterpolationError(f"Error evaluating expression {expr}:\n{errormsg}")
-    return res
+
+    if USE_SAFE_EVAL:
+        # Original safe implementation using asteval
+        safe_eval = Interpreter(user_symbols=symbols or {}, max_string_length=1000)
+        res = safe_eval.eval(expr, raise_errors=False)
+        errors = safe_eval.error
+        if errors:
+            errors = [': '.join(e.get_error()) for e in errors]
+            errormsg = '\n'.join(errors)
+            raise InterpolationError(f"Error evaluating expression {expr}:\n{errormsg}")
+        return res
+    else:
+        import traceback
+
+        try:
+            eval_globals = {}
+            eval_globals.update(__builtins__)  # type: ignore
+            eval_globals.update(symbols or {})
+            return eval(expr, eval_globals)
+        except Exception as e:
+            import traceback
+
+            # Get the actual error traceback, skipping the wrapping
+            error_tb = '\n'.join(traceback.format_exception(type(e), e, e.__traceback__))
+            raise InterpolationError(f"Error evaluating expression {expr}:\n{error_tb}") from e
 
 
 @ftrace(watch=[])

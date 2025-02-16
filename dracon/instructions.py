@@ -262,7 +262,7 @@ class Each(Instruction):
                     )
 
         else:
-            raise ValueError(f"Invalid value node for 'each' instruction: {value_node}")
+            raise ValueError(f"Invalid value node for 'each' instruction: {value_node} of type {type(value_node)}")
 
         del parent_node[key_node.value]
         comp_res.set_at(path.parent, new_parent)
