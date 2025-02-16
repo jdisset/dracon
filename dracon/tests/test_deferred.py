@@ -73,6 +73,11 @@ def test_deferred_file():
     assert simple_merge.root.a == "new_a"
     assert simple_merge.additional_settings.setting_list[1] == 3
 
+    assert type(config.deferred_root) is DeferredNode
+    deferred_root = config.deferred_root.construct()
+    assert deferred_root.ayy == "lmao"
+    assert deferred_root.base.file_stem == "interpolation"
+
 
 def test_deferred_basic():
     yaml_content = """

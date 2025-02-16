@@ -5,7 +5,7 @@ default_settings:
     - item1
     - item2
     - item3
-  <<: *pkg:dracon:tests/configs/params
+  <<: !include file:$DIR/../params
   again: *pkg:dracon:tests/configs/params
   just_simple: *pkg:dracon:tests/configs/params@simple_params.additional_settings
 

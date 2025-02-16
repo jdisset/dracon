@@ -9,9 +9,11 @@ from dracon.composer import (
 )
 from dracon.interpolation_utils import resolve_interpolable_variables
 from dracon.interpolation import evaluate_expression
+from dracon.merge import merged, MergeKey
 from dracon.utils import (
     deepcopy,
 )
+from dracon.deferred import DeferredNode
 
 from dracon.merge import add_to_context
 from dracon.loaders.file import read_from_file
@@ -165,7 +167,9 @@ def compose_from_include_str(
                 raise ValueError(f"Invalid result type from loader '{loader_name}': {type(result)}")
             new_loader = draconloader.copy()
             if node is not None:
-                add_to_context(node.context, new_loader)
+                merged_context = merged(node.context, new_context, MergeKey(raw="{<+}"))
+                add_to_context(merged_context, new_loader)
+
             result = new_loader.compose_config_from_str(result)
         if components.key_path:
             result = result.rerooted(KeyPath(components.key_path))

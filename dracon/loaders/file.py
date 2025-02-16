@@ -25,7 +25,6 @@ def read_from_file(path: str, extra_paths=None):
     Raises:
         FileNotFoundError: If the file is not found in any of the specified paths.
     """
-
     all_paths = with_possible_ext(path)
     if not extra_paths:
         extra_paths = []
@@ -46,6 +45,11 @@ def read_from_file(path: str, extra_paths=None):
     with open(p, 'r') as f:
         raw = f.read()
 
-    new_context = {'$DIR': p.parent.as_posix(), '$FILE': p.name, '$FILE_STEM': p.stem}
+    new_context = {
+        '$DIR': p.parent.as_posix(),
+        '$FILE': p.name,
+        '$FILE_STEM': p.stem,
+    }
+
 
     return raw, new_context

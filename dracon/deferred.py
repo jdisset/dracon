@@ -81,6 +81,9 @@ class DeferredNode(ContextNode, Generic[T]):
         # and simply unlock the deferred node when we need to compose it. This way we can
         # have references to other nodes in the entire conf
 
+        print(
+            f"Composing DeferredNode with context: {self.context}, value context: {getattr(self.value, 'context', None)}"
+        )
         assert self._loader
         assert self._full_composition
         assert isinstance(self.path, KeyPath)
@@ -178,19 +181,17 @@ def process_deferred(comp: CompositionResult, force_deferred_at: List[KeyPath | 
     comp.walk(find_deferred_nodes)
     deferred_nodes = sorted(deferred_nodes, key=lambda x: len(x[1]), reverse=True)
 
-    # filter to only take higher up nodes
-    deferred_nodes = [
-        (node, path)
-        for node, path in deferred_nodes
-        if not any((path.startswith(p) and path != p) for _, p in deferred_nodes)
-    ]
-
     for node, path in deferred_nodes:
         if isinstance(node, DeferredNode):
             continue
 
-        if path == ROOTPATH:
-            raise ValueError("Cannot use !deferred at the root level")
+        # Get any existing context from the node
+        node_context = {}
+        if hasattr(node, 'context'):
+            node_context = node.context
+
+        # Also capture surrounding context from composition
+        comp.walk_no_path(partial(add_to_context, node_context))
 
         if node.tag.startswith('!deferred'):
             node.tag = node.tag[len('!deferred') :]
@@ -204,8 +205,8 @@ def process_deferred(comp: CompositionResult, force_deferred_at: List[KeyPath | 
         if node.tag == "":
             reset_tag(node)
 
-        new_node = DeferredNode(value=node)
-
+        print(f"Wrapping node at {path} in DeferredNode. Context: {node_context}")
+        new_node = DeferredNode(value=node, context=node_context)
         comp.set_at(path, new_node)
 
     return comp

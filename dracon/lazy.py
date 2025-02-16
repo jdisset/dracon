@@ -16,13 +16,9 @@ from typing import Protocol, runtime_checkable, Optional
 from dracon.interpolation_utils import (
     InterpolationMatch,
 )
-from dracon.interpolation import evaluate_expression
+from dracon.interpolation import evaluate_expression, InterpolationError, DraconError
 from dracon.utils import list_like, dict_like, ftrace, deepcopy
 from dracon.interpolation_utils import find_field_references
-
-
-class InterpolationError(Exception):
-    pass
 
 
 ## {{{                     --     LazyInterpolable     --
@@ -131,13 +127,20 @@ class LazyInterpolable(Lazy[T]):
 
     def resolve(self) -> T:
         if isinstance(self.value, str):
-            self.value = evaluate_expression(
-                self.value,
-                self.current_path,
-                self.root_obj,
-                init_outermost_interpolations=self.init_outermost_interpolations,
-                context=self.context,
-            )
+            try:
+                self.value = evaluate_expression(
+                    self.value,
+                    self.current_path,
+                    self.root_obj,
+                    init_outermost_interpolations=self.init_outermost_interpolations,
+                    context=self.context,
+                )
+            except InterpolationError as e:
+                raise InterpolationError(
+                    f"Error at path {self.current_path}: {e.message}", traceback=e.traceback
+                ) from e
+            except Exception as e:
+                raise type(e)("Error resolving lazy value") from e
 
         return self.validate(self.value)
 
@@ -228,7 +231,11 @@ def resolve_all_lazy(
                 parent = path.parent.get_obj(root_obj)
                 current_obj.root_obj = root_obj
                 current_obj.current_path = path
-                val = current_obj.resolve()
+                try:
+                    val = current_obj.resolve()
+                except InterpolationError as e:
+                    # Add path context to the message but preserve the original error
+                    raise type(e)(f"Error at path {path}: {str(e)}") from None
                 stem = path.stem
                 if stem == '/' or stem == ROOTPATH:
                     raise ValueError("Cannot resolve root path")
@@ -258,8 +265,10 @@ def resolve_all_lazy(
                     item_path = path + KeyPath(str(i))
                     queue.append((item, item_path))
 
+        except InterpolationError as e:
+            raise  # Pass through without wrapping
         except Exception as e:
-            raise type(e)(f"Error while resolving path {path}: {str(e)}") from e
+            raise DraconError(f"Error resolving {path}: {str(e)}") from None
 
     # a bit hacky, but some resolutions trigger new lazy values in unexpected places, so, we recurse
     if unresolved_count > 0 and iteration < max_iterations:

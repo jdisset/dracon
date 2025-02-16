@@ -10,6 +10,7 @@ import types
 import pickle
 from dracon.keypath import KeyPath, ROOTPATH
 
+from dracon.interpolation import InterpolationError
 from pydantic import (
     TypeAdapter,
     PydanticSchemaGenerationError,
@@ -59,8 +60,10 @@ def pydantic_validate(tag, value, localns=None, root_obj=None, current_path=None
             return instance
         except Exception as e2:
             raise ValueError(
-                f"Failed to validate {tag}, i.e {tag_type=} with {value=}. When trying as a simple construction, got {e2}. When trying as a Pydantic schema, got {e}"
+                f"Failed to validate {tag}, i.e {tag_type=} with {value=}. When trying as a simple construction, got {e2}."
             ) from e
+    except Exception as e:
+        raise ValueError(f"Failed to validate {tag}, i.e {tag_type=}.") from e
 
 
 def resolve_type(
@@ -248,7 +251,6 @@ class Draconstructor(Constructor):
     # rawstr = rf"{node.value}"
     # return rawstr
     # return super().construct_scalar(node)
-
     @ftrace()
     def construct_object(self, node, deep=True):
         assert self.context is not None, "Context must be set before constructing objects"
@@ -263,6 +265,7 @@ class Draconstructor(Constructor):
             self._current_path = ROOTPATH
         self._depth += 1
         tag = node.tag
+
         try:
             tag_type = resolve_type(tag, localns=self.localns)
 
@@ -281,26 +284,30 @@ class Draconstructor(Constructor):
 
             node.tag = tag  # we don't want to permanently change the tag of the node because it might be referenced elsewhere
 
-        except pydantic.ValidationError as e:
-            raise ConstructorError(
-                None, None, f"Error while constructing {tag}: {e.errors()}", node.start_mark
-            ) from e
-        except Exception as e:
-            raise ConstructorError(
-                None, None, f"Error while constructing {tag}: {e}", node.start_mark
-            ) from e
+            try:
+                obj = pydantic_validate(
+                    tag,
+                    obj,
+                    self.localns,
+                    root_obj=self._root_node,
+                    current_path=self._current_path,
+                )
+
+                if self.resolve_interpolations and is_root:
+                    resolve_all_lazy(obj)
+
+                return obj
+
+            except InterpolationError:
+                raise
+
+            except Exception as e:
+                raise ConstructorError(
+                    None, None, f"Error while constructing {tag}: {e}", node.start_mark
+                ) from e
+
         finally:
             self._depth -= 1
-            # self._current_path.up()
-
-        obj = pydantic_validate(
-            tag, obj, self.localns, root_obj=self._root_node, current_path=self._current_path
-        )
-
-        if self.resolve_interpolations and is_root:
-            resolve_all_lazy(obj)
-
-        return obj
 
     @ftrace(watch=[])
     def construct_resolvable(self, node, tag_type):
