@@ -21,8 +21,7 @@ def make_default_empty_mapping_node():
     )
 
 
-@ftrace(inputs=False, watch=[])
-@ftrace(inputs=False, watch=[])
+# @ftrace(inputs=False, watch=[])
 def process_merges(comp_res):
     """
     Process all merge nodes in the composition result recursively until there are no more merges to process.

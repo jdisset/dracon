@@ -1,5 +1,6 @@
 ## {{{                          --     imports     --
 from typing import Optional, Any, List, Dict, TypeVar, Generic, Type
+import dracon.utils as utils
 from dracon.utils import ftrace, deepcopy
 from dracon.composer import (
     CompositionResult,
@@ -81,9 +82,6 @@ class DeferredNode(ContextNode, Generic[T]):
         # and simply unlock the deferred node when we need to compose it. This way we can
         # have references to other nodes in the entire conf
 
-        print(
-            f"Composing DeferredNode with context: {self.context}, value context: {getattr(self.value, 'context', None)}"
-        )
         assert self._loader
         assert self._full_composition
         assert isinstance(self.path, KeyPath)
@@ -93,12 +91,12 @@ class DeferredNode(ContextNode, Generic[T]):
         self._loader.deferred_paths = deferred_paths or []
 
         composition = self._full_composition
-
         composition.set_at(self.path, self.value)
         walk_node(
             node=self.path.get_obj(composition.root),
             callback=partial(add_to_context, self.context),
         )
+
         compres = self._loader.post_process_composed(composition)
 
         return self.path.get_obj(compres.root)
@@ -160,9 +158,11 @@ def make_deferred(value: Any, loader=None, **kwargs) -> DeferredNode:
 ## {{{                     --     process deferred     --
 
 
-@ftrace(watch=[])
+# @ftrace(watch=[])
 def process_deferred(comp: CompositionResult, force_deferred_at: List[KeyPath | str] | None = None):
-    """Wraps any node with a tag starting with '!deferred' in a DeferredNode"""
+    """
+    Wraps in a DeferredNode any node with a tag starting with '!deferred', or in a path that matches any in force_deferred_at
+    """
 
     from dracon.nodes import reset_tag
 
@@ -190,9 +190,6 @@ def process_deferred(comp: CompositionResult, force_deferred_at: List[KeyPath | 
         if hasattr(node, 'context'):
             node_context = node.context
 
-        # Also capture surrounding context from composition
-        comp.walk_no_path(partial(add_to_context, node_context))
-
         if node.tag.startswith('!deferred'):
             node.tag = node.tag[len('!deferred') :]
             if node.tag.startswith(':'):
@@ -205,9 +202,9 @@ def process_deferred(comp: CompositionResult, force_deferred_at: List[KeyPath | 
         if node.tag == "":
             reset_tag(node)
 
-        print(f"Wrapping node at {path} in DeferredNode. Context: {node_context}")
         new_node = DeferredNode(value=node, context=node_context)
         comp.set_at(path, new_node)
+        new_node._full_composition = comp
 
     return comp
 

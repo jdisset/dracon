@@ -1,4 +1,3 @@
-import collections.abc as cabc
 from typing import (
     Any,
     Dict,
@@ -8,17 +7,16 @@ from typing import (
     TypeVar,
     Generic,
     Annotated,
+    Protocol,
+    runtime_checkable,
 )
-from typing import Generic, TypeVar, get_args, get_origin, Literal
 from dracon.keypath import KeyPath, ROOTPATH, MAPPING_KEY
-from pydantic import TypeAdapter, BaseModel, field_validator, ConfigDict, WrapValidator, Field
-from typing import Protocol, runtime_checkable, Optional
+from pydantic import BaseModel, field_validator, ConfigDict, WrapValidator, Field
 from dracon.interpolation_utils import (
     InterpolationMatch,
 )
 from dracon.interpolation import evaluate_expression, InterpolationError, DraconError
-from dracon.utils import list_like, dict_like, ftrace, deepcopy
-from dracon.interpolation_utils import find_field_references
+from dracon.utils import list_like, dict_like
 
 
 ## {{{                     --     LazyInterpolable     --

@@ -32,7 +32,7 @@ class Instruction:
         raise NotImplementedError
 
 
-@ftrace(watch=[])
+# @ftrace(watch=[])
 def process_instructions(comp_res: CompositionResult, loader) -> CompositionResult:
     # then all other instructions
     instruction_nodes = []

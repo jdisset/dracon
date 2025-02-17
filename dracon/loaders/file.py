@@ -5,6 +5,7 @@ from typing import Optional
 
 from cachetools import cached, LRUCache
 from cachetools.keys import hashkey
+import time
 
 DraconLoader = ForwardRef('DraconLoader')
 
@@ -45,11 +46,18 @@ def read_from_file(path: str, extra_paths=None):
     with open(p, 'r') as f:
         raw = f.read()
 
+    now = time.time()
+
     new_context = {
         '$DIR': p.parent.as_posix(),
-        '$FILE': p.name,
+        '$FILE': p.as_posix(),
+        '$FILE_PATH': p.as_posix(),
         '$FILE_STEM': p.stem,
+        '$FILE_EXT': p.suffix,
+        '$FILE_LOAD_TIME': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now)),
+        '$FILE_LOAD_TIME_UNIX': int(now),
+        '$FILE_LOAD_TIME_UNIX_MS': int(now * 1000),
+        '$FILE_SIZE': p.stat().st_size,
     }
-
 
     return raw, new_context

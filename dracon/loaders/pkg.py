@@ -1,4 +1,5 @@
 from .load_utils import with_possible_ext
+import time
 from importlib.resources import files, as_file
 from typing import ForwardRef, Optional
 from pathlib import Path
@@ -23,11 +24,20 @@ def read_from_pkg(path: str):
     for fpath in all_paths:
         try:
             with as_file(files(pkg) / fpath.as_posix()) as p:
+                now = time.time()
                 with open(p, 'r') as f:
+                    pp = Path(p).resolve().absolute()
                     new_context = {
-                        '$FILE': Path(p).resolve().absolute().as_posix(),
-                        '$DIR': Path(p).parent.resolve().absolute().as_posix(),
-                        '$FILE_STEM': Path(p).stem,
+                        '$DIR': pp.parent.as_posix(),
+                        '$FILE': pp.as_posix(),
+                        '$FILE_PATH': pp.as_posix(),
+                        '$FILE_STEM': pp.stem,
+                        '$FILE_EXT': pp.suffix,
+                        '$FILE_LOAD_TIME': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now)),
+                        '$FILE_LOAD_TIME_UNIX': int(now),
+                        '$FILE_LOAD_TIME_UNIX_MS': int(now * 1000),
+                        '$FILE_SIZE': pp.stat().st_size,
+                        '$PACKAGE_NAME': pkg,
                     }
 
                     return f.read(), new_context

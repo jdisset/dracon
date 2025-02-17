@@ -65,7 +65,7 @@ def main_config_ok(config):
 
 
 def get_config(config_path):
-    loader = DraconLoader()
+    loader = DraconLoader(enable_interpolation=True)
     compres = compose_from_include_str(loader, f"pkg:{config_path}")
     config = loader.load_composition_result(compres)
     return config
@@ -125,11 +125,23 @@ def test_params_config():
     assert config["list2"] == [7, 8, 9]
 
 
-def test_base_variable_inclusion():
+def test_include_contexts():
     loader = DraconLoader(enable_interpolation=True)
-    config = loader.load(f"pkg:{interp_config_path}")
+    config_path = "pkg:dracon:tests/configs/incl_contexts.yaml"
+    compres = compose_from_include_str(loader, config_path)
+    print(f"Composition result: {compres}")
+    config = loader.load_composition_result(compres)
+    print(f"Config: {config}")
 
-    assert config.base.file_stem == "interpolation"
+    assert config.fstem_basedir == "incl_contexts"
+    assert config.fstem_subdir.fstem_here == "subincl"
+    assert config.fstem_subdir.fstem_above.here == "fstem"
+
+    assert config.avar_from_sub == 3
+    assert config.bvar_from_sub == 2
+
+    assert config.vars.a == 5
+    assert config.vars.b == 2
 
 
 def test_composition_through_interpolation():
@@ -159,6 +171,8 @@ def test_composition_through_interpolation():
 
     assert config.interp_later_tag == 5.0
     assert type(config.interp_later_tag) is float
+
+    # assert config.base.fstem == "fstem"
 
 
 def test_override():
