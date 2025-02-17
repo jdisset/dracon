@@ -1,0 +1,6 @@
+!set_default avar: 1
+!define bvar: 2
+
+a: ${avar}
+b: ${bvar}
+

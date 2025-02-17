@@ -251,7 +251,7 @@ class Draconstructor(Constructor):
     # rawstr = rf"{node.value}"
     # return rawstr
     # return super().construct_scalar(node)
-    @ftrace()
+    # @ftrace()
     def construct_object(self, node, deep=True):
         assert self.context is not None, "Context must be set before constructing objects"
 
@@ -309,7 +309,7 @@ class Draconstructor(Constructor):
         finally:
             self._depth -= 1
 
-    @ftrace(watch=[])
+    # @ftrace(watch=[])
     def construct_resolvable(self, node, tag_type):
         newnode = deepcopy(node)
         inner_type = get_inner_type(tag_type)
@@ -326,7 +326,7 @@ class Draconstructor(Constructor):
         res = Resolvable(node=newnode, ctor=self, inner_type=inner_type)
         return res
 
-    @ftrace(watch=[])
+    # @ftrace(watch=[])
     def construct_interpolable(self, node):
         node_value = node.value
         init_outermost_interpolations = node.init_outermost_interpolations

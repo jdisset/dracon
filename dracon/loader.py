@@ -31,6 +31,7 @@ from dracon.utils import (
     deepcopy,
     make_hashable,
 )
+import dracon.utils as utils
 
 from dracon.interpolation import InterpolableNode, preprocess_references
 from dracon.merge import process_merges, add_to_context, merged, MergeKey
@@ -173,6 +174,7 @@ class DraconLoader:
         composed_content = cached_compose_config_from_str(self.yaml, content)
         return self.post_process_composed(composed_content)
 
+    @ftrace(watch=[])
     def load_node(self, node):
         try:
             self.yaml.constructor.referenced_nodes = self.referenced_nodes
@@ -200,8 +202,11 @@ class DraconLoader:
         comp = self.compose_config_from_str(content)
         return self.load_composition_result(comp)
 
+    @ftrace()
     def post_process_composed(self, comp: CompositionResult):
-        comp.walk_no_path(callback=partial(add_to_context, self.context))
+        comp.walk_no_path(
+            callback=partial(add_to_context, self.context, merge_key=MergeKey(raw='{>+}'))
+        )
         comp = preprocess_references(comp)
         comp = process_deferred(comp, force_deferred_at=self.deferred_paths)  # type: ignore
         comp = process_instructions(comp, self)
@@ -233,7 +238,7 @@ class DraconLoader:
 
         return comp_res
 
-    @ftrace(watch=[])
+    # @ftrace(watch=[])
     def save_references(self, comp_res: CompositionResult):
         # the preprocessed refernces are stored as paths that point to refered nodes
         # however, after all the merging and including is done, we need to save

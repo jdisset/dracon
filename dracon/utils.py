@@ -47,6 +47,23 @@ def generate_unique_id() -> int:
     return uuid.uuid4().int
 
 
+def printcontext(ctx):
+    if ctx is None or not ctx:
+        return 'empty context'
+    else:
+        if '$FILE_STEM' in ctx:
+            return '$FILE_STEM=' + ctx['$FILE_STEM']
+        else:
+            return 'no $FILE in context'
+
+
+def printdir(node):
+    if hasattr(node, 'context'):
+        return printcontext(node.context)
+    else:
+        return 'no context'
+
+
 ## {{{                      --     dict/list like     --{{{
 K = TypeVar('K')
 V = TypeVar('V')
@@ -349,7 +366,15 @@ def get_hash(data: str) -> str:
     return base64.b32encode(hash_value).decode('utf-8').rstrip('=')
 
 
-def node_repr(node, prefix='', is_last=True, is_root=True, enable_colors=True, _seen=None):
+def node_repr(
+    node,
+    prefix='',
+    is_last=True,
+    is_root=True,
+    enable_colors=False,
+    show_file_context=True,
+    _seen=None,
+):
     if _seen is None:
         _seen = set()
 
@@ -428,7 +453,11 @@ def node_repr(node, prefix='', is_last=True, is_root=True, enable_colors=True, _
             if hasattr(node, 'value'):
                 nvalue = node.value
 
-            return f'{TAG_COLOR}{tag}{RESET} {VAL_COLOR}{nvalue}{RESET} {tstring}'
+            nctx = ''
+            if hasattr(node, 'context') and show_file_context:
+                nctx = f'[ctx: {printcontext(node.context)}] '
+
+            return f'{TAG_COLOR}{tag}{RESET} {nctx} {VAL_COLOR}{nvalue}{RESET} {tstring}'
 
         output = ''
 

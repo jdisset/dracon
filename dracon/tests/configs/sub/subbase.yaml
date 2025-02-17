@@ -9,6 +9,7 @@ default_settings:
   again: *pkg:dracon:tests/configs/params
   just_simple: *pkg:dracon:tests/configs/params@simple_params.additional_settings
 
+fstem: !include file:$DIR/../fstem
 
 ppath: *env:TESTVAR2
 

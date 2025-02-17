@@ -154,7 +154,6 @@ def find_interpolable_variables(expr: str) -> list[VarMatch]:
     return matches
 
 
-@ftrace()
 def resolve_interpolable_variables(expr: str, symbols: DictLike[str, Any]) -> str:
     var_matches = find_interpolable_variables(expr)
     if not var_matches:

@@ -13,6 +13,7 @@ from typing import (
     runtime_checkable,
 )
 from dracon.utils import DictLike, ftrace, deepcopy
+import dracon.utils as utils
 from dracon.nodes import DraconMappingNode, ContextNode
 
 from dracon.interpolation_utils import (
@@ -211,6 +212,7 @@ def prepare_symbols(current_path, root_obj, context):
 ## {{{                     --     evaluate expression   --
 
 
+@ftrace(watch=[])
 def evaluate_expression(
     expr: str,
     current_path: str | KeyPath = '/',
@@ -220,6 +222,7 @@ def evaluate_expression(
     context: Optional[Dict[str, Any]] = None,
 ) -> Any:
     from dracon.merge import merged, MergeKey
+
 
     # Initialize interpolations
     if init_outermost_interpolations is None:
@@ -374,6 +377,18 @@ class InterpolableNode(ContextNode):
         return newexpr
 
     def preprocess_references(self, comp_res, current_path):
+        """
+        Preprocess field references in the node's value by handling ampersand ('&')
+        symbols within interpolation expressions. At ('@') references are handled at a later stage.
+
+        Scans the node's value for field references and, for each ampersand reference that is located
+        within an interpolation, replaces it with a "_DRACON_RESOLVE_(...)" call that resolves the referenced node.
+
+        If the current node is used as a mapping key, the parent's mapping
+        is recomputed to reflect any changes.
+
+        """
+
         if self.init_outermost_interpolations is None:
             self.init_outermost_interpolations = outermost_interpolation_exprs(self.value)
 

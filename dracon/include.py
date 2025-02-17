@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Any, Optional, Dict, Tuple, Callable
+import dracon.utils as utils
 from functools import partial
 import re
 from dracon.keypath import KeyPath, ROOTPATH
@@ -10,9 +11,7 @@ from dracon.composer import (
 from dracon.interpolation_utils import resolve_interpolable_variables
 from dracon.interpolation import evaluate_expression
 from dracon.merge import merged, MergeKey
-from dracon.utils import (
-    deepcopy,
-)
+from dracon.utils import deepcopy, ftrace
 from dracon.deferred import DeferredNode
 
 from dracon.merge import add_to_context
@@ -94,13 +93,14 @@ def handle_anchor_path(
     )
 
 
+@ftrace(watch=[])
 def compose_from_include_str(
     draconloader,
     include_str: str,
     include_node_path: KeyPath = ROOTPATH,
     composition_result: Optional[CompositionResult] = None,
     custom_loaders: dict = DEFAULT_LOADERS,
-    node: Optional[IncludeNode] = None,
+    node: Optional[IncludeNode] = None,  #
 ) -> Any:
     context = draconloader.context if not node else node.context
 
@@ -118,6 +118,7 @@ def compose_from_include_str(
 
     components = parse_include_str(include_str)
     result = None
+    file_context = {}
 
     try:
         if composition_result is not None:
@@ -160,6 +161,7 @@ def compose_from_include_str(
             raise ValueError(f'Unknown loader: {loader_name}')
 
         result, new_context = custom_loaders[loader_name](path)
+        file_context = new_context
         draconloader.update_context(new_context)
 
         if not isinstance(result, CompositionResult):
@@ -178,4 +180,10 @@ def compose_from_include_str(
     finally:
         if isinstance(result, CompositionResult) and node is not None:
             result.make_map()
-            result.walk_no_path(callback=partial(add_to_context, node.context))
+            merged_context = merged(
+                node.context, file_context, MergeKey(raw="{+<}")
+            )  # Changed to +>
+            result.walk_no_path(
+                callback=partial(add_to_context, merged_context, merge_key=MergeKey(raw='{>+}'))
+            )
+

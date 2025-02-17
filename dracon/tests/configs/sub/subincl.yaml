@@ -1,0 +1,2 @@
+fstem_here: ${"$FILE_STEM"}
+fstem_above: !include file:$DIR/../fstem

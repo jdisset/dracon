@@ -167,6 +167,12 @@ class CompositionResult(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    def __repr__(self):
+        return f'CompositionResult:{self.root}'
+
+    def __str__(self):
+        return f'CompositionResult:{self.root}'
+
 
 def walk_node(node, callback, start_path=None):
     def __walk_node_no_path(node):
@@ -256,7 +262,6 @@ class DraconComposer(Composer):
 
         return node
 
-    @ftrace(watch=[])
     def wrapped_node(self, node: Node) -> Node:
         if isinstance(node, MappingNode):
             return DraconMappingNode(
@@ -294,7 +299,6 @@ class DraconComposer(Composer):
         else:
             raise NotImplementedError(f'Node type {type(node)} not supported')
 
-    @ftrace(watch=[])
     def compose_alias_event(self):
         event = self.parser.get_event()
         return IncludeNode(
@@ -304,7 +308,6 @@ class DraconComposer(Composer):
             comment=event.comment,
         )
 
-    @ftrace(watch=[])
     def compose_scalar_node(self, anchor=None) -> Node:
         event = self.parser.get_event()
         tag = event.ctag
@@ -330,7 +333,6 @@ class DraconComposer(Composer):
 
         return node
 
-    @ftrace(watch=[])
     def handle_interpolation(self, node) -> Node:
         if self.interpolation_enabled:
             tag_iexpr = outermost_interpolation_exprs(node.tag)
@@ -350,7 +352,6 @@ class DraconComposer(Composer):
                 )
         return node
 
-    @ftrace(watch=[])
     def compose_include_node(self) -> Node:
         normal_node = self.compose_scalar_node()
         node = IncludeNode(
@@ -362,7 +363,6 @@ class DraconComposer(Composer):
         )
         return node
 
-    @ftrace(watch=[])
     def compose_merge_node(self) -> Any:
         event = self.parser.get_event()
         tag = event.ctag
