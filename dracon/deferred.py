@@ -75,6 +75,15 @@ class DeferredNode(ContextNode, Generic[T]):
     def update_context(self, context):
         add_to_context(context, self)
 
+    def clear_composition_context(self):
+        composition = self._full_composition
+        context = self.context
+        walk_node(
+            node=composition.root,
+            callback=partial(reset_context),
+        )
+        self.context = context
+
     def compose(
         self,
         context: Optional[Dict[str, Any]] = None,
@@ -102,6 +111,7 @@ class DeferredNode(ContextNode, Generic[T]):
         self._working_loader.deferred_paths = deferred_paths
 
         composition = self._full_composition
+
         value = self.value
 
         merged_context = merged(self.context, context or {}, MergeKey(raw="{<~}[<~]"))
