@@ -1,3 +1,6 @@
 !deferred
 ayy: lmao
 <<: !include file:$DIR/../interpolation
+
+instructs: 
+  <<: !include file:$DIR/instructions

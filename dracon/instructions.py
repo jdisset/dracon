@@ -3,7 +3,7 @@ from typing import Optional, Any
 import re
 from pydantic import BaseModel
 from enum import Enum
-from dracon.utils import dict_like, DictLike, ListLike, ftrace, deepcopy
+from dracon.utils import dict_like, DictLike, ListLike, ftrace, deepcopy, node_repr
 from dracon.composer import (
     CompositionResult,
     walk_node,
@@ -15,8 +15,12 @@ from ruamel.yaml.nodes import Node
 from dracon.keypath import KeyPath, ROOTPATH
 from dracon.merge import merged, MergeKey, add_to_context
 from dracon.interpolation import evaluate_expression, InterpolableNode
+from dracon.deferred import DeferredNode, make_deferred
 from functools import partial
 from dracon.nodes import DraconScalarNode
+import logging
+
+logger = logging.getLogger(__name__)
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
@@ -211,8 +215,6 @@ class Each(Instruction):
             key_node, InterpolableNode
         ), f"Expected an interpolable node for 'each' instruction, but got {key_node}, a {type(key_node)}"
 
-        ctx = {}
-
         list_like = evaluate_expression(
             key_node.value,
             current_path=path,
@@ -220,31 +222,61 @@ class Each(Instruction):
             context=key_node.context,
         )
 
-        ctx = merged(ctx, key_node.context, MergeKey(raw='{<+}'))
+        logger.debug(
+            f"Processing each instruction, key_node.context.{self.var_name}={key_node.context.get(self.var_name)}"
+        )
 
         # Remove the original each instruction node
         new_parent = deepcopy(parent_node)
         del new_parent[key_node.value]
 
+        was_deferred = False
+        deferred_ctx = {}
+        if isinstance(value_node, DeferredNode):
+            logger.debug(f"Processing an each instruction with a deferred node. {list_like=}")
+            was_deferred = True
+            deferred_ctx = value_node.context
+            value_node = value_node.value
+
+        mkey = MergeKey(raw='{<~}[~<]')
         # Handle sequence values
         if isinstance(value_node, DraconSequenceNode):
             assert len(parent_node) == 1, "Cannot use !each with a sequence node in a mapping"
             new_parent = DraconSequenceNode.from_mapping(parent_node, empty=True)
+            logger.debug(f"Processing an each instruction with a sequence node. {list_like=}")
 
             for item in list_like:
-                item_ctx = merged(ctx, {self.var_name: item}, MergeKey(raw='{<+}'))
+                logger.debug(f"  each: {item=}")
+                item_ctx = merged(key_node.context, {self.var_name: item}, MergeKey(raw='{<~}[<~]'))
+                logger.debug(
+                    f"  after merge into key_node.ctx, item_ctx.{self.var_name}={item_ctx.get(self.var_name)}"
+                )
                 for node in value_node.value:
                     new_value_node = deepcopy(node)
-                    new_parent.append(new_value_node)
+                    if was_deferred:
+                        logger.debug(
+                            f"  each: deferred node: {node_repr(new_value_node,context_paths=['**.'+self.var_name])}"
+                        )
+                        new_value_node = make_deferred(
+                            new_value_node, loader=loader, context=deferred_ctx
+                        )
+                    logger.debug(
+                        f"  each: Before merging context, new_value_node={node_repr(new_value_node, context_paths=['**.'+self.var_name])}"
+                    )
                     walk_node(
                         node=new_value_node,
-                        callback=partial(add_to_context, item_ctx),
+                        callback=partial(add_to_context, item_ctx, merge_key=mkey),
                     )
+                    logger.debug(
+                        f"  each: After merging item_ctx into new_value_node: {node_repr(new_value_node, context_paths=['**.'+self.var_name])}"
+                    )
+                    new_parent.append(new_value_node)
 
         # Handle mapping values
         elif isinstance(value_node, DraconMappingNode):
+            logger.debug(f"Processing an each instruction with a dict node. {list_like=}")
             for item in list_like:
-                item_ctx = merged(ctx, {self.var_name: item}, MergeKey(raw='{<+}'))
+                item_ctx = merged(key_node.context, {self.var_name: item}, MergeKey(raw='{<~}'))
                 for knode, vnode in value_node.items():
                     new_vnode = deepcopy(vnode)
                     # can't add the knode directly to the new_parent, as that would result in duplicate keys
@@ -253,18 +285,20 @@ class Each(Instruction):
                         knode, InterpolableNode
                     ), f"Keys inside an !each instruction must be interpolable (so that they're unique), but got {knode}"
                     new_knode = deepcopy(knode)
-                    add_to_context(item_ctx, new_knode)
+                    add_to_context(item_ctx, new_knode, mkey)
                     scalar_knode = DraconScalarNode(tag=new_knode.tag, value=new_knode.evaluate())
                     new_parent.append((scalar_knode, new_vnode))
                     walk_node(
                         node=new_vnode,
-                        callback=partial(add_to_context, item_ctx),
+                        callback=partial(add_to_context, item_ctx, merge_key=mkey),
                     )
 
         else:
-            raise ValueError(f"Invalid value node for 'each' instruction: {value_node} of type {type(value_node)}")
+            raise ValueError(
+                f"Invalid value node for 'each' instruction: {value_node} of type {type(value_node)}"
+            )
 
-        del parent_node[key_node.value]
+        # del parent_node[key_node.value]
         comp_res.set_at(path.parent, new_parent)
 
         return comp_res

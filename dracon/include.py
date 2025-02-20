@@ -169,7 +169,7 @@ def compose_from_include_str(
                 raise ValueError(f"Invalid result type from loader '{loader_name}': {type(result)}")
             new_loader = draconloader.copy()
             if node is not None:
-                merged_context = merged(node.context, new_context, MergeKey(raw="{<+}"))
+                merged_context = merged(node.context, new_context, MergeKey(raw="{<~}[<~]"))
                 add_to_context(merged_context, new_loader)
 
             result = new_loader.compose_config_from_str(result)
@@ -181,9 +181,8 @@ def compose_from_include_str(
         if isinstance(result, CompositionResult) and node is not None:
             result.make_map()
             merged_context = merged(
-                node.context, file_context, MergeKey(raw="{+<}")
+                node.context, file_context, MergeKey(raw="{<~}[~<]")
             )  # Changed to +>
             result.walk_no_path(
-                callback=partial(add_to_context, merged_context, merge_key=MergeKey(raw='{>+}'))
+                callback=partial(add_to_context, merged_context, merge_key=MergeKey(raw='{>~}[~>]'))
             )
-

@@ -13,3 +13,5 @@ default_settings:
 ppath: *env:TESTVAR2
 
 empty: *pkg:dracon:tests/configs/empty
+
+scalar: !include file:$DIR/scalar

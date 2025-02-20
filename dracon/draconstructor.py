@@ -345,7 +345,7 @@ class Draconstructor(Constructor):
             validator = partial(validator_f)
 
         context = ShallowDict(merged(self.context, node.context, MergeKey(raw='{<+}')))
-        context['__DR_NODES'] = {
+        context['__DRACON_NODES'] = {
             i: Resolvable(node=n, ctor=self.copy()) for i, n in self.referenced_nodes.items()
         }
 

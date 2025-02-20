@@ -182,7 +182,7 @@ class DraconLoader:
                 self.yaml.constructor.context = self.context.copy() or {}
             return self.yaml.constructor.construct_document(node)
         except Exception as e:
-            raise DraconError(f"Error loading node") from e
+            raise DraconError(f"Error loading node: {e}")
 
     def load_composition_result(self, compres: CompositionResult, post_process=True):
         if post_process:
@@ -205,7 +205,7 @@ class DraconLoader:
     @ftrace()
     def post_process_composed(self, comp: CompositionResult):
         comp.walk_no_path(
-            callback=partial(add_to_context, self.context, merge_key=MergeKey(raw='{>+}'))
+            callback=partial(add_to_context, self.context, merge_key=MergeKey(raw='{>~}[>~]'))
         )
         comp = preprocess_references(comp)
         comp = process_deferred(comp, force_deferred_at=self.deferred_paths)  # type: ignore
@@ -216,8 +216,13 @@ class DraconLoader:
         if merge_changed or delete_changed:
             comp.make_map()
         comp = self.save_references(comp)
+        comp.update_paths()
+
+        # one more round of processing deferred nodes to catch them at new paths
+        comp = process_deferred(comp, force_deferred_at=self.deferred_paths)  # type: ignore
         comp = self.update_deferred_nodes(comp)
         comp.update_paths()
+
         return comp
 
     def update_deferred_nodes(self, comp_res: CompositionResult):
@@ -259,7 +264,7 @@ class DraconLoader:
                     referenced_nodes[i] = deepcopy(n)
 
         self.referenced_nodes = ShallowDict(
-            merged(self.referenced_nodes, referenced_nodes, MergeKey(raw='{<+}'))
+            merged(self.referenced_nodes, referenced_nodes, MergeKey(raw='{<~}[<~]'))
         )
         return comp_res
 

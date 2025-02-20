@@ -63,6 +63,8 @@ def main_config_ok(config):
         "item_lol",
     ]
 
+    assert config["other_base"]["scalar"] == "hello"
+
 
 def get_config(config_path):
     loader = DraconLoader(enable_interpolation=True)
@@ -74,6 +76,7 @@ def get_config(config_path):
 def test_main_config_composition():
     config = get_config(main_config_path)
     main_config_ok(config)
+
 
 
 def test_copy_composition_result():
