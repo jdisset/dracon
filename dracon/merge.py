@@ -209,7 +209,7 @@ class MergeKey(BaseModel):
         )
 
 
-DEFAULT_ADD_TO_CONTEXT_MERGE_KEY = MergeKey(raw='<<{+<}[~<]')
+DEFAULT_ADD_TO_CONTEXT_MERGE_KEY = MergeKey(raw='<<{~<}[~<]')
 
 
 def merged(existing: Any, new: Any, k: MergeKey = DEFAULT_ADD_TO_CONTEXT_MERGE_KEY) -> DictLike:
@@ -262,6 +262,15 @@ def merged(existing: Any, new: Any, k: MergeKey = DEFAULT_ADD_TO_CONTEXT_MERGE_K
 def add_to_context(context, item, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
     if hasattr(item, 'context'):
         item.context = context_add(item.context, context, merge_key)
+
+
+def reset_context(item, ignore_dracon_namespace=True):
+    newctx = {}
+    if hasattr(item, 'context'):
+        for k, v in item.context.items():
+            if ignore_dracon_namespace and k.startswith('__DRACON_'):
+                newctx[k] = v
+        item.context = newctx
 
 
 def context_add(base, newcontext, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):

@@ -369,10 +369,10 @@ class InterpolableNode(ContextNode):
 
         keypathstr = str(keypath.simplified())
         self.referenced_nodes.available_paths.add(keypathstr)
-        newexpr = f'__DRACON_RESOLVE(__DR_NODES["{keypathstr}"] {context_str})'
+        newexpr = f'__DRACON_RESOLVE(__DRACON_NODES["{keypathstr}"] {context_str})'
 
-        if '__DR_NODES' not in self.context:
-            self.context['__DR_NODES'] = self.referenced_nodes
+        if '__DRACON_NODES' not in self.context:
+            self.context['__DRACON_NODES'] = self.referenced_nodes
 
         return newexpr
 
@@ -420,8 +420,8 @@ class InterpolableNode(ContextNode):
             parent_node._recompute_map()
 
     def flush_references(self):
-        if '__DR_NODES' in self.context:
-            del self.context['__DR_NODES']
+        if '__DRACON_NODES' in self.context:
+            del self.context['__DRACON_NODES']
 
 
 ##───────────────────────────────────────────────────────────────────────────}}}

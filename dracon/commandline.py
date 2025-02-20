@@ -27,7 +27,7 @@ import traceback
 import logging
 
 
-logger = logging.getLogger("dracon.commandline")
+logger = logging.getLogger(__name__)
 
 B = TypeVar("B", bound=BaseModel)
 
@@ -427,9 +427,9 @@ class Program(BaseModel, Generic[T]):
             dmp += '\n' + merge_str
         dmp += '\n' + override_str
 
-        logger.debug(f"Parsed all args passed to commandline prog: {args}")
-        logger.debug(f"Defined vars: {defined_vars}")
-        logger.debug(f"Going to parse generated config:\n{dmp}\n")
+        # logger.debug(f"Parsed all args passed to commandline prog: {args}")
+        # logger.debug(f"Defined vars: {defined_vars}")
+        # logger.debug(f"Going to parse generated config:\n{dmp}\n")
 
         try:
             comp = loader.compose_config_from_str(dmp)

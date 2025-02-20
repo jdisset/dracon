@@ -4,7 +4,7 @@ from typing import List, Union, Hashable, Any, Optional, TypeVar, Type, Protocol
 from typing_extensions import runtime_checkable
 from collections import deque
 from ruamel.yaml.nodes import Node
-from dracon.utils import node_repr, list_like, dict_like, ftrace
+from dracon.utils import node_repr, list_like, dict_like
 import re
 
 
@@ -443,15 +443,19 @@ def _get_obj_impl(
         else:
             try:  # check if we can access it with __getitem__
                 return obj[attr]
-            except (TypeError, KeyError):
+            except (TypeError, KeyError) as e:
                 if create_path_if_not_exists:
                     assert default_mapping_constructor is not None
                     obj[attr] = default_mapping_constructor()
                     return obj[attr]
                 if isinstance(obj, Node):
+                    import traceback
+
+                    tback = traceback.format_exc(limit=10)
+
                     raise AttributeError(
-                        f'Could not find attribute {attr} in node \n{node_repr(obj)} of type {type(obj)}'
-                    )
+                        f'Could not find attribute {attr} in node \n{node_repr(obj)} of type {type(obj)}. \nTraceback:\n{tback}'
+                    ) from e
                 else:
                     raise AttributeError(f'Could not find attribute {attr} in {obj}')
 

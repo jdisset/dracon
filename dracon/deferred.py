@@ -15,11 +15,13 @@ from dracon.nodes import (
 
 
 from dracon.keypath import KeyPath, ROOTPATH
-from dracon.merge import add_to_context
+from dracon.merge import add_to_context, merged, MergeKey, reset_context
 
 from functools import partial
 from dracon.nodes import make_node
+import logging
 
+logger = logging.getLogger(__name__)
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
@@ -77,6 +79,7 @@ class DeferredNode(ContextNode, Generic[T]):
         self,
         context: Optional[Dict[str, Any]] = None,
         deferred_paths: Optional[list[KeyPath | str]] = None,
+        use_original_root: bool = False,
     ) -> Node:
         # rather than composing just this node, we can hold a copy of the entire composition
         # and simply unlock the deferred node when we need to compose it. This way we can
@@ -87,24 +90,48 @@ class DeferredNode(ContextNode, Generic[T]):
         assert isinstance(self.path, KeyPath)
         assert isinstance(self.value, Node)
 
-        self._loader.update_context(context or {})
-        self._loader.deferred_paths = deferred_paths or []
+        self._working_loader = self._loader
+
+        deferred_paths = [KeyPath(p) if isinstance(p, str) else p for p in deferred_paths or []]
+
+        logger.debug(f"Composing deferred node at {self.path}. deferred_paths={deferred_paths}")
+        if not use_original_root:
+            deferred_paths = [self.path + p[1:] for p in deferred_paths]
+
+        # self._working_loader.update_context(context or {})
+        self._working_loader.deferred_paths = deferred_paths
 
         composition = self._full_composition
-        composition.set_at(self.path, self.value)
-        walk_node(
-            node=self.path.get_obj(composition.root),
-            callback=partial(add_to_context, self.context),
+        value = self.value
+
+        merged_context = merged(self.context, context or {}, MergeKey(raw="{<~}[<~]"))
+
+        composition.set_at(self.path, value)
+
+        composition.walk_no_path(
+            callback=partial(
+                add_to_context, self._working_loader.context, merge_key=MergeKey(raw='{>~}[>~]')
+            )
         )
 
-        compres = self._loader.post_process_composed(composition)
+        walk_node(
+            node=self.path.get_obj(composition.root),
+            callback=partial(reset_context),
+        )
+
+        walk_node(
+            node=self.path.get_obj(composition.root),
+            callback=partial(add_to_context, merged_context, merge_key=MergeKey(raw='{<~}[<~]')),
+        )
+
+        compres = self._working_loader.post_process_composed(composition)
 
         return self.path.get_obj(compres.root)
 
     def construct(self, **kwargs) -> T:  # type: ignore
         assert self._loader, "DeferredNode must have a loader to be constructed"
         compres = self.compose(**kwargs)
-        return self._loader.load_node(compres)
+        return self._working_loader.load_node(compres)
 
     @property
     def keypath_passthrough(self):
@@ -123,17 +150,19 @@ class DeferredNode(ContextNode, Generic[T]):
     def __hash__(self):
         return context_node_hash(self)
 
-    def __deepcopy__(self, memo):
+    def copy(self):
         new_obj = DeferredNode(
-            value=deepcopy(self.value, memo),
-            path=deepcopy(self.path, memo),
+            value=deepcopy(self.value),
+            path=deepcopy(self.path),
             obj_type=self.obj_type,
             start_mark=self.start_mark,
             end_mark=self.end_mark,
             anchor=self.anchor,
             comment=self.comment,
-            context=self.context.copy(),
+            context=deepcopy(self.context),
         )
+        new_obj._loader = self._loader.copy() if self._loader else None
+        new_obj._full_composition = deepcopy(self._full_composition)
         return new_obj
 
 

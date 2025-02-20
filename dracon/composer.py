@@ -39,18 +39,22 @@ INSTRUCTION: Final = 'instruction'
 
 INCLUDE_TAG = '!include'
 
+
 class CompositionResult(BaseModel):
     root: Node
     special_nodes: dict[SpecialNodeCategory, list[KeyPath]] = {}
     anchor_paths: Optional[dict[str, KeyPath]] = None
     node_map: Optional[dict[KeyPath, Node]] = None
+    # parent_path: KeyPath = ROOTPATH
 
     def __deepcopy__(self, memo=None):
-        return CompositionResult(
+        cr = CompositionResult(
             root=deepcopy(self.root, memo),
             special_nodes={},
             anchor_paths=deepcopy(self.anchor_paths, memo),
         )
+        cr.make_map()
+        return cr
 
     def __hash__(self):
         return hash(self.root)
@@ -110,6 +114,7 @@ class CompositionResult(BaseModel):
         walk_node(node, _callback, start_path=at_path)
 
     def merge_composition_at(self, at_path: KeyPath, new_comp: 'CompositionResult', reuse_map=True):
+        # new_comp.parent_path = self.parent_path + at_path[1:]
         new_node = new_comp.root
         self.set_at(at_path, new_node)
         # if reuse_map:

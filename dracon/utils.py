@@ -338,7 +338,7 @@ def _deepcopy(obj: T, memo=None) -> T:
         if isinstance(obj, (ModuleType, FunctionType, type)):
             return obj  # Return the object itself for modules, functions and types
         else:
-            print(f"Failed to deepcopy object of type {type(obj)}")
+            # print(f"Failed to deepcopy object of type {type(obj)}")
             return copy.copy(obj)  # Fallback to shallow copy for other types
 
 
@@ -367,6 +367,205 @@ def get_hash(data: str) -> str:
 
 
 def node_repr(
+    node,
+    prefix='',
+    is_last=True,
+    is_root=True,
+    enable_colors=False,
+    context_paths=None,
+    _seen=None,
+):
+    if _seen is None:
+        _seen = set()
+
+    node_id = id(node)
+    if node_id in _seen:
+        return f"<circular reference to {node.__class__.__name__}>"
+
+    _seen.add(node_id)
+
+    try:
+        if enable_colors:
+            BLUE = '\033[94m'
+            GREEN = '\033[92m'
+            YELLOW = '\033[93m'
+            MAGENTA = '\033[95m'
+            GREY = '\033[90m'
+            DARK_BLUE = '\033[34m'
+            DARK_GREEN = '\033[32m'
+            WHITE = '\033[97m'
+            RESET = '\033[0m'
+        else:
+            BLUE = ''
+            GREEN = ''
+            YELLOW = ''
+            MAGENTA = ''
+            GREY = ''
+            DARK_BLUE = ''
+            DARK_GREEN = ''
+            WHITE = ''
+            RESET = ''
+
+        TAG_COLOR: str = DARK_BLUE
+        YAML_TAG_COLOR: str = GREY
+        VAL_COLOR: str = WHITE
+        TYPE_COLOR: str = YELLOW
+        KEY_COLOR: str = MAGENTA
+        TREE_COLOR: str = GREY
+        CONTEXT_COLOR: str = GREEN
+        DEFERRED_COLOR: str = BLUE
+
+        VERTICAL: str = TREE_COLOR + '│ ' + RESET
+        ELBOW: str = TREE_COLOR + '├─' + RESET
+        ELBOW_END: str = TREE_COLOR + '└─' + RESET
+        EMPTY: str = TREE_COLOR + '  ' + RESET
+
+        SHORT_TAGS = {
+            'tag:yaml.org,2002:int': 'int',
+            'tag:yaml.org,2002:str': 'str',
+            'tag:yaml.org,2002:float': 'float',
+            'tag:yaml.org,2002:bool': 'bool',
+            'tag:yaml.org,2002:null': 'null',
+            'tag:yaml.org,2002:map': 'map',
+            'tag:yaml.org,2002:seq': 'seq',
+        }
+        for k, v in SHORT_TAGS.items():
+            SHORT_TAGS[k] = YAML_TAG_COLOR + v + RESET
+
+        NODE_TYPES = {
+            'ScalarNode': '',
+            'MappingNode': '',
+            'SequenceNode': '',
+            'InterpolableNode': '[INTRP]',
+            'MergeNode': '[MERGE]',
+            'IncludeNode': '[INCL]',
+            'DeferredNode': f'{DEFERRED_COLOR}[DEFER]{RESET}',
+        }
+
+        def format_context(node):
+            if not hasattr(node, 'context') or not node.context or not context_paths:
+                return ''
+
+            # Convert string paths to KeyPath objects
+            from dracon.keypath import KeyPath
+
+            paths = [KeyPath(p) if isinstance(p, str) else p for p in context_paths]
+
+            # Filter context based on paths
+            matching_items = []
+            for key, value in node.context.items():
+                key_path = f"/{key}"  # Convert context key to path format
+                if any(path.match(KeyPath(key_path)) for path in paths):
+                    matching_items.append(f"{key}={value}")
+
+            if matching_items:
+                items_str = ', '.join(matching_items)
+                return f'{CONTEXT_COLOR}[ctx: {items_str}]{RESET}'
+            return ''
+
+        def get_node_repr(node):
+            # Special handling for DeferredNode - just add the [DEFER] tag
+            is_deferred = hasattr(node, '__class__') and node.__class__.__name__ == 'DeferredNode'
+            if is_deferred:
+                defer_tag = NODE_TYPES.get('DeferredNode', '')
+            else:
+                defer_tag = ''
+
+            ntag = ''
+            if hasattr(node, 'tag'):
+                ntag = node.tag
+            tag = SHORT_TAGS.get(ntag, ntag)
+            node_type = type(node).__name__ if not is_deferred else type(node.value).__name__
+            tstring = f'{TYPE_COLOR}{NODE_TYPES.get(node_type,"")}{RESET}'
+            nctx = format_context(node)
+
+            if isinstance(node, (MappingNode, SequenceNode)) or (
+                is_deferred and isinstance(node.value, (MappingNode, SequenceNode))
+            ):
+                return f'{TAG_COLOR}{tag}{RESET} {nctx} {tstring} {defer_tag}'
+
+            nvalue = node.value if is_deferred else node
+            if hasattr(nvalue, 'value'):
+                nvalue = nvalue.value
+
+            return (
+                f'{TAG_COLOR}{tag}{RESET} {nctx} {VAL_COLOR}{nvalue}{RESET} {tstring} {defer_tag}'
+            )
+
+        output = ''
+
+        if is_root:
+            output += TREE_COLOR + '●─' + get_node_repr(node) + ' '
+        else:
+            connector: str = ELBOW_END if is_last else ELBOW
+            line_prefix = prefix + connector
+            output += line_prefix + get_node_repr(node) + '\n'
+
+        # For DeferredNode, we want to traverse its value
+        traverse_node = (
+            node.value
+            if hasattr(node, '__class__') and node.__class__.__name__ == 'DeferredNode'
+            else node
+        )
+
+        if isinstance(traverse_node, MappingNode):
+            if is_root:
+                output = '\n' + output + '\n'
+            child_prefix = prefix + (EMPTY if is_last else VERTICAL)
+            items = traverse_node.value
+            n = len(items)
+
+            for i, (key, value) in enumerate(items):
+                is_last_item = i == n - 1
+
+                # Print the key
+                key_connector: str = ELBOW_END if is_last_item else ELBOW
+                key_line_prefix = child_prefix + key_connector
+
+                if hasattr(key, 'value'):
+                    key_repr = f'{TAG_COLOR}{SHORT_TAGS.get(key.tag, key.tag)}{RESET} {TREE_COLOR}󰌆{KEY_COLOR} {key.value} {RESET}'
+                    keytypestr = f'{TYPE_COLOR}{NODE_TYPES.get(type(key).__name__,"")}{RESET}'
+                    key_repr += f'{keytypestr}'
+                else:
+                    key_repr = f'noval(<{type(key)}>{key}) [KEY]'
+                output += key_line_prefix + key_repr + '\n'
+
+                # Recursively print the value
+                child_output = node_repr(
+                    value,
+                    prefix=child_prefix + (EMPTY if is_last_item else VERTICAL),
+                    is_last=True,
+                    is_root=False,
+                    enable_colors=enable_colors,
+                    context_paths=context_paths,
+                    _seen=_seen,
+                )
+                output += child_output
+
+        elif isinstance(traverse_node, SequenceNode):
+            child_prefix = prefix + (EMPTY if is_last else VERTICAL)
+            items = traverse_node.value
+            n = len(items)
+
+            for i, value in enumerate(items):
+                is_last_item = i == n - 1
+                child_output = node_repr(
+                    value,
+                    prefix=child_prefix,
+                    is_last=is_last_item,
+                    is_root=False,
+                    enable_colors=enable_colors,
+                    context_paths=context_paths,
+                    _seen=_seen,
+                )
+                output += child_output
+
+        return output
+    finally:
+        _seen.remove(node_id)
+
+
+def old_node_repr(
     node,
     prefix='',
     is_last=True,
