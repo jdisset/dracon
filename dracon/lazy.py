@@ -38,7 +38,9 @@ class Lazy(Generic[T]):
                 return self.validator(value)
             except Exception as e:
                 quoted_name = f' "{self.name}"' if self.name else ''
-                raise InterpolationError(f"Failed to lazyly validate attribute{quoted_name}") from e
+                raise InterpolationError(
+                    f"Failed to lazyly validate attribute {quoted_name}: {e}"
+                ) from None
         return value
 
     def resolve(self) -> T:
@@ -133,12 +135,8 @@ class LazyInterpolable(Lazy[T]):
                     init_outermost_interpolations=self.init_outermost_interpolations,
                     context=self.context,
                 )
-            except InterpolationError as e:
-                raise InterpolationError(
-                    f"Error at path {self.current_path}: {e.message}", traceback=e.traceback
-                ) from e
             except Exception as e:
-                raise type(e)("Error resolving lazy value") from e
+                raise type(e)(f"Error resolving lazy value \"{self.value}\": {str(e)}") from None
 
         return self.validate(self.value)
 

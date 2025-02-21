@@ -72,7 +72,7 @@ def process_merges(comp_res):
                     'While processing merge node',
                     merge_node.start_mark,
                     f'Error: {str(e)}',
-                ) from e
+                ) from None
 
             # Remove the merge node key
             del parent_node[node_key]

@@ -50,20 +50,11 @@ def pydantic_validate(tag, value, localns=None, root_obj=None, current_path=None
 
     if not is_lazy_compatible(tag_type) and tag_type is not Any:
         resolve_all_lazy(value)
-
     try:
         return TypeAdapter(tag_type).validate_python(value)
     except PydanticSchemaGenerationError as e:
-        # we try a simple construction:
-        try:
-            instance = tag_type(value)
-            return instance
-        except Exception as e2:
-            raise ValueError(
-                f"Failed to validate {tag}, i.e {tag_type=} with {value=}. When trying as a simple construction, got {e2}."
-            ) from e
-    except Exception as e:
-        raise ValueError(f"Failed to validate {tag}, i.e {tag_type=}.") from e
+        instance = tag_type(value)  # we try a simple construction
+        return instance
 
 
 def resolve_type(
@@ -108,7 +99,7 @@ def resolve_type(
 
         return _eval_type(ForwardRef(type_str), globals(), localns)
     except NameError as e:
-        raise ValueError(f"Failed to resolve type {type_str}") from e
+        raise ValueError(f"Failed to resolve type {type_str}. {e}") from None
     except Exception:
         return Resolvable if type_str.startswith('Resolvable[') else Any
 
@@ -284,27 +275,18 @@ class Draconstructor(Constructor):
 
             node.tag = tag  # we don't want to permanently change the tag of the node because it might be referenced elsewhere
 
-            try:
-                obj = pydantic_validate(
-                    tag,
-                    obj,
-                    self.localns,
-                    root_obj=self._root_node,
-                    current_path=self._current_path,
-                )
+            obj = pydantic_validate(
+                tag,
+                obj,
+                self.localns,
+                root_obj=self._root_node,
+                current_path=self._current_path,
+            )
 
-                if self.resolve_interpolations and is_root:
-                    resolve_all_lazy(obj)
+            if self.resolve_interpolations and is_root:
+                resolve_all_lazy(obj)
 
-                return obj
-
-            except InterpolationError:
-                raise
-
-            except Exception as e:
-                raise ConstructorError(
-                    None, None, f"Error while constructing {tag}: {e}", node.start_mark
-                ) from e
+            return obj
 
         finally:
             self._depth -= 1
