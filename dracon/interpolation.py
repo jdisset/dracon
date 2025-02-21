@@ -28,15 +28,7 @@ from dracon.interpolation_utils import (
 
 
 class DraconError(Exception):
-    def __init__(self, message, traceback=None):
-        self.message = message
-        self.traceback = traceback
-        super().__init__(message)
-
-    def __str__(self):
-        if self.traceback:
-            return f"{self.traceback}"
-        return self.message
+    pass
 
 
 class InterpolationError(DraconError):
@@ -168,8 +160,8 @@ def do_safe_eval(expr: str, symbols: Optional[dict] = None) -> Any:
             import traceback
 
             # Get the actual error traceback, skipping the wrapping
-            error_tb = '\n'.join(traceback.format_exception(type(e), e, e.__traceback__))
-            raise InterpolationError(f"Error evaluating expression {expr}:\n{error_tb}") from e
+            # error_tb = '\n'.join(traceback.format_exception(type(e), e, e.__traceback__))
+            raise InterpolationError(f"Error evaluating expression {expr}") from e
 
 
 @ftrace(watch=[])
@@ -222,7 +214,6 @@ def evaluate_expression(
     context: Optional[Dict[str, Any]] = None,
 ) -> Any:
     from dracon.merge import merged, MergeKey
-
 
     # Initialize interpolations
     if init_outermost_interpolations is None:

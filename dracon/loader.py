@@ -65,17 +65,10 @@ def dillcopy(obj):
 
 @ftrace()
 def construct(node_or_val, **kwargs):
-    try:
-        if isinstance(node_or_val, Node):
-            loader = DraconLoader(**kwargs)
-            compres = CompositionResult(root=node_or_val)
-            return loader.load_composition_result(compres, post_process=True)
-    except Exception as e:
-        # give much more context to the error, since this usually happens inside an asteval eval
-        import traceback
-
-        msg = f'Error while constructing node: {e}\n{traceback.format_exc()}'
-        raise ValueError(msg)
+    if isinstance(node_or_val, Node):
+        loader = DraconLoader(**kwargs)
+        compres = CompositionResult(root=node_or_val)
+        return loader.load_composition_result(compres, post_process=True)
 
     return node_or_val
 
@@ -182,7 +175,7 @@ class DraconLoader:
                 self.yaml.constructor.context = self.context.copy() or {}
             return self.yaml.constructor.construct_document(node)
         except Exception as e:
-            raise DraconError(f"Error loading node: {e}")
+            raise DraconError(f"Error loading node {node}") from e
 
     def load_composition_result(self, compres: CompositionResult, post_process=True):
         if post_process:

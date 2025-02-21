@@ -467,10 +467,6 @@ class Program(BaseModel, Generic[T]):
 
             print_help(self, None)
             print()
-        except Exception as e:
-            print(f"Error: {e}")
-            print(traceback.format_exc())
-            raise ArgParseError(f"Error while parsing commandline arguments: {e}")
 
 
 def make_program(conf_type: type, **kwargs):
