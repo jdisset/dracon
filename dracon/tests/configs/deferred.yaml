@@ -1,12 +1,19 @@
+!set_default var_a: 0
+
+!define debug0: "${print('in deferred, var_a is', var_a)}"
+
 some_basic_key: "ok"
 
 main_content: !deferred
   <<: !include file:$DIR/main
 
 simple_merge: !deferred
+  !set_default var_a: 3
   <<: !include file:$DIR/simple
   <<{<+}:
     root:
-      a: "new_a"
+      a: ${var_a}
 
 deferred_root: !include file:$DIR/sub/deferred_root
+
+a: ${var_a}
