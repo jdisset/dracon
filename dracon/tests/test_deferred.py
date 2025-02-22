@@ -63,30 +63,47 @@ def get_index(obj):
 
 
 def test_deferred_file():
-    config = get_config('dracon:tests/configs/deferred.yaml')
+    loader = DraconLoader(enable_interpolation=True, context={'var_a': 2})
+    compres = compose_from_include_str(loader, "pkg:dracon:tests/configs/deferred.yaml")
+    config = loader.load_composition_result(compres)
+    assert config.a == 2
+
     assert type(config.main_content) is DeferredNode
     main_content = config.main_content.construct()
     main_config_ok(main_content)
     assert type(config.simple_merge) is DeferredNode
-    simple_merge = config.simple_merge.construct()
-    assert simple_merge.root.a == "new_a"
+
+    sm = config.simple_merge.copy()
+
+    simple_merge = sm.construct()
+    assert simple_merge.root.a == 2
     assert simple_merge.additional_settings.setting_list[1] == 3
 
-    assert type(config.deferred_root) is DeferredNode
-    deferred_root = config.deferred_root.construct()
-    assert deferred_root.ayy == "lmao"
-    assert deferred_root.base.file_stem == "interpolation"
+    sm2 = config.simple_merge.copy()
+    simple_merge2 = sm2.construct(context={'var_a': 42})
+    assert simple_merge2.root.a == 42
+    assert simple_merge2.additional_settings.setting_list[1] == 3
 
+    assert type(config.deferred_root) is DeferredNode
+    dr = config.deferred_root.copy()
+    deferred_root = dr.construct()
+    assert deferred_root.ayy == "lmao"
+    assert deferred_root.a == 2
+    assert deferred_root.base.file_stem == "interpolation"
     instructs = deferred_root.instructs
     assert len(instructs.things) == 3
     instructs.things = [t.construct() for t in instructs.things]
-
     assert instructs.things[0].a == 1
     assert instructs.things[1].a == 2
     assert instructs.things[2].a == 3
     assert instructs.things[0].b == 2
     assert instructs.things[1].elt == 3
     assert instructs.things[2].fstem.here == "fstem"
+
+    dr2 = config.deferred_root.copy()
+    deferred_root2 = dr2.construct(context={'var_a': 42})
+    assert deferred_root2.ayy == "lmao"
+    assert deferred_root2.a == 42
 
 
 def test_deferred_file_with_paths():
@@ -140,7 +157,7 @@ def test_deferred_with_instructs():
         assert fs.here == "fstem"
 
 
-def test_deferred_context():
+def test_deferred_context_1():
     yaml_content = """
     !set_default start: 3
     !set_default N : 2
@@ -177,6 +194,21 @@ def test_deferred_context():
     assert c0.value == 5
     assert c1.value == 6
     assert c2.value == 7
+
+
+def test_deferred_context_2():
+    yaml_content = """
+    !set_default var : 0
+    value: ${var}
+    deferred_node: !deferred
+        value: ${var}
+    """
+
+    loader = DraconLoader(enable_interpolation=True, context={'var': 42})
+    config = loader.loads(yaml_content)
+    assert config.value == 42
+    n = config.deferred_node.construct()
+    assert n.value == 42
 
 
 def test_deferred_basic():
