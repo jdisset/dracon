@@ -423,13 +423,14 @@ class Program(BaseModel, Generic[T]):
         dmp = loader.dump(as_dict)
 
         merge_str = "\n".join(list(self.make_merge_str(confs_to_merge)))
+
         if merge_str:
             dmp += '\n' + merge_str
         dmp += '\n' + override_str
 
-        # logger.debug(f"Parsed all args passed to commandline prog: {args}")
-        # logger.debug(f"Defined vars: {defined_vars}")
-        # logger.debug(f"Going to parse generated config:\n{dmp}\n")
+        logger.debug(f"Parsed all args passed to commandline prog: {args}")
+        logger.debug(f"Defined vars: {defined_vars}")
+        logger.debug(f"Going to parse generated config:\n{dmp}\n")
 
         try:
             comp = loader.compose_config_from_str(dmp)

@@ -21,7 +21,7 @@ def make_default_empty_mapping_node():
     )
 
 
-# @ftrace(inputs=False, watch=[])
+@ftrace(watch=[])
 def process_merges(comp_res):
     """
     Process all merge nodes in the composition result recursively until there are no more merges to process.
@@ -40,7 +40,6 @@ def process_merges(comp_res):
 
         any_merges = True
 
-        # Process each merge node
         for merge_path in comp_res.pop_all_special('merge'):
             # Get value path (remove mapping key)
             merge_path = merge_path.removed_mapping_key()
@@ -74,22 +73,17 @@ def process_merges(comp_res):
                     f'Error: {str(e)}',
                 ) from None
 
-            # Remove the merge node key
             del parent_node[node_key]
 
-            # Handle keypath in merge key
             if merge_key.keypath:
                 parent_path = parent_path + KeyPath(merge_key.keypath)
 
-            # Get parent node and merge
             new_parent = parent_path.get_obj(comp_res.root)
             new_parent = merged(new_parent, merge_node, merge_key)
             assert isinstance(new_parent, Node)
 
-            # Update the composition with merged result
             comp_res.set_at(parent_path, new_parent)
 
-        # Update the node map after processing all merges in this round
         comp_res.make_map()
 
     return comp_res, any_merges
@@ -264,6 +258,7 @@ def add_to_context(context, item, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
         item.context = context_add(item.context, context, merge_key)
 
 
+@ftrace(inputs=False, output=False, watch=[])
 def reset_context(item, ignore_dracon_namespace=True):
     newctx = {}
     if hasattr(item, 'context'):
@@ -273,8 +268,31 @@ def reset_context(item, ignore_dracon_namespace=True):
         item.context = newctx
 
 
+@ftrace(inputs=False, output=False, watch=[])
 def context_add(base, newcontext, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
-    return merged(base, newcontext, merge_key)
+    m = merged(base, newcontext, merge_key)
+    # diff = dict_diff(newcontext, m)
+    # print('diff:', diff)
+    return m
+
+
+def dict_diff(dict1, dict2):
+    """
+    Returns a dictionary with the differences between dict1 and dict2
+    """
+    diff = {}
+    for key, value in dict1.items():
+        if key not in dict2:
+            diff[key] = value
+        elif value != dict2[key]:
+            if dict_like(value) and dict_like(dict2[key]):
+                diff[key] = dict_diff(value, dict2[key])
+            else:
+                diff[key] = dict2[key]
+    for key, value in dict2.items():
+        if key not in dict1:
+            diff[key] = value
+    return diff
 
 
 # ideal syntax:
