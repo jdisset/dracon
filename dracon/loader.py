@@ -202,11 +202,11 @@ class DraconLoader:
 
     @ftrace()
     def post_process_composed(self, comp: CompositionResult):
+        comp = preprocess_references(comp)
+        comp = process_deferred(comp, force_deferred_at=self.deferred_paths)  # type: ignore
         comp.walk_no_path(
             callback=partial(add_to_context, self.context, merge_key=MergeKey(raw='{>~}[>~]'))
         )
-        comp = preprocess_references(comp)
-        comp = process_deferred(comp, force_deferred_at=self.deferred_paths)  # type: ignore
         comp = process_instructions(comp, self)
         comp = self.process_includes(comp)
         comp, merge_changed = process_merges(comp)
