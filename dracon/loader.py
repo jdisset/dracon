@@ -135,6 +135,7 @@ class DraconLoader:
             )
         )
 
+    @ftrace()
     def update_context(self, kwargs):
         add_to_context(kwargs, self)
 
@@ -163,11 +164,12 @@ class DraconLoader:
     def __setstate__(self, state):
         self.__dict__.update(state)
 
+    @ftrace()
     def compose_config_from_str(self, content: str) -> CompositionResult:
         composed_content = cached_compose_config_from_str(self.yaml, content)
         return self.post_process_composed(composed_content)
 
-    @ftrace(watch=[])
+    @ftrace()
     def load_node(self, node):
         try:
             self.yaml.constructor.referenced_nodes = self.referenced_nodes
@@ -177,11 +179,13 @@ class DraconLoader:
         except Exception as e:
             raise DraconError(f"Error loading node {node}") from e
 
+    @ftrace()
     def load_composition_result(self, compres: CompositionResult, post_process=True):
         if post_process:
             compres = self.post_process_composed(compres)
         return self.load_node(compres.root)
 
+    @ftrace()
     def load(self, config_path: str | Path):
         self.reset_context()
         if isinstance(config_path, Path):
@@ -191,6 +195,7 @@ class DraconLoader:
         comp = compose_from_include_str(self, config_path, custom_loaders=self.custom_loaders)
         return self.load_composition_result(comp)
 
+    @ftrace()
     def loads(self, content: str):
         comp = self.compose_config_from_str(content)
         return self.load_composition_result(comp)
@@ -218,6 +223,7 @@ class DraconLoader:
 
         return comp
 
+    @ftrace()
     def update_deferred_nodes(self, comp_res: CompositionResult):
         # copies the loader into deferred nodes so they can resume their composition by themselves
 
@@ -236,7 +242,7 @@ class DraconLoader:
 
         return comp_res
 
-    # @ftrace(watch=[])
+    @ftrace(watch=[])
     def save_references(self, comp_res: CompositionResult):
         # the preprocessed refernces are stored as paths that point to refered nodes
         # however, after all the merging and including is done, we need to save
@@ -261,6 +267,7 @@ class DraconLoader:
         )
         return comp_res
 
+    @ftrace(watch=[])
     def process_includes(self, comp_res: CompositionResult) -> CompositionResult:
         comp_res.find_special_nodes('include', lambda n: isinstance(n, IncludeNode))
 
@@ -328,6 +335,7 @@ def load_file(config_path: str | Path, raw_dict=True, **kwargs):
     return load(f'file:{config_path}', raw_dict, **kwargs)
 
 
+@ftrace()
 def loads(config_str: str, raw_dict=False, **kwargs):
     loader = DraconLoader(**kwargs)
     if raw_dict:

@@ -36,7 +36,7 @@ class Instruction:
         raise NotImplementedError
 
 
-# @ftrace(watch=[])
+@ftrace()
 def process_instructions(comp_res: CompositionResult, loader) -> CompositionResult:
     # then all other instructions
     instruction_nodes = []
@@ -119,7 +119,7 @@ class Define(Instruction):
 
         return var_name, value, parent_node
 
-    @ftrace(False, watch=[])
+    @ftrace(watch=[])
     def process(self, comp_res: CompositionResult, path: KeyPath, loader):
         var_name, value, parent_node = self.get_name_and_value(comp_res, path, loader)
 
@@ -148,7 +148,7 @@ class SetDefault(Define):
             return SetDefault()
         return None
 
-    @ftrace(False, watch=[])
+    @ftrace(watch=[])
     def process(self, comp_res: CompositionResult, path: KeyPath, loader):
         var_name, value, parent_node = self.get_name_and_value(comp_res, path, loader)
 
@@ -342,7 +342,7 @@ class If(Instruction):
             return If()
         return None
 
-    @ftrace(False, watch=[])
+    @ftrace(watch=[])
     def process(self, comp_res: CompositionResult, path: KeyPath, loader):
         if not path.is_mapping_key():
             raise ValueError(f"instruction 'if' must be a key, but got {path}")

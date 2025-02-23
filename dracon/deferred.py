@@ -72,9 +72,11 @@ class DeferredNode(ContextNode, Generic[T]):
         self._loader = state['_loader']
         self._full_composition = state['_full_composition']
 
+    @ftrace(watch=[])
     def update_context(self, context):
         add_to_context(context, self)
 
+    @ftrace(watch=[])
     def compose(
         self,
         context: Optional[Dict[str, Any]] = None,
@@ -128,6 +130,7 @@ class DeferredNode(ContextNode, Generic[T]):
 
         return self.path.get_obj(compres.root)
 
+    @ftrace(watch=[])
     def construct(self, **kwargs) -> T:  # type: ignore
         assert self._loader, "DeferredNode must have a loader to be constructed"
         compres = self.compose(**kwargs)
@@ -166,6 +169,7 @@ class DeferredNode(ContextNode, Generic[T]):
         return new_obj
 
 
+@ftrace(watch=[])
 def make_deferred(value: Any, loader=None, **kwargs) -> DeferredNode:
     from dracon.loader import DraconLoader
 
@@ -187,7 +191,7 @@ def make_deferred(value: Any, loader=None, **kwargs) -> DeferredNode:
 ## {{{                     --     process deferred     --
 
 
-# @ftrace(watch=[])
+@ftrace(watch=[])
 def process_deferred(comp: CompositionResult, force_deferred_at: List[KeyPath | str] | None = None):
     """
     Wraps in a DeferredNode any node with a tag starting with '!deferred', or in a path that matches any in force_deferred_at

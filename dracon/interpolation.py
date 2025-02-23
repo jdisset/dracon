@@ -418,6 +418,7 @@ class InterpolableNode(ContextNode):
 ##───────────────────────────────────────────────────────────────────────────}}}
 
 
+@ftrace()
 def preprocess_references(comp_res):
     comp_res.find_special_nodes('interpolable', lambda n: isinstance(n, InterpolableNode))
     comp_res.sort_special_nodes('interpolable')
