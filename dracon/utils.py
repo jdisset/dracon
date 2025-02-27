@@ -277,7 +277,7 @@ def node_repr(
     prefix='',
     is_last=True,
     is_root=True,
-    enable_colors=True,
+    enable_colors=False,
     context_paths=None,
     _seen=None,
 ):
