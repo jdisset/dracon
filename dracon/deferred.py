@@ -89,6 +89,7 @@ class DeferredNode(ContextNode, Generic[T]):
 
         assert self._loader
         assert self._full_composition
+
         assert isinstance(self.path, KeyPath)
         assert isinstance(self.value, Node)
 
@@ -127,6 +128,7 @@ class DeferredNode(ContextNode, Generic[T]):
         )
 
         compres = self._working_loader.post_process_composed(composition)
+
 
         return self.path.get_obj(compres.root)
 
