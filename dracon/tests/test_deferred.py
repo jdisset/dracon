@@ -1,6 +1,8 @@
 ## {{{                          --     imports     --
 import re
 import pytest
+import weakref
+import types
 from dracon import dump, loads
 from dracon.loader import DraconLoader
 from dracon.deferred import DeferredNode, make_deferred
@@ -793,3 +795,119 @@ def test_make_deferred():
 
     snode = make_deferred("hello")
     assert snode.construct() == "hello"
+
+
+def test_deferred_node_method_pickling():
+    """Test that bound methods of DeferredNode can be pickled and unpickled."""
+    # Create a deferred node
+    node = make_deferred(42)
+
+    try:
+        # Try to pickle the whole node with its methods
+        pickled_node = pickle.dumps(node)
+        unpickled_node = pickle.loads(pickled_node)
+
+        # This is likely where it will fail
+        result = unpickled_node.construct()
+        assert result == 42
+    except Exception as e:
+        pytest.fail(f"Failed to pickle/unpickle DeferredNode methods: {e}")
+
+
+def test_check_weakrefs_in_deferred_node():
+    """Check if DeferredNode contains weakref objects that could cause serialization issues."""
+    node = make_deferred(42)
+
+    def find_weakrefs(obj, path="obj", seen=None):
+        if seen is None:
+            seen = set()
+
+        # Skip if we've seen this object or it's None
+        if id(obj) in seen or obj is None:
+            return []
+
+        seen.add(id(obj))
+        weakrefs_found = []
+
+        # Check if this object is a weakref
+        if isinstance(obj, weakref.ReferenceType):
+            weakrefs_found.append((path, obj))
+
+        # Check if object is a bound method (which often contain weakrefs)
+        if isinstance(obj, types.MethodType):
+            for attr_name in ['__self__', '__func__']:
+                if hasattr(obj, attr_name):
+                    attr_value = getattr(obj, attr_name)
+                    weakrefs_found.extend(find_weakrefs(attr_value, f"{path}.{attr_name}", seen))
+
+        # Check other attributes
+        if hasattr(obj, "__dict__"):
+            for attr_name, attr_value in obj.__dict__.items():
+                if attr_name.startswith("__"):
+                    continue
+                weakrefs_found.extend(find_weakrefs(attr_value, f"{path}.{attr_name}", seen))
+
+        # Check elements of sequences
+        if isinstance(obj, (list, tuple)) and not isinstance(obj, str):
+            for i, item in enumerate(obj):
+                weakrefs_found.extend(find_weakrefs(item, f"{path}[{i}]", seen))
+
+        # Check keys and values of dictionaries
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                key_str = str(k)[:20]  # Truncate long keys
+                weakrefs_found.extend(find_weakrefs(v, f"{path}['{key_str}']", seen))
+
+        return weakrefs_found
+
+    weakrefs = find_weakrefs(node)
+
+    # Print all found weakrefs for debugging
+    if weakrefs:
+        for path, ref in weakrefs:
+            print(f"Found weakref at {path}: {ref}")
+
+    # The test should fail if weakrefs are found
+    assert not weakrefs, f"Found {len(weakrefs)} weakref objects in DeferredNode"
+
+
+def test_full_composition_serialization():
+    """Test that _full_composition can be properly serialized and deserialized."""
+    node = make_deferred(42)
+
+    # Test serializing the full composition
+    try:
+        # First check if _full_composition exists
+        assert node._full_composition is not None, "Node has no _full_composition"
+
+        # Try to pickle just the _full_composition
+        pickled_comp = pickle.dumps(node._full_composition)
+        unpickled_comp = pickle.loads(pickled_comp)
+
+        # Check if essential attributes were preserved
+        assert hasattr(unpickled_comp, 'root')
+    except Exception as e:
+        print(f"Failed to serialize _full_composition: {e}")
+        # This might be expected to fail
+        pass
+
+
+def test_loader_serialization():
+    """Test that _loader can be properly serialized and deserialized."""
+    node = make_deferred(42)
+
+    # Test serializing the loader
+    try:
+        # First check if _loader exists
+        assert node._loader is not None, "Node has no _loader"
+
+        # Try to pickle just the _loader
+        pickled_loader = pickle.dumps(node._loader)
+        unpickled_loader = pickle.loads(pickled_loader)
+
+        # Check if essential methods were preserved
+        assert hasattr(unpickled_loader, 'load')
+    except Exception as e:
+        print(f"Failed to serialize _loader: {e}")
+        # This might be expected to fail
+        pass

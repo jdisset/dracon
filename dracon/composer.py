@@ -45,7 +45,6 @@ class CompositionResult(BaseModel):
     special_nodes: dict[SpecialNodeCategory, list[KeyPath]] = {}
     anchor_paths: Optional[dict[str, KeyPath]] = None
     node_map: Optional[dict[KeyPath, Node]] = None
-    # parent_path: KeyPath = ROOTPATH
 
     def __deepcopy__(self, memo=None):
         cr = CompositionResult(
@@ -169,6 +168,20 @@ class CompositionResult(BaseModel):
         for path, node in self.node_map.items():
             if is_anchor(node):
                 self.anchor_paths[node.anchor] = path
+
+    def remove_from_context(self, ctx_key: str | list[str]):
+        if isinstance(ctx_key, str):
+            ctx_key = [ctx_key]
+        for key in ctx_key:
+            self.walk_no_path(
+                lambda node: node.context.pop(key, None) if hasattr(node, 'context') else None
+            )
+
+    def print_context_keys(self):
+        # print path: key1, key2, ...
+        for path, node in self.node_map.items():
+            if hasattr(node, 'context'):
+                print(f'{path}: {", ".join(node.context.keys())}')
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
