@@ -9,6 +9,8 @@ import copy
 from dracon.interpolation_utils import find_field_references
 from dracon.include import compose_from_include_str
 import pytest
+from dracon.keypath import ROOTPATH
+from dracon.dracontainer import resolve_all_lazy
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 

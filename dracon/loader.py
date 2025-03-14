@@ -30,8 +30,8 @@ from dracon.utils import (
     ftrace,
     deepcopy,
     make_hashable,
+    ser_debug,
 )
-import dracon.utils as utils
 
 from dracon.interpolation import InterpolableNode, preprocess_references
 from dracon.merge import process_merges, add_to_context, merged, MergeKey
@@ -39,7 +39,7 @@ from dracon.instructions import process_instructions
 from dracon.deferred import DeferredNode, process_deferred
 from dracon.representer import DraconRepresenter
 
-from dracon.lazy import InterpolationError, DraconError
+from dracon.lazy import DraconError
 
 from dracon import dracontainer
 
@@ -86,6 +86,7 @@ class DraconLoader:
     ):
         self.custom_loaders = DEFAULT_LOADERS.copy()
         self.custom_loaders.update(custom_loaders or {})
+        self._capture_globals = capture_globals
         self._context_arg = context
         self._enable_interpolation = enable_interpolation
         self.referenced_nodes = {}
@@ -119,7 +120,7 @@ class DraconLoader:
                 'construct': partial(
                     construct,
                     custom_loaders=self.custom_loaders,
-                    capture_globals=True,
+                    capture_globals=self._capture_globals,
                     enable_interpolation=self._enable_interpolation,
                     context=self.context,
                 )
@@ -142,7 +143,7 @@ class DraconLoader:
     def copy(self):
         new_loader = DraconLoader(
             custom_loaders=self.custom_loaders.copy(),
-            capture_globals=False,
+            capture_globals=self._capture_globals,
             base_dict_type=self.base_dict_type,
             base_list_type=self.base_list_type,
             enable_interpolation=self._enable_interpolation,
@@ -202,6 +203,8 @@ class DraconLoader:
 
     @ftrace()
     def post_process_composed(self, comp: CompositionResult):
+        ser_debug(self, operation='deepcopy')
+        ser_debug(comp, operation='deepcopy')
         comp = preprocess_references(comp)
         comp = process_deferred(comp, force_deferred_at=self.deferred_paths)  # type: ignore
         comp.walk_no_path(

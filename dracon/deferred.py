@@ -1,7 +1,8 @@
 ## {{{                          --     imports     --
 from typing import Optional, Any, List, Dict, TypeVar, Generic, Type
 import dracon.utils as utils
-from dracon.utils import ftrace, deepcopy
+from dracon.utils import ftrace, deepcopy, ser_debug
+from dracon.utils import ShallowDict
 from dracon.composer import (
     CompositionResult,
     walk_node,
@@ -83,6 +84,7 @@ class DeferredNode(ContextNode, Generic[T]):
         deferred_paths: Optional[list[KeyPath | str]] = None,
         use_original_root: bool = False,
     ) -> Node:
+
         # rather than composing just this node, we can hold a copy of the entire composition
         # and simply unlock the deferred node when we need to compose it. This way we can
         # have references to other nodes in the entire conf
@@ -107,7 +109,11 @@ class DeferredNode(ContextNode, Generic[T]):
         composition = self._full_composition
         value = self.value
 
+        ser_debug(context, operation='deepcopy')
+        ser_debug(self.context, operation='deepcopy')
+
         merged_context = merged(self.context, context or {}, MergeKey(raw="{<~}[<~]"))
+        merged_context = ShallowDict(merged_context)
 
         composition.set_at(self.path, value)
 
@@ -128,7 +134,6 @@ class DeferredNode(ContextNode, Generic[T]):
         )
 
         compres = self._working_loader.post_process_composed(composition)
-
 
         return self.path.get_obj(compres.root)
 
@@ -155,7 +160,13 @@ class DeferredNode(ContextNode, Generic[T]):
     def __hash__(self):
         return context_node_hash(self)
 
-    def copy(self):
+    def copy(self, clear_context=False, reroot=False):
+        """Create a copy with optional context clearing."""
+
+        ser_debug(self.value, operation='deepcopy')
+        ser_debug(self.path, operation='deepcopy')
+        ser_debug(self._full_composition, operation='deepcopy')
+
         new_obj = DeferredNode(
             value=deepcopy(self.value),
             path=deepcopy(self.path),
@@ -164,21 +175,27 @@ class DeferredNode(ContextNode, Generic[T]):
             end_mark=self.end_mark,
             anchor=self.anchor,
             comment=self.comment,
-            context=deepcopy(self.context),
+            context={} if clear_context else self.context.copy(),  # Optionally clear context
         )
         new_obj._loader = self._loader.copy() if self._loader else None
-        new_obj._full_composition = deepcopy(self._full_composition)
+        if not reroot:
+            new_obj._full_composition = deepcopy(self._full_composition)
+        else:
+            new_comp = deepcopy(self._full_composition.rerooted(self.path))
+            new_obj._full_composition = new_comp
+            new_obj.path = ROOTPATH
         return new_obj
 
 
 @ftrace(watch=[])
-def make_deferred(value: Any, loader=None, **kwargs) -> DeferredNode:
+def make_deferred(value: Any, loader=None, context=None, **kwargs) -> DeferredNode:
     from dracon.loader import DraconLoader
+    from dracon.utils import ShallowDict
 
     if loader is None:
         loader = DraconLoader()
 
-    n = DeferredNode(value=make_node(value, **kwargs))
+    n = DeferredNode(value=make_node(value, **kwargs), context=context or ShallowDict())
     comp = CompositionResult(root=n)
 
     n.path = ROOTPATH

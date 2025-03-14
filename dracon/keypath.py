@@ -80,7 +80,7 @@ def simplify_parts_recursive(
 # return simplify_parts_recursive(tuple(parts))
 
 
-@lru_cache(maxsize=1000)
+@lru_cache(maxsize=10000)
 def simplify_parts_cached(parts: Tuple) -> Tuple[Union[Hashable, KeyPathToken], ...]:
     """
     Non-recursive version of simplify_parts that processes parts from left to right using a stack.
@@ -132,6 +132,8 @@ def simplify_parts_cached(parts: Tuple) -> Tuple[Union[Hashable, KeyPathToken], 
 
 
 def simplify_parts(parts):
+    if not parts:
+        return tuple()
     return simplify_parts_cached(tuple(parts))
 
 
@@ -291,7 +293,7 @@ class KeyPath:
         return self.copy().down(other)
 
     def copy(self) -> 'KeyPath':
-        kc = KeyPath([])
+        kc = KeyPath([], simplify=False)
         kc.parts = self.parts.copy()
         kc.is_simple = self.is_simple
         return kc
@@ -388,18 +390,23 @@ class KeyPath:
             raise ValueError(f'Cannot get object from path with wildcards: {self}')
 
         res = obj
-        for i, part in enumerate(self.parts):
-            if part == KeyPathToken.UP:
-                raise ValueError(f'Cannot get object from unsimplifiable path: {self}')
-            if part == KeyPathToken.ROOT:
-                continue
-            if part == KeyPathToken.MAPPING_KEY:
-                if i != len(self.parts) - 2:
-                    raise ValueError(f'Invalid mapping key in path: {self}')
-                assert hasattr(res, 'get_key')
-                res = res.get_key(self.parts[-1])
-                return res
-            res = _get_obj_impl(res, part, create_path_if_not_exists, default_mapping_constructor)
+        try:
+            for i, part in enumerate(self.parts):
+                if part == KeyPathToken.UP:
+                    raise ValueError(f'Cannot get object from unsimplifiable path: {self}')
+                if part == KeyPathToken.ROOT:
+                    continue
+                if part == KeyPathToken.MAPPING_KEY:
+                    if i != len(self.parts) - 2:
+                        raise ValueError(f'Invalid mapping key in path: {self}')
+                    assert hasattr(res, 'get_key')
+                    res = res.get_key(self.parts[-1])
+                    return res
+                res = _get_obj_impl(
+                    res, part, create_path_if_not_exists, default_mapping_constructor
+                )
+        except AttributeError as e:
+            raise AttributeError(f'Could not get object from path: {self}') from e
         return res
 
     def is_mapping_key(self, simplify=False) -> bool:

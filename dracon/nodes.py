@@ -1,13 +1,7 @@
 ## {{{                          --     imports     --
 from ruamel.yaml.nodes import Node, MappingNode, SequenceNode, ScalarNode
 from ruamel.yaml.tag import Tag
-from dracon.utils import (
-    dict_like,
-    list_like,
-    node_repr,
-    deepcopy,
-    make_hashable,
-)
+from dracon.utils import dict_like, list_like, node_repr, deepcopy, make_hashable, ShallowDict
 from typing import Any, Hashable, Optional
 ##────────────────────────────────────────────────────────────────────────────}}}
 
@@ -110,7 +104,7 @@ class ContextNode(DraconScalarNode):
         tag=None,
         anchor=None,
         comment=None,
-        context: Optional[dict[str, Any]] = None,
+        context=None,
     ):
         DraconScalarNode.__init__(
             self,
@@ -121,28 +115,30 @@ class ContextNode(DraconScalarNode):
             comment=comment,
             anchor=anchor,
         )
-        self.context = context or {}
-
-        # deepcopy still shallows copy the context:
-        def __deepcopy__(self, memo):
-            return self.__class__(
-                value=deepcopy(self.value, memo),
-                start_mark=self.start_mark,
-                end_mark=self.end_mark,
-                tag=self.tag,
-                anchor=self.anchor,
-                comment=self.comment,
-                context=self.context.copy(),
-            )
+        self.context = (
+            ShallowDict(context or {}) if not isinstance(context, ShallowDict) else context
+        )
 
     def __getstate__(self):
         state = DraconScalarNode.__getstate__(self)
-        state['context'] = self.context
+        state['context'] = self.context.copy()
         return state
 
     def __setstate__(self, state):
         DraconScalarNode.__setstate__(self, state)
         self.context = state['context']
+
+    def copy(self):
+        """Create a shallow copy with the context also shallow copied."""
+        return self.__class__(
+            value=self.value,
+            start_mark=self.start_mark,
+            end_mark=self.end_mark,
+            tag=self.tag,
+            anchor=self.anchor,
+            comment=self.comment,
+            context=self.context.copy(),  # Shallow copy the context
+        )
 
 
 class IncludeNode(ContextNode):

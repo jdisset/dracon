@@ -1,4 +1,5 @@
 from dracon.merge import merged, MergeKey, MergeMode, MergePriority
+from dracon.utils import ShallowDict
 
 
 def test_basic_merge():
@@ -105,4 +106,22 @@ def test_merge_nested_dicts_with_lists():
     assert result == {"a": {"x": [1, 2, 3, 4], "y": 5}, "b": 3, "c": 6}
 
 
+def test_context_merge_with_large_objects():
+    large_data1 = [i for i in range(100000)]
+    large_data2 = [i for i in range(100000, 200000)]
 
+    context1 = ShallowDict({"data1": large_data1, "common_key": "value1"})
+    context2 = ShallowDict({"data2": large_data2, "common_key": "value2"})
+
+    merged_context_existing = merged(context1, context2, MergeKey(raw="{+>}"))
+    merged_context_new = merged(context1, context2, MergeKey(raw="{+<}"))
+
+    # large objects are preserved as references, not copies
+    assert merged_context_existing["data1"] is large_data1
+    assert merged_context_existing["data2"] is large_data2
+    assert merged_context_new["data1"] is large_data1
+    assert merged_context_new["data2"] is large_data2
+
+    # merge priority works correctly
+    assert merged_context_existing["common_key"] == "value1"  # Existing preserved
+    assert merged_context_new["common_key"] == "value2"  # New took priority

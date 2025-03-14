@@ -35,7 +35,6 @@ from asteval import Interpreter
 
 import pickle
 import multiprocessing
-import concurrent.futures
 import operator
 
 ##────────────────────────────────────────────────────────────────────────────}}}
@@ -911,3 +910,32 @@ def test_loader_serialization():
         print(f"Failed to serialize _loader: {e}")
         # This might be expected to fail
         pass
+
+
+def test_large_context_not_duplicated():
+    """Test that large context objects aren't duplicated."""
+    from dracon.deferred import DeferredNode, make_deferred
+    from dracon.nodes import DraconMappingNode, DraconScalarNode
+    from dracon.keypath import ROOTPATH
+    import sys
+
+    large_data = [i for i in range(100)]
+    ref_count_before = sys.getrefcount(large_data)
+
+    context = {"large_data": large_data}
+
+    nodes = []
+    for i in range(10):
+        node = make_deferred(f"test{i}", context=context)
+        nodes.append(node)
+
+    for node in nodes:
+        assert node.context["large_data"] is large_data
+
+    ref_count_after = sys.getrefcount(large_data)
+    assert ref_count_after <= ref_count_before + len(nodes) + 3  # Allow a few extra references
+
+    result = nodes[0].construct()
+
+    assert large_data[0] == 0
+    assert large_data[-1] == 99

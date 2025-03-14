@@ -18,9 +18,16 @@ from typing import (
     get_args,
 )
 
+import pickle
+import copy
+import sys
 from dracon.trace import ftrace as ftrace
+import os
 
+import logging
 from collections.abc import MutableMapping
+
+logger = logging.getLogger(__name__)
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 ## {{{                      --     dict/list like     --{{{
@@ -51,15 +58,14 @@ class ShallowDict(MutableMapping, Generic[K, V]):
         return len(self._dict)
 
     def __copy__(self):
-        # Always return a shallow copy
+        # always return a shallow copy
         return ShallowDict(self._dict)
 
     def __deepcopy__(self, memo):
-        # Force deep copy to behave as a shallow copy
+        # force deep copy to behave as a shallow copy
         return self.__copy__()
 
     def copy(self):
-        # Provide a custom copy method for explicit shallow copying
         return self.__copy__()
 
     def __repr__(self):
@@ -152,6 +158,189 @@ def list_like(obj) -> bool:
 ## {{{                         --     deepcopy     --
 
 
+def debug_serialization(
+    obj, operation='pickle', path='', max_depth=20, max_size_mb=None, seen=None
+):
+    if not os.getenv('ENABLE_SER_DEBUG', False):
+        return
+
+    if seen is None:
+        seen = set()
+    output = {}
+    if max_depth <= 0:
+        return output
+
+    if id(obj) in seen:
+        return output
+    seen.add(id(obj))
+
+    try:
+        if operation == 'pickle':
+            pickle.dumps(obj)
+        elif operation == 'dill':
+            import dill
+
+            dill.dumps(obj)
+        elif operation == 'sizeof':
+            from .asizeof import asizeof
+
+            s = asizeof(obj)
+            if (max_size_mb is not None) and (s > max_size_mb * 1024 * 1024):
+                return {
+                    "path": path,
+                    "operation": operation,
+                    "err": f"SIZE ERR: objsize = {s:.2f} bytes",
+                    "failing_children": [],
+                }
+        elif operation == 'deepcopy':
+            import copy
+
+            copy.deepcopy(obj)
+        else:
+            raise ValueError(f"Unsupported operation: {operation}")
+    except Exception as e:
+        failing_children = []
+
+        if hasattr(obj, "context"):
+            result = debug_serialization(
+                obj.context,
+                operation,
+                path=f"{path}.context",
+                max_depth=max_depth - 1,
+                max_size_mb=max_size_mb,
+                seen=seen,
+            )
+            if result:
+                failing_children.append(result)
+
+        if dict_like(obj):
+            for k, v in obj.items():
+                result = debug_serialization(
+                    v,
+                    operation,
+                    path=f"{path}[{k}]",
+                    max_depth=max_depth - 1,
+                    max_size_mb=max_size_mb,
+                    seen=seen,
+                )
+                if result:
+                    failing_children.append(result)
+
+        elif list_like(obj):
+            for i, v in enumerate(obj):
+                result = debug_serialization(
+                    v,
+                    operation,
+                    path=f"{path}[{i}]",
+                    max_depth=max_depth - 1,
+                    max_size_mb=max_size_mb,
+                    seen=seen,
+                )
+                if result:
+                    failing_children.append(result)
+
+        elif hasattr(obj, "__dict__"):
+            for k, v in obj.__dict__.items():
+                result = debug_serialization(
+                    v,
+                    operation,
+                    path=f"{path}.{k}",
+                    max_depth=max_depth - 1,
+                    max_size_mb=max_size_mb,
+                    seen=seen,
+                )
+                if result:
+                    failing_children.append(result)
+
+        elif hasattr(obj, "items") and not isinstance(obj, (str, bytes)):
+            try:
+                for k, v in obj.items():
+                    result = debug_serialization(
+                        v,
+                        operation,
+                        path=f"{path}[{k}]",
+                        max_depth=max_depth - 1,
+                        max_size_mb=max_size_mb,
+                        seen=seen,
+                    )
+                    if result:
+                        failing_children.append(result)
+            # somethings might change size while iterating:
+            except RuntimeError:
+                pass
+
+        elif hasattr(obj, "__iter__") and not isinstance(obj, (str, bytes)):
+            for i, v in enumerate(obj):
+                result = debug_serialization(
+                    v,
+                    operation,
+                    path=f"{path}[{i}]",
+                    max_depth=max_depth - 1,
+                    max_size_mb=max_size_mb,
+                    seen=seen,
+                )
+                if result:
+                    failing_children.append(result)
+
+        elif hasattr(obj, "__getitem__") and not isinstance(obj, (str, bytes)):
+            try:
+                for i in range(len(obj)):
+                    result = debug_serialization(
+                        obj[i],
+                        operation,
+                        path=f"{path}[{i}]",
+                        max_depth=max_depth - 1,
+                        max_size_mb=max_size_mb,
+                        seen=seen,
+                    )
+                    if result:
+                        failing_children.append(result)
+            except (TypeError, IndexError, KeyError):
+                pass  # some objects with __getitem__ don't support integer indexing
+
+        try:
+            errmsg = f"{type(e).__name__}: {str(e)}"
+        except Exception as e:
+            errmsg = f"Error in exception handling: {str(e)}"
+
+        output = {
+            "path": path,
+            "operation": operation,
+            "err": errmsg,
+            "failing_children": failing_children,
+        }
+
+    return output
+
+
+def ser_debug(obj, operation='deepcopy', **kwargs):
+    out = debug_serialization(obj, operation=operation, **kwargs)
+    if out:
+        errors = {}
+
+        def collect_errors(err):
+            nonlocal errors
+            if not err["failing_children"]:
+                errors[err["path"]] = err["err"]
+            else:
+                for child in err["failing_children"]:
+                    collect_errors(child)
+
+        collect_errors(out)
+        if errors:
+            # find original call to this ser_debug function to get the caller's line number and file name
+            import inspect
+
+            stack = inspect.stack()
+            lineno = stack[1].lineno
+            filename = stack[1].filename
+            logger.error(f"Serialization error in {filename}:{lineno}")
+
+            for k, v in errors.items():
+                logger.error(f"{k}: {v}")
+    return out
+
+
 def make_hashable(obj: Any) -> Hashable:
     """
     Recursively converts unhashable objects into hashable ones.
@@ -230,37 +419,26 @@ def _try_marshal(obj: T) -> Optional[T]:
 
 
 def _deepcopy(obj: T, memo=None) -> T:
-    if obj is None:
-        return obj
+    # if memo is None:
+    #     memo = {}
 
-    if memo is None:
-        memo = {}
+    # obj_id = id(obj)
+    # if obj_id in memo:
+    #     return memo[obj_id]
 
-    obj_id = id(obj)
-    if obj_id in memo:
-        return memo[obj_id]
-
-    if hasattr(obj, '__deepcopy__'):
-        result = obj.__deepcopy__(memo)
-        memo[obj_id] = result
-        return result
-
-    result = _try_marshal(obj)
-    if result is not None:
-        memo[obj_id] = result
-        return result
+    # if hasattr(obj, '__deepcopy__'):
+    #     result = obj.__deepcopy__(memo)
+    #     memo[obj_id] = result
+    #     return result
 
     try:
-        import copy
-
         return copy.deepcopy(obj, memo)
 
     except Exception as e:
         if isinstance(obj, (ModuleType, FunctionType, type)):
             return obj  # Return the object itself for modules, functions and types
         else:
-            # print(f"Failed to deepcopy object of type {type(obj)}")
-            return copy.copy(obj)  # Fallback to shallow copy for other types
+            raise e
 
 
 T = TypeVar('T')
@@ -279,13 +457,12 @@ def node_repr(
     is_root=True,
     enable_colors=False,
     context_paths=None,
+    context_filter=None,
+    show_biggest_context=0,  # show n biggest variables in context
     _seen=None,
 ):
     if _seen is None:
         _seen = set()
-
-    if context_paths is None:
-        context_paths = ['/var']
 
     node_id = id(node)
     if node_id in _seen:
@@ -352,28 +529,68 @@ def node_repr(
         }
 
         def format_context(node):
-            if not hasattr(node, 'context') or not node.context or not context_paths:
+            if (
+                not hasattr(node, 'context')
+                or not node.context
+                or (not context_paths and not context_filter and not show_biggest_context)
+            ):
                 return ''
 
             # Convert string paths to KeyPath objects
             from dracon.keypath import KeyPath
 
-            paths = [KeyPath(p) if isinstance(p, str) else p for p in context_paths]
+            paths = (
+                [KeyPath(p) if isinstance(p, str) else p for p in context_paths]
+                if context_paths
+                else []
+            )
 
-            # Filter context based on paths
+            # Filter context based on paths or custom filter
             matching_items = []
+            sizes = {}
+            if show_biggest_context > 0:
+                from .asizeof import asizeof
+
+                na = set()
+
+                for key, value in node.context.items():
+                    try:
+                        sizes[key] = asizeof(value)
+                    except Exception:
+                        na.add(key)
+                sizes = list(sorted(sizes.items(), key=lambda item: item[1], reverse=True))
+                # add N/A on top of the list
+                sizes = [(k, 'N/A') for k in na] + sizes[:show_biggest_context]
+                sizes = dict(sizes)
+
             for key, value in node.context.items():
                 key_path = f"/{key}"  # Convert context key to path format
                 if any(path.match(KeyPath(key_path)) for path in paths):
                     matching_items.append(f"{key}={value}")
+                elif context_filter and context_filter(key, value):
+                    matching_items.append(f"{key}={value}")
 
-            if matching_items:
+            if matching_items or show_biggest_context:
                 items_str = ', '.join(matching_items)
+                if show_biggest_context:
+
+                    def pretty_size(s):
+                        if isinstance(s, str):
+                            return s
+                        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+                            if s < 1000.0:
+                                return f"{s:.2f} {unit}"
+                            s /= 1000.0
+                        return f"{s:.2f} PB"
+
+                    items_str += ', '
+                    items_str += ', '.join(
+                        f"{key}={pretty_size(value)}" for key, value in sizes.items()
+                    )
                 return f'{CONTEXT_COLOR}[ctx: {items_str}]{RESET}'
             return ''
 
         def get_node_repr(node):
-            # Special handling for DeferredNode - just add the [DEFER] tag
             is_deferred = hasattr(node, '__class__') and node.__class__.__name__ == 'DeferredNode'
             if is_deferred:
                 defer_tag = NODE_TYPES.get('DeferredNode', '')
@@ -447,6 +664,8 @@ def node_repr(
                     is_root=False,
                     enable_colors=enable_colors,
                     context_paths=context_paths,
+                    context_filter=context_filter,
+                    show_biggest_context=show_biggest_context,
                     _seen=_seen,
                 )
                 output += child_output
@@ -465,6 +684,8 @@ def node_repr(
                     is_root=False,
                     enable_colors=enable_colors,
                     context_paths=context_paths,
+                    context_filter=context_filter,
+                    show_biggest_context=show_biggest_context,
                     _seen=_seen,
                 )
                 output += child_output

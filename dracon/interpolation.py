@@ -12,7 +12,7 @@ from typing import (
     Protocol,
     runtime_checkable,
 )
-from dracon.utils import DictLike, ftrace, deepcopy
+from dracon.utils import DictLike, ftrace, deepcopy, ser_debug
 import dracon.utils as utils
 from dracon.nodes import DraconMappingNode, ContextNode
 
@@ -170,6 +170,10 @@ def dracon_resolve(obj, **ctx):
     from dracon.merge import add_to_context
     from dracon.composer import walk_node
     from functools import partial
+
+    err = ser_debug(obj, operation='deepcopy')
+    if err:
+        print(f"Error in deepcopy when resolving {obj}")
 
     if isinstance(obj, Resolvable):
         newobj = deepcopy(obj).resolve(ctx)
@@ -413,6 +417,22 @@ class InterpolableNode(ContextNode):
     def flush_references(self):
         if '__DRACON_NODES' in self.context:
             del self.context['__DRACON_NODES']
+
+    def copy(self):
+        """Create a copy of the interpolable node with shallow copied context and referenced nodes."""
+        new_node = self.__class__(
+            value=self.value,
+            start_mark=self.start_mark,
+            end_mark=self.end_mark,
+            tag=self.tag,
+            anchor=self.anchor,
+            comment=self.comment,
+            context=self.context.copy(),
+            init_outermost_interpolations=self.init_outermost_interpolations,
+        )
+        if hasattr(self, 'referenced_nodes') and self.referenced_nodes is not None:
+            new_node.referenced_nodes = self.referenced_nodes
+        return new_node
 
 
 ##───────────────────────────────────────────────────────────────────────────}}}

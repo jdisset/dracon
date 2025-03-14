@@ -402,14 +402,12 @@ class Program(BaseModel, Generic[T]):
             return f"<<@{argname}: {value}"
 
         override_str = "\n".join([make_override(k, v) for k, v in args.items()])
-        custom_types = {self.conf_type.__name__: self.conf_type}
         loader = DraconLoader(
             enable_interpolation=True,
             base_dict_type=dict,
             base_list_type=list,
             **kwargs,
         )
-        loader.update_context(custom_types)
         loader.update_context(defined_vars)
 
         empty_model = self.conf_type.model_construct()
