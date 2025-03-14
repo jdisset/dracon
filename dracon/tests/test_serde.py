@@ -2,6 +2,10 @@ from dracon import dump, loads
 from dracon.loader import DraconLoader
 from pydantic import BaseModel, PlainSerializer
 from typing import Annotated, List, get_type_hints
+import pytest
+from dracon.nodes import ContextNode
+import gc
+import sys
 
 
 class ClassA(BaseModel):
@@ -18,6 +22,31 @@ TypeWithSer = Annotated[
     str,
     PlainSerializer(lambda x: f'custom_{x}'),
 ]
+
+
+def test_context_shallow_copy():
+    # Create a large object that would be expensive to deepcopy
+    large_data = [i for i in range(1000000)]
+    initial_ref_count = sys.getrefcount(large_data)
+
+    # Create a context with this large object
+    context = {"large_data": large_data}
+
+    # Create nodes with this context
+    nodes = [ContextNode(value=f"test{i}", context=context) for i in range(10)]
+
+    # Verify all nodes reference the same large_data object
+    for node in nodes:
+        assert node.context["large_data"] is large_data
+
+    # Verify reference count increased by expected amount
+    # (one for each node's context dict plus other references from the test)
+    expected_increase = len(nodes)
+    assert sys.getrefcount(large_data) <= initial_ref_count + expected_increase + 3
+
+    # Copy a node and verify the large data is not duplicated
+    copied_node = nodes[0].copy()
+    assert copied_node.context["large_data"] is large_data
 
 
 class ClassC(BaseModel):

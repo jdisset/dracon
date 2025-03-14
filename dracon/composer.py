@@ -76,13 +76,17 @@ class CompositionResult(BaseModel):
         walk_node(self.root, _callback, start_path=ROOTPATH)
 
     def update_paths(self):
+        # update the path attribute of all nodes
         assert self.node_map is not None
         for path, node in self.node_map.items():
             if hasattr(node, 'path'):
                 node.path = path  # type: ignore
 
     def rerooted(self, new_root_path: KeyPath):
-        return CompositionResult(root=new_root_path.get_obj(self.root))
+        cr = CompositionResult(root=new_root_path.get_obj(self.root))
+        cr.make_map()
+        cr.update_paths()
+        return cr
 
     def set_at(self, at_path: KeyPath, new_node: Node):
         if at_path == ROOTPATH:

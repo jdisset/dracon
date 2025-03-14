@@ -3,7 +3,7 @@ from typing import Optional, Any
 import re
 from pydantic import BaseModel
 from enum import Enum
-from dracon.utils import dict_like, DictLike, ListLike, ftrace, deepcopy, node_repr
+from dracon.utils import dict_like, DictLike, ListLike, ftrace, deepcopy, node_repr, ser_debug
 from dracon.composer import (
     CompositionResult,
     walk_node,
@@ -206,8 +206,37 @@ class Each(Instruction):
         if not path.is_mapping_key():
             raise ValueError(f"instruction 'each' must be a mapping key, but got {path}")
 
-        key_node = deepcopy(path.get_obj(comp_res.root))
-        value_node = deepcopy(path.removed_mapping_key().get_obj(comp_res.root))
+        base_key_node = path.get_obj(comp_res.root)
+        base_value_node = path.removed_mapping_key().get_obj(comp_res.root)
+
+        # logger.debug("testing serialization of key node")
+        # serr = ser_debug(base_key_node)
+        # if serr:
+        #     logger.error(f"ser_debug failed for keynode:\n{base_key_node}")
+        # logger.debug("testing serialization of value node")
+        # serr = ser_debug(base_value_node)
+        # if serr:
+        #     logger.error(f"ser_debug failed for valuenode:\n{base_value_node}")
+        #     if isinstance(base_value_node, DeferredNode):
+        #         logger.error("  valuenode is a deferred node")
+        #         serr = ser_debug(base_value_node.context)
+        #         if serr:
+        #             logger.error(
+        #                 f"ser_debug failed for valuenode.context:\n{base_value_node.context}"
+        #             )
+        #         serr = ser_debug(base_value_node.value)
+        #         if serr:
+        #             logger.error(f"ser_debug failed for valuenode.value:\n{base_value_node.value}")
+        #     else:
+        #         logger.error(f"  valuenode is a {type(base_value_node)}")
+        #         for i, n in enumerate(base_value_node):
+        #             serr = ser_debug(n)
+        #             if serr:
+        #                 logger.error(f"ser_debug failed for valuenode[{i}]:\n{n}")
+
+        key_node = base_key_node
+        value_node = base_value_node
+
         parent_node = path.parent.get_obj(comp_res.root)
 
         assert isinstance(parent_node, DraconMappingNode)
@@ -227,7 +256,7 @@ class Each(Instruction):
         )
 
         # Remove the original each instruction node
-        new_parent = deepcopy(parent_node)
+        new_parent = parent_node.copy()
         del new_parent[key_node.value]
 
         was_deferred = False
