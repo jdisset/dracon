@@ -418,6 +418,13 @@ class InterpolableNode(ContextNode):
         if '__DRACON_NODES' in self.context:
             del self.context['__DRACON_NODES']
 
+    # def __deepcopy__(self, memo):
+    #     # use ContextNode's deepcopy method
+    #     new_node = super().__deepcopy__(memo)
+    #     new_node.init_outermost_interpolations = self.init_outermost_interpolations
+    #     new_node.referenced_nodes = self.referenced_nodes
+    #     return new_node
+
     def copy(self):
         """Create a copy of the interpolable node with shallow copied context and referenced nodes."""
         new_node = self.__class__(

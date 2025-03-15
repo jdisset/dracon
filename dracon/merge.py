@@ -256,6 +256,10 @@ def merged(existing: Any, new: Any, k: MergeKey = DEFAULT_ADD_TO_CONTEXT_MERGE_K
 def add_to_context(context, item, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
     if hasattr(item, 'context'):
         item.context = context_add(item.context, context, merge_key)
+    if hasattr(item, '_clear_ctx') and item._clear_ctx:
+        for k in item._clear_ctx:
+            if k in item.context:
+                del item.context[k]
 
 
 @ftrace(inputs=False, output=False, watch=[])
@@ -271,8 +275,6 @@ def reset_context(item, ignore_dracon_namespace=True):
 @ftrace(inputs=False, output=False, watch=[])
 def context_add(base, newcontext, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
     m = merged(base, newcontext, merge_key)
-    # diff = dict_diff(newcontext, m)
-    # print('diff:', diff)
     return m
 
 

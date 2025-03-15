@@ -185,13 +185,20 @@ def debug_serialization(
             from .asizeof import asizeof
 
             s = asizeof(obj)
+            import numpy as np
+            import pandas as pd
+
             if (max_size_mb is not None) and (s > max_size_mb * 1024 * 1024):
-                return {
-                    "path": path,
-                    "operation": operation,
-                    "err": f"SIZE ERR: objsize = {s:.2f} bytes",
-                    "failing_children": [],
-                }
+                pretty_size = f"{s / 1024 / 1024:.2f} MB"
+                if isinstance(obj, (np.ndarray, pd.DataFrame, pd.Series)):
+                    return {
+                        "path": path,
+                        "operation": operation,
+                        "err": f"Size exceeds {max_size_mb} MB: {pretty_size}",
+                        "failing_children": [],
+                    }
+                raise ValueError(f"Size exceeds {max_size_mb} MB: {pretty_size}")
+
         elif operation == 'deepcopy':
             import copy
 

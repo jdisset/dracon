@@ -1,7 +1,7 @@
 ## {{{                          --     imports     --
 from typing import Optional, Any, List, Dict, TypeVar, Generic, Type
 import dracon.utils as utils
-from dracon.utils import ftrace, deepcopy, ser_debug
+from dracon.utils import ftrace, deepcopy, ser_debug, node_repr
 from dracon.utils import ShallowDict
 from dracon.composer import (
     CompositionResult,
@@ -41,20 +41,45 @@ class DeferredNode(ContextNode, Generic[T]):
 
     def __init__(
         self,
-        value: Node,
-        path: Optional[KeyPath] = None,
+        value: Node | T,
+        path=ROOTPATH,
         obj_type: Optional[Type[T]] = None,
+        clear_ctx: Optional[List[str] | bool] = None,
+        loader=None,
+        context=None,
+        comp=None,
         **kwargs,
     ):
-        super().__init__(tag='', value=value, **kwargs)
-
-        self.path = path
-        self.obj_type = obj_type
-
         from dracon.loader import DraconLoader
 
-        self._loader: Optional[DraconLoader] = None
-        self._full_composition: Optional[CompositionResult] = None
+        if not isinstance(value, Node):
+            value = make_node(value, **kwargs)
+
+        self._clear_ctx = []
+
+        if isinstance(clear_ctx, str):
+            clear_ctx = [clear_ctx]
+
+        if context is None or clear_ctx is True:
+            context = ShallowDict()
+
+        if isinstance(clear_ctx, list):
+            self._clear_ctx = clear_ctx
+
+        super().__init__(tag='', value=value, context=context, **kwargs)
+
+        self.obj_type = obj_type
+
+        for key in self._clear_ctx:
+            if key in self.context:
+                del self.context[key]
+
+        if loader is None:
+            self._loader = DraconLoader()
+        else:
+            self._loader = loader
+
+        self.path = path
 
     def __getstate__(self):
         state = DraconScalarNode.__getstate__(self)
@@ -63,6 +88,7 @@ class DeferredNode(ContextNode, Generic[T]):
         state['obj_type'] = self.obj_type
         state['_loader'] = self._loader
         state['_full_composition'] = self._full_composition
+        state['_clear_ctx'] = self._clear_ctx
         return state
 
     def __setstate__(self, state):
@@ -71,6 +97,7 @@ class DeferredNode(ContextNode, Generic[T]):
         self.context = state['context']
         self.obj_type = state['obj_type']
         self._loader = state['_loader']
+        self._clear_ctx = state['_clear_ctx']
         self._full_composition = state['_full_composition']
 
     @ftrace(watch=[])
@@ -84,10 +111,10 @@ class DeferredNode(ContextNode, Generic[T]):
         deferred_paths: Optional[list[KeyPath | str]] = None,
         use_original_root: bool = False,
     ) -> Node:
+        from dracon.loader import DraconLoader
 
-        # rather than composing just this node, we can hold a copy of the entire composition
-        # and simply unlock the deferred node when we need to compose it. This way we can
-        # have references to other nodes in the entire conf
+        if self._loader is None:
+            self._loader = DraconLoader()
 
         assert self._loader
         assert self._full_composition
@@ -95,16 +122,13 @@ class DeferredNode(ContextNode, Generic[T]):
         assert isinstance(self.path, KeyPath)
         assert isinstance(self.value, Node)
 
-        self._working_loader = self._loader
-
         deferred_paths = [KeyPath(p) if isinstance(p, str) else p for p in deferred_paths or []]
 
         logger.debug(f"Composing deferred node at {self.path}. deferred_paths={deferred_paths}")
         if not use_original_root:
             deferred_paths = [self.path + p[1:] for p in deferred_paths]
 
-        # self._working_loader.update_context(context or {})
-        self._working_loader.deferred_paths = deferred_paths
+        self._loader.deferred_paths = deferred_paths
 
         composition = self._full_composition
         value = self.value
@@ -119,7 +143,7 @@ class DeferredNode(ContextNode, Generic[T]):
 
         composition.walk_no_path(
             callback=partial(
-                add_to_context, self._working_loader.context, merge_key=MergeKey(raw='{>~}[>~]')
+                add_to_context, self._loader.context, merge_key=MergeKey(raw='{>~}[>~]')
             )
         )
 
@@ -133,15 +157,14 @@ class DeferredNode(ContextNode, Generic[T]):
             callback=partial(add_to_context, merged_context, merge_key=MergeKey(raw='{<~}[<~]')),
         )
 
-        compres = self._working_loader.post_process_composed(composition)
+        compres = self._loader.post_process_composed(composition)
 
         return self.path.get_obj(compres.root)
 
     @ftrace(watch=[])
     def construct(self, **kwargs) -> T:  # type: ignore
-        assert self._loader, "DeferredNode must have a loader to be constructed"
         compres = self.compose(**kwargs)
-        return self._working_loader.load_node(compres)
+        return self._loader.load_node(compres)
 
     @property
     def keypath_passthrough(self):
@@ -160,47 +183,70 @@ class DeferredNode(ContextNode, Generic[T]):
     def __hash__(self):
         return context_node_hash(self)
 
-    def copy(self, clear_context=False, reroot=False):
+    def copy(self, clear_context=False, reroot=False, deepcopy_composition=True):
         """Create a copy with optional context clearing."""
 
-        ser_debug(self.value, operation='deepcopy')
-        ser_debug(self.path, operation='deepcopy')
-        ser_debug(self._full_composition, operation='deepcopy')
+        value_copy = deepcopy(self.value)
+        context = {} if clear_context else self.context.copy()
 
         new_obj = DeferredNode(
-            value=deepcopy(self.value),
+            value=value_copy,
             path=deepcopy(self.path),
             obj_type=self.obj_type,
             start_mark=self.start_mark,
             end_mark=self.end_mark,
             anchor=self.anchor,
             comment=self.comment,
-            context={} if clear_context else self.context.copy(),  # Optionally clear context
+            context=context,
         )
         new_obj._loader = self._loader.copy() if self._loader else None
         if not reroot:
-            new_obj._full_composition = deepcopy(self._full_composition)
+            new_obj._full_composition = self._full_composition
         else:
-            new_comp = deepcopy(self._full_composition.rerooted(self.path))
+            new_comp = self._full_composition.rerooted(self.path)
             new_obj._full_composition = new_comp
             new_obj.path = ROOTPATH
+
+        if deepcopy_composition:
+            new_obj._full_composition = deepcopy(new_obj._full_composition)
+
         return new_obj
 
 
-@ftrace(watch=[])
-def make_deferred(value: Any, loader=None, context=None, **kwargs) -> DeferredNode:
-    from dracon.loader import DraconLoader
+def make_deferred(
+    value: Any,
+    loader=None,
+    context=None,
+    comp=None,
+    path=ROOTPATH,
+    clear_ctx=None,
+    reroot=False,
+    **kwargs,
+) -> DeferredNode:
     from dracon.utils import ShallowDict
 
-    if loader is None:
-        loader = DraconLoader()
+    if context is None or clear_ctx is True:
+        context = ShallowDict()
 
-    n = DeferredNode(value=make_node(value, **kwargs), context=context or ShallowDict())
-    comp = CompositionResult(root=n)
+    n = DeferredNode(
+        value=make_node(value, **kwargs),
+        context=context,
+        path=path,
+        clear_ctx=clear_ctx,
+    )
 
-    n.path = ROOTPATH
-    n._loader = loader
+    if comp is None:
+        comp = CompositionResult(root=n)
     n._full_composition = comp
+
+    n._loader = loader
+
+
+    if reroot:
+        n.path = ROOTPATH
+        n._full_composition = comp.rerooted(n.path)
+    else:
+        n._full_composition = comp
 
     return n
 
@@ -208,6 +254,64 @@ def make_deferred(value: Any, loader=None, context=None, **kwargs) -> DeferredNo
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 ## {{{                     --     process deferred     --
+
+
+def parse_query_params(query_string: str) -> Dict[str, Any]:
+    """
+    Parse URI-style query parameters into a dictionary with type conversion and list support
+    For list values, the key should be repeated with the same name.
+    For nested values, the key should be separated by a dot.
+    """
+
+    from urllib.parse import parse_qsl
+
+    params = {}
+    if not query_string:
+        return params
+
+    for key, value in parse_qsl(query_string, keep_blank_values=True):
+        if value.lower() == "true":
+            value = True
+        elif value.lower() == "false":
+            value = False
+        elif value.lower() == "null" or value.lower() == "none":
+            value = None
+        else:
+            try:
+                if value.isdigit() or (value.startswith("-") and value[1:].isdigit()):
+                    value = int(value)
+                else:
+                    value = float(value)
+            except (ValueError, TypeError):
+                pass
+
+        if "." in key:
+            parts = key.split(".")
+            current = params
+            for part in parts[:-1]:
+                if part not in current:
+                    current[part] = {}
+                elif not isinstance(current[part], dict):
+                    current[part] = {"_value": current[part]}
+                current = current[part]
+
+            last_part = parts[-1]
+            if last_part in current:
+                if isinstance(current[last_part], list):
+                    current[last_part].append(value)
+                else:
+                    current[last_part] = [current[last_part], value]
+            else:
+                current[last_part] = value
+        elif key in params:
+            if isinstance(params[key], list):
+                params[key].append(value)
+            else:
+                params[key] = [params[key], value]
+        else:
+            params[key] = value
+
+    return params
 
 
 @ftrace(watch=[])
@@ -234,16 +338,25 @@ def process_deferred(comp: CompositionResult, force_deferred_at: List[KeyPath | 
     deferred_nodes = sorted(deferred_nodes, key=lambda x: len(x[1]), reverse=True)
 
     for node, path in deferred_nodes:
+        qparams = {}
         if isinstance(node, DeferredNode):
             continue
 
-        # Get any existing context from the node
         node_context = {}
         if hasattr(node, 'context'):
             node_context = node.context
 
         if node.tag.startswith('!deferred'):
             node.tag = node.tag[len('!deferred') :]
+            if node.tag.startswith('::'):
+                end = node.tag[2:].find(':')
+                if end == -1:
+                    query_string = node.tag[2:]
+                else:
+                    query_string = node.tag[2:end]
+                qparams = parse_query_params(query_string)
+                node.tag = node.tag[end + 1 :]
+
             if node.tag.startswith(':'):
                 node.tag = '!' + node.tag[1:]
         else:
@@ -254,9 +367,14 @@ def process_deferred(comp: CompositionResult, force_deferred_at: List[KeyPath | 
         if node.tag == "":
             reset_tag(node)
 
-        new_node = DeferredNode(value=node, context=node_context)
+        new_node = make_deferred(
+            value=node,
+            path=path,
+            context=node_context,
+            comp=comp,
+            **qparams,
+        )
         comp.set_at(path, new_node)
-        new_node._full_composition = comp
 
     return comp
 
