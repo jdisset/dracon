@@ -31,6 +31,7 @@ from dracon.utils import (
     deepcopy,
     make_hashable,
     ser_debug,
+    node_repr,
 )
 
 from dracon.interpolation import InterpolableNode, preprocess_references
@@ -210,6 +211,7 @@ class DraconLoader:
         comp.walk_no_path(
             callback=partial(add_to_context, self.context, merge_key=MergeKey(raw='{>~}[>~]'))
         )
+        comp = self.update_deferred_nodes(comp)
         comp = process_instructions(comp, self)
         comp = self.process_includes(comp)
         comp, merge_changed = process_merges(comp)
@@ -240,8 +242,13 @@ class DraconLoader:
         deferred_nodes = sorted(deferred_nodes, key=lambda x: len(x[1]), reverse=True)
 
         for node, _ in deferred_nodes:
-            node._loader = self
+            if node._loader is None:
+                node._loader = self.copy()
             node._full_composition = comp_res
+            if node._clear_ctx:
+                for k in node._clear_ctx:
+                    node.context.pop(k, None)
+                    node._loader.context.pop(k, None)
 
         return comp_res
 

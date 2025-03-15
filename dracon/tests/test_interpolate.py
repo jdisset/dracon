@@ -678,3 +678,28 @@ def test_include():
 
     assert config.other.a == 3
     assert config.other.var_b_value == 15
+
+
+def test_each_ctx_is_shallow():
+    yaml_content = """
+    !set_default varlist : ['value1', 'value2']
+    list_content:
+      !each(var) ${varlist}:
+        - val: ${var}
+          valist: ${varlist}
+    """
+    loader = DraconLoader(enable_interpolation=True, base_dict_type=dict, base_list_type=list)
+    config = loader.loads(yaml_content)
+    assert isinstance(config, dict)
+    assert isinstance(config['list_content'], list)
+    assert len(config['list_content']) == 2
+    assert (
+        config['list_content'][0]['val'].context['varlist']
+        is config['list_content'][1]['val'].context['varlist']
+    )
+
+    resolve_all_lazy(config)
+
+    for i, c in enumerate(config['list_content']):
+        assert c['val'] == f"value{i+1}"
+        assert c['valist'] == ['value1', 'value2']

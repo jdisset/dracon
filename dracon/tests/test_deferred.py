@@ -212,6 +212,62 @@ def test_deferred_context_2():
     assert n.value == 42
 
 
+def test_deferred_context_3():
+    yaml_content = """
+    !set_default var : 0
+    val: ${var}
+    deferred_node: !deferred::clear_ctx=var
+        !set_default var : 1
+        val: ${var}
+    """
+    loader = DraconLoader(enable_interpolation=True, context={'var': 42})
+    config = loader.loads(yaml_content)
+    print(node_repr(config.deferred_node, context_paths=['/*'], enable_colors=True))
+    assert config.val == 42
+    n = config.deferred_node.construct()
+    assert n.val == 1
+
+
+def test_deferred_each_ctx():
+    yaml_content = """
+    !set_default varlist : ['value1', 'value2']
+    list_content:
+      !each(var) ${varlist}:
+        - !deferred
+          val: ${var}
+          valist: ${varlist}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+    assert len(config.list_content) == 2
+    assert all(isinstance(c, DeferredNode) for c in config.list_content)
+    assert config.list_content[0].context['varlist'] is config.list_content[1].context['varlist']
+    for i, c in enumerate(config.list_content):
+        c = c.construct()
+        assert c.val == f"value{i+1}"
+        assert c.valist == ['value1', 'value2']
+
+
+def test_deferred_context_4():
+    yaml_content = """
+    !set_default varlist : ['value1', 'value2']
+    list_content:
+      !each(var) ${varlist}:
+        - !deferred::clear_ctx=varlist
+          !set_default varlist : ['value3']
+          val: ${var}
+          valist: ${varlist}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+    print(node_repr(config, context_paths=['/*'], enable_colors=True))
+    for i, c in enumerate(config.list_content):
+        assert isinstance(c, DeferredNode)
+        c = c.construct()
+        assert c.val == f"value{i+1}"
+        assert c.valist == ['value3']
+
+
 def test_deferred_basic():
     yaml_content = """
     !define i42 : !int 42

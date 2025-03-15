@@ -1,6 +1,7 @@
 ## {{{                          --     imports     --
 from typing import Optional, Any
 import re
+import time
 from pydantic import BaseModel
 from enum import Enum
 from dracon.utils import dict_like, DictLike, ListLike, ftrace, deepcopy, node_repr, ser_debug
@@ -11,6 +12,7 @@ from dracon.composer import (
     DraconSequenceNode,
     IncludeNode,
 )
+from dracon.utils import ShallowDict
 from ruamel.yaml.nodes import Node
 from dracon.keypath import KeyPath, ROOTPATH
 from dracon.merge import merged, MergeKey, add_to_context
@@ -209,31 +211,6 @@ class Each(Instruction):
         base_key_node = path.get_obj(comp_res.root)
         base_value_node = path.removed_mapping_key().get_obj(comp_res.root)
 
-        # logger.debug("testing serialization of key node")
-        # serr = ser_debug(base_key_node)
-        # if serr:
-        #     logger.error(f"ser_debug failed for keynode:\n{base_key_node}")
-        # logger.debug("testing serialization of value node")
-        # serr = ser_debug(base_value_node)
-        # if serr:
-        #     logger.error(f"ser_debug failed for valuenode:\n{base_value_node}")
-        #     if isinstance(base_value_node, DeferredNode):
-        #         logger.error("  valuenode is a deferred node")
-        #         serr = ser_debug(base_value_node.context)
-        #         if serr:
-        #             logger.error(
-        #                 f"ser_debug failed for valuenode.context:\n{base_value_node.context}"
-        #             )
-        #         serr = ser_debug(base_value_node.value)
-        #         if serr:
-        #             logger.error(f"ser_debug failed for valuenode.value:\n{base_value_node.value}")
-        #     else:
-        #         logger.error(f"  valuenode is a {type(base_value_node)}")
-        #         for i, n in enumerate(base_value_node):
-        #             serr = ser_debug(n)
-        #             if serr:
-        #                 logger.error(f"ser_debug failed for valuenode[{i}]:\n{n}")
-
         key_node = base_key_node
         value_node = base_value_node
 
@@ -255,17 +232,9 @@ class Each(Instruction):
             f"Processing each instruction, key_node.context.{self.var_name}={key_node.context.get(self.var_name)}"
         )
 
-        # Remove the original each instruction node
+        # remove the original each instruction node
         new_parent = parent_node.copy()
         del new_parent[key_node.value]
-
-        was_deferred = False
-        deferred_ctx = {}
-        if isinstance(value_node, DeferredNode):
-            logger.debug(f"Processing an each instruction with a deferred node. {list_like=}")
-            was_deferred = True
-            deferred_ctx = value_node.context
-            value_node = value_node.value
 
         mkey = MergeKey(raw='{<~}[~<]')
         # Handle sequence values
@@ -276,29 +245,21 @@ class Each(Instruction):
 
             for item in list_like:
                 logger.debug(f"  each: {item=}")
-                item_ctx = merged(key_node.context, {self.var_name: item}, MergeKey(raw='{<~}[<~]'))
+                item_ctx = ShallowDict({self.var_name: item})
                 logger.debug(
                     f"  after merge into key_node.ctx, item_ctx.{self.var_name}={item_ctx.get(self.var_name)}"
                 )
                 for node in value_node.value:
-                    new_value_node = deepcopy(node)
-                    if was_deferred:
-                        logger.debug(
-                            f"  each: deferred node: {node_repr(new_value_node,context_paths=['**.'+self.var_name])}"
-                        )
-                        new_value_node = make_deferred(
-                            new_value_node, loader=loader, context=deferred_ctx
-                        )
-                    logger.debug(
-                        f"  each: Before merging context, new_value_node={node_repr(new_value_node, context_paths=['**.'+self.var_name])}"
-                    )
+                    if isinstance(node, DeferredNode):
+                        new_value_node = node.copy(deepcopy_composition=False)
+                    else:
+                        new_value_node = deepcopy(node)
+
                     walk_node(
                         node=new_value_node,
                         callback=partial(add_to_context, item_ctx, merge_key=mkey),
                     )
-                    logger.debug(
-                        f"  each: After merging item_ctx into new_value_node: {node_repr(new_value_node, context_paths=['**.'+self.var_name])}"
-                    )
+
                     new_parent.append(new_value_node)
 
         # Handle mapping values
