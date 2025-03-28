@@ -9,7 +9,7 @@ from cachetools.keys import hashkey
 DraconLoader = ForwardRef('DraconLoader')
 
 
-@cached(LRUCache(maxsize=1e6))
+@cached(LRUCache(maxsize=50))
 def read_from_pkg(path: str):
     pkg = None
 

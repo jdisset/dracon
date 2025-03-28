@@ -78,6 +78,10 @@ class pad_output(ContextDecorator):
         sys.stdout = self._old_stdout
 
 
+# alias to with_indent for backward compatibility
+with_indent = pad_output
+
+
 @dataclass
 class TraceConfig:
     """Configuration container for trace settings."""

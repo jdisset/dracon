@@ -23,6 +23,7 @@ import copy
 import sys
 from dracon.trace import ftrace as ftrace
 import os
+from dracon.trace import with_indent
 
 import logging
 from collections.abc import MutableMapping
