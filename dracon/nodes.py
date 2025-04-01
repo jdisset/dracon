@@ -128,6 +128,7 @@ class ContextNode(DraconScalarNode):
         DraconScalarNode.__setstate__(self, state)
         self.context = state['context']
 
+
     def copy(self):
         """Create a shallow copy with the context also shallow copied."""
         return self.__class__(

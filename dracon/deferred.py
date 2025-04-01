@@ -202,13 +202,16 @@ class DeferredNode(ContextNode, Generic[T]):
         new_obj._loader = self._loader.copy() if self._loader else None
         if not reroot:
             new_obj._full_composition = self._full_composition
+            if deepcopy_composition:
+                new_obj._full_composition = deepcopy(new_obj._full_composition)
         else:
-            new_comp = self._full_composition.rerooted(self.path)
+            # new_comp = self._full_composition.rerooted(self.path)
+            # new_obj._full_composition = new_comp
+            # new_obj.path = ROOTPATH
+            new_comp = CompositionResult(root=new_obj)
             new_obj._full_composition = new_comp
             new_obj.path = ROOTPATH
 
-        if deepcopy_composition:
-            new_obj._full_composition = deepcopy(new_obj._full_composition)
 
         return new_obj
 

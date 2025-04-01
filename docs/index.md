@@ -30,14 +30,15 @@ print(config.service.port)
 ```yaml
 # config.yaml
 database:
-  host: ${env:DB_HOST or 'localhost'}
+  host: *env:DB_HOST
   port: 5432
-  credentials: !include "file:./secrets.yaml"
+  credentials: !include file:./secrets.yaml
 
 service:
-  name: "MyService"
+  name: MyService
+  db_port: */database.port # Reference other values using absolute path ('/')
   port: ${8080 + instance_id} # assuming instance_id is defined in context
-  settings: !include "pkg:mypackage:settings/${env:ENV}.yaml"
+  settings: !include "pkg:mypackage:settings/${env:DB_SETTINGS}.yaml"
 ```
 
 ## Core Features
@@ -74,9 +75,9 @@ Control how configurations are merged using merge operators:
 
 ```yaml
 # Merge with different strategies
-<<{+>}: *file:base.yaml          # Append recursively, existing values take priority
-<<{~<}: *file:overrides.yaml     # Replace values, new values take priority
-<<{+>}@settings: *file:settings  # Merge at specific path
+<<{+>}: !include file:base.yaml # Append recursively, existing values take priority
+<<{~<}: !include file:overrides.yaml # Replace values, new values take priority
+<<{+>}@settings: !include file:settings # Merge at specific path
 ```
 
 ### Type-Safe Configurations

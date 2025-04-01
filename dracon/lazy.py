@@ -125,15 +125,18 @@ class LazyInterpolable(Lazy[T]):
     def __repr__(self):
         return f"LazyInterpolable({self.value})"
 
-    def resolve(self) -> T:
+    def resolve(self, context_override=None) -> T:
         if isinstance(self.value, str):
             try:
+                ctx = self.context if self.context is not None else {}
+                if context_override is not None:
+                    ctx.update(context_override)
                 self.value = evaluate_expression(
                     self.value,
                     self.current_path,
                     self.root_obj,
                     init_outermost_interpolations=self.init_outermost_interpolations,
-                    context=self.context,
+                    context=ctx,
                 )
             except Exception as e:
                 raise type(e)(f"Error resolving lazy value \"{self.value}\": {str(e)}") from None
@@ -175,100 +178,182 @@ def set_val(parent: Any, key, value: Any) -> None:
         try:
             parent[key] = value
         except TypeError:
-            raise AttributeError(f'Could not set attribute {key} in {parent}')
+            raise AttributeError(f'Could not set attribute {key} in {parent}') from None
 
 
 def num_array_like(obj):
     return hasattr(obj, 'dtype') and hasattr(obj, 'shape') and obj.dtype.kind in 'iuf'
 
 
-def resolve_all_lazy(
-    obj, root_obj=None, current_path=None, visited=None, iteration=0, max_iterations=5
-):
-    """
-    Resolves all lazy objects in the object using breadth-first traversal.
-    Added iteration limit and verification to ensure all lazy values are resolved.
-    """
+def collect_lazy_by_depth(obj, path=ROOTPATH, seen=None):
+    """collect all lazy objects grouped by depth"""
+    if seen is None:
+        seen = set()
 
+    lazy_keys_by_depth = {}  # depth -> list of (path, lazy_key)
+    lazy_values = []  # list of (path, lazy_value)
+
+    def _collect(o, p, seen_set):
+        obj_id = id(o)
+        if obj_id in seen_set:
+            return
+        seen_set.add(obj_id)
+
+        depth = len(p)
+
+        if isinstance(o, LazyInterpolable):
+            if p.is_mapping_key():
+                if depth not in lazy_keys_by_depth:
+                    lazy_keys_by_depth[depth] = []
+                lazy_keys_by_depth[depth].append((p, o))
+            else:
+                lazy_values.append((p, o))
+            return
+
+        if dict_like(o):
+            for k, v in list(o.items()):
+                if isinstance(k, LazyInterpolable):
+                    key_path = p.copy().down(MAPPING_KEY).down(str(k))
+                    if depth not in lazy_keys_by_depth:
+                        lazy_keys_by_depth[depth] = []
+                    lazy_keys_by_depth[depth].append((key_path, k))
+
+                value_path = p.copy().down(str(k))
+                _collect(v, value_path, seen_set)
+
+        elif list_like(o) and not isinstance(o, (str, bytes)) and not num_array_like(o):
+            for i, item in enumerate(o):
+                item_path = p.copy().down(str(i))
+                _collect(item, item_path, seen_set)
+
+    _collect(obj, path, seen)
+    return lazy_keys_by_depth, lazy_values
+
+
+def resolve_single_key(path, key, root, context_override=None):
+    """resolve a single lazy key and return info about the transformation"""
+    parent_path = path.parent
+
+    try:
+        parent = parent_path.get_obj(root)
+        key.root_obj = root
+        key.current_path = path.removed_mapping_key()
+
+        # find the actual key in parent
+        lazy_key = None
+        for k in parent.keys():
+            if isinstance(k, LazyInterpolable) and (id(k) == id(key) or str(k) == str(key)):
+                lazy_key = k
+                break
+
+        if lazy_key is None:
+            raise DraconError(f"couldn't find LazyInterpolable key in parent at {path}")
+
+        # resolve the key
+        resolved_key = key.resolve(context_override=context_override)
+        if not isinstance(resolved_key, (str, int, float, bool)):
+            resolved_key = str(resolved_key)
+
+        # update mapping
+        value = parent[lazy_key]
+        del parent[lazy_key]
+        parent[resolved_key] = value
+
+        if hasattr(parent, '_recompute_map'):
+            parent._recompute_map()
+
+        # return the transformation info
+        old_path = parent_path.down(str(lazy_key))
+        new_path = parent_path.down(str(resolved_key))
+        return True, (old_path, new_path)
+
+    except Exception as e:
+        return False, None
+
+
+def resolve_single_value(path, value, root, context_override=None):
+    """resolve a single lazy value"""
+    try:
+        parent = path.parent.get_obj(root)
+        value.root_obj = root
+        value.current_path = path
+
+        resolved_value = value.resolve(context_override=context_override)
+
+        stem = path.stem
+        if stem == '/' or stem == ROOTPATH:
+            raise ValueError("cannot resolve root path")
+
+        set_val(parent, stem, resolved_value)
+        return True
+
+    except Exception as e:
+        return False
+
+
+def resolve_all_lazy(
+    obj,
+    root_obj=None,
+    current_path=None,
+    visited=None,
+    context_override=None,
+    max_passes=20,
+):
+    """resolves all lazy objects in a multi-pass approach by depth level"""
     if visited is None:
         visited = set()
 
     if root_obj is None:
-        if hasattr(obj, '_dracon_root_obj'):
-            root_obj = obj._dracon_root_obj
-        else:
-            root_obj = obj
+        root_obj = obj if not hasattr(obj, '_dracon_root_obj') else obj._dracon_root_obj
 
     if current_path is None:
-        if hasattr(obj, '_dracon_current_path'):
-            current_path = obj._dracon_current_path
-        else:
-            current_path = ROOTPATH
+        current_path = (
+            ROOTPATH if not hasattr(obj, '_dracon_current_path') else obj._dracon_current_path
+        )
 
+    # process key resolution in multiple passes by depth
     unresolved_count = 0
+    pass_num = 0
 
-    from collections import deque
+    while pass_num < max_passes:
+        lazy_keys_by_depth, lazy_values = collect_lazy_by_depth(obj, current_path)
 
-    queue = deque([(obj, current_path)])
+        if not lazy_keys_by_depth and not lazy_values:
+            break
 
-    while queue:
-        current_obj, path = queue.popleft()
-        obj_id = id(current_obj)
+        # resolve keys by depth (shallowest first)
+        depths = sorted(lazy_keys_by_depth.keys())
+        if not depths:  # no more keys to resolve, move on to values
+            keys_resolved = 0
+        else:  # resolve keys at the shallowest depth only
+            current_depth = depths[0]
+            keys_resolved = 0
+            for path, key in lazy_keys_by_depth[current_depth]:
+                success, _ = resolve_single_key(path, key, root_obj, context_override)
+                if success:
+                    keys_resolved += 1
 
-        if obj_id in visited:
-            continue
+        # if no keys were resolved, move on to values
+        if not keys_resolved:
+            values_resolved = 0
+            for path, value in lazy_values:
+                success = resolve_single_value(path, value, root_obj, context_override)
+                if success:
+                    values_resolved += 1
 
-        visited.add(obj_id)
+            unresolved_count += values_resolved
+            if values_resolved == 0:  # nothing more to resolve
+                break
+        else:
+            unresolved_count += keys_resolved
 
-        try:
-            if isinstance(current_obj, LazyInterpolable):
-                if path.is_mapping_key():
-                    raise NotImplementedError("Lazy objects in key mappings are not supported")
-                parent = path.parent.get_obj(root_obj)
-                current_obj.root_obj = root_obj
-                current_obj.current_path = path
-                try:
-                    val = current_obj.resolve()
-                except InterpolationError as e:
-                    # Add path context to the message but preserve the original error
-                    raise type(e)(f"Error at path {path}: {str(e)}") from None
-                stem = path.stem
-                if stem == '/' or stem == ROOTPATH:
-                    raise ValueError("Cannot resolve root path")
-                set_val(parent, stem, val)
-                unresolved_count += 1
-                # Get the resolved object for further processing
-                current_obj = path.get_obj(root_obj)
+        pass_num += 1
 
-            if isinstance(current_obj, BaseModel):
-                for key, value in current_obj:
-                    child_path = path + KeyPath(str(key))
-                    queue.append((value, child_path))
+    if unresolved_count > 0:  # should not happen, I think?
+        print(f"WARNING: dracon.resolve_all_lazy: unresolved_count = {unresolved_count}")
+        return resolve_all_lazy(obj, root_obj, current_path, visited, context_override, max_passes)
 
-            elif dict_like(current_obj):
-                for key, value in current_obj.items():
-                    key_path = path + MAPPING_KEY + str(key)
-                    value_path = path + KeyPath(str(key))
-                    queue.append((key, key_path))
-                    queue.append((value, value_path))
-
-            elif (
-                list_like(current_obj)
-                and not isinstance(current_obj, (str, bytes))
-                and not num_array_like(current_obj)
-            ):
-                for i, item in enumerate(current_obj):
-                    item_path = path + KeyPath(str(i))
-                    queue.append((item, item_path))
-
-        except InterpolationError as e:
-            raise  # Pass through without wrapping
-        except Exception as e:
-            raise DraconError(f"Error resolving {path}: {str(e)}") from None
-
-    # a bit hacky, but some resolutions trigger new lazy values in unexpected places, so, we recurse
-    if unresolved_count > 0 and iteration < max_iterations:
-        resolve_all_lazy(obj, root_obj, current_path, None, iteration + 1, max_iterations)
+    return obj
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
