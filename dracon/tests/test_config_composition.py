@@ -29,6 +29,7 @@ def main_config_ok(config):
     assert config["base"]["setting.with.dot"] == "baseval3"
     assert config["config"]["setting1"] == "newval1"
     assert config["config"]["setting2"] == "baseval2"
+    assert config["config"]["setting2_incl"] == "baseval2"
     assert config["config"]["setting3"]["setting1"] == "baseval"
     assert config["config"]["setting3"]["setting2"] == "baseval2"
     assert config["config"]["setting3"]["setting.with.dot"] == "baseval3"
@@ -76,7 +77,6 @@ def get_config(config_path):
 def test_main_config_composition():
     config = get_config(main_config_path)
     main_config_ok(config)
-
 
 
 def test_copy_composition_result():

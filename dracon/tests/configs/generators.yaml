@@ -1,0 +1,6 @@
+!set_default n: 3
+
+!noconstruct value: &val
+  b: ${a}
+
+wrapper: !generate ${[&val:a=i for i in range(n)]}

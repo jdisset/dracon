@@ -12,6 +12,7 @@ config:
     setting1: newval1
     setting3: *base # testing anchor reference
     setting2: *base@setting2
+    setting2_incl: !include "base@setting2"
     extra: *pkg:dracon:tests/configs/simple.yaml
     home: *env:TESTVAR1
     new_with.dot: */base.setting\.with\.dot
