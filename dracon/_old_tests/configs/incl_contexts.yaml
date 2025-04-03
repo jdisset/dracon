@@ -1,0 +1,13 @@
+fstem_basedir: ${"$FILE_STEM"}
+fstem_subdir: !include file:$DIR/sub/subincl
+
+!define avar: 3
+!define bvar: 4
+avar_from_sub: !include file:$DIR/sub/variables@a
+bvar_from_sub: !include file:$DIR/sub/variables@b
+
+
+vars: 
+  !define avar: 5
+  <<: !include file:$DIR/sub/variables
+

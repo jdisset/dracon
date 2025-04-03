@@ -34,8 +34,8 @@ nested:
 
 # References to dotted keys using @ syntax
 reference_test:
-  simple_ref: ${@dotted.keys/nested.value} # changed \. to . and . to /
-  nested_ref: ${@nested/level1/dotted.key} # changed . to /
+  simple_ref: ${@/dotted\\.keys.nested\\.value}
+  nested_ref: ${@/nested.level1.dotted\\.key} # Using interpolation within dotted keys
 
 !define suffix: dynamic
 interpolated.keys.${suffix}:
@@ -46,7 +46,7 @@ base.with.dots:
   key1: base_value1
   nested.key: base_nested
 
-<<{+<}@base.with.dots: # changed \. to .
+<<{+<}@base\.with\.dots:
   key2: override_value2
   nested.key: override_nested
 
@@ -55,7 +55,7 @@ base.with.dots:
 # Deferred nodes with dotted keys
 !deferred deferred.node:
   dotted.key: deferred_value
-  reference: ${@dotted.keys/nested.value} # changed \. to . and . to /
+  reference: ${@/dotted\.keys.nested\.value}
 
 # Complex nested structures with dotted keys and interpolation
 complex:
@@ -63,4 +63,4 @@ complex:
   ${level}.level:
     !define inner_key: inner.value
     ${inner_key}: complex_inner_value
-    reference: ${@complex/${level}/level/${inner_key}} # changed . to /, removed \\
+    reference: ${@/complex.${level}\\.level.${inner_key}}

@@ -349,8 +349,7 @@ def resolve_all_lazy(
 
         pass_num += 1
 
-    if unresolved_count > 0:  # should not happen, I think?
-        print(f"WARNING: dracon.resolve_all_lazy: unresolved_count = {unresolved_count}")
+    if unresolved_count > 0:
         return resolve_all_lazy(obj, root_obj, current_path, visited, context_override, max_passes)
 
     return obj

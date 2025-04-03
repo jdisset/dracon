@@ -13,9 +13,9 @@ nested:
   nameindex: ${get_nameindex(constructed_a)}
   nameindex_2: ${constructed_a.name_index}
   a_nested: &a_nest
-    <<: !include $new_a
+    <<: !include $new_a # include a copy of aobj with i=3
     <<{<+}:
-      name: "newer_name ${&a_nest/index}"
+      name: "newer_name ${&a_nest.index}"
 
   alist:
     !each(i) ${list(range(1, 3))}:

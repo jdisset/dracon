@@ -1,0 +1,11 @@
+!set_default elements: [1, 2, 3]
+
+things:
+  !each(elt) "${elements}":
+    - !deferred
+      !define avar: ${elt}
+      !set_default elt_value: ${elt}
+      !set_default plus_one: ${int(elt_value) + 1}
+      <<: !include file:$DIR/variables
+      fstem: !include file:$DIR/../fstem
+      elt: ${plus_one}

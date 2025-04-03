@@ -1,0 +1,25 @@
+base:
+  <<{>}: *file:$DIR/base.yaml
+  <<: *file:$DIR/sub/subbase.yaml
+  interpolated_addition: ${2+2}
+  file_stem: ${"$FILE_STEM"}
+
+loaded_base: !include file:$DIR/base
+
+
+int4: ${2+2}
+
+nested_int4: ${${2+2}}
+
+floatstr: "$(str('float'))"
+
+tag_interp: !$(str('float')) ${2+2}
+
+interp_later: 4
+<<{<}@interp_later: ${3+2}
+
+interp_later_tag: 4
+<<{<}@interp_later_tag: !$(str('float')) 5
+
+
+

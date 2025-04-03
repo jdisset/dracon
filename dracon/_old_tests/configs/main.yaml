@@ -1,3 +1,4 @@
+
 base: &base
   setting1: baseval
   setting2: baseval2
@@ -14,7 +15,7 @@ config:
     setting2_incl: !include "base@setting2"
     extra: *pkg:dracon:tests/configs/simple.yaml
     home: *env:TESTVAR1
-    new_with.dot: */base/setting.with.dot
+    new_with.dot: */base.setting\.with\.dot
     a_list:
       - item4
 

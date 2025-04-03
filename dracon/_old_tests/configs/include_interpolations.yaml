@@ -4,4 +4,4 @@ base:
 
 !define addsettings: "additional_settings"
 
-just_simple: !include file:$DIR/params@simple_params/${addsettings}
+just_simple: !include file:$DIR/params@simple_params.${addsettings}

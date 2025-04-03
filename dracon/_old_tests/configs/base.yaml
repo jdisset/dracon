@@ -1,4 +1,4 @@
-default_settings:
+default_settings: 
   setting1: default_value1
   setting2: default_value2
   setting_list:
@@ -7,7 +7,7 @@ default_settings:
     - item3
   <<: *pkg:dracon:tests/configs/params
   again: *pkg:dracon:tests/configs/params
-  just_simple: *file:$DIR/params@simple_params/additional_settings
+  just_simple: *file:$DIR/params@simple_params.additional_settings
 
 
 ppath: *env:TESTVAR2

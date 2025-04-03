@@ -1,0 +1,8 @@
+
+ned: !Resolvable[Person]
+  name: Eddard
+  age: 40
+
+jon: !Resolvable[$(str('Person'))]
+  name: Jon
+  age: 20

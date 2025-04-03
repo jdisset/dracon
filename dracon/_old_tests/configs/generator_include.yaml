@@ -1,0 +1,6 @@
+!define n: !generate [1, 2]
+
+<<: !include file:$DIR/generators
+
+!if ${n == 2}:
+  n_is_2: true

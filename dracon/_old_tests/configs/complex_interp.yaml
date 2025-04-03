@@ -1,0 +1,7 @@
+a_obj: !ClassA
+    index: &aid ${i}
+    name: oldname
+    <<{<+}: 
+        name: "oldname ${&aid}"
+
+

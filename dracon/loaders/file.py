@@ -10,7 +10,7 @@ import time
 DraconLoader = ForwardRef('DraconLoader')
 
 
-@cached(LRUCache(maxsize=50))
+# @cached(LRUCache(maxsize=50))
 def read_from_file(path: str, extra_paths=None):
     """
     Reads the content of a file, searching in the specified path and additional paths if provided.

@@ -1,0 +1,10 @@
+!deferred
+!set_default var_a: 4
+!define debug0: "${print('in deferred_root, var_a is', var_a)}"
+ayy: lmao
+<<: !include file:$DIR/../interpolation
+
+instructs:
+  <<: !include file:$DIR/instructions
+
+a: ${var_a}
