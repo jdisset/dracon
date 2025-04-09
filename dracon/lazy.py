@@ -18,6 +18,8 @@ from dracon.interpolation_utils import (
 from dracon.interpolation import evaluate_expression, InterpolationError, DraconError
 from dracon.utils import list_like, dict_like
 
+import inspect
+
 
 ## {{{                     --     LazyInterpolable     --
 
@@ -169,65 +171,8 @@ class LazyInterpolable(Lazy[T]):
 ## {{{                     --     resolve all lazy     --
 
 
-def set_val(parent: Any, key, value: Any) -> None:
-    if list_like(parent):
-        parent[int(key)] = value
-    elif hasattr(parent, key):
-        setattr(parent, key, value)
-    else:
-        try:
-            parent[key] = value
-        except TypeError:
-            raise AttributeError(f'Could not set attribute {key} in {parent}') from None
-
-
 def num_array_like(obj):
-    return hasattr(obj, 'dtype') and hasattr(obj, 'shape') and obj.dtype.kind in 'iuf'
-
-
-def collect_lazy_by_depth(obj, path=ROOTPATH, seen=None):
-    """collect all lazy objects grouped by depth"""
-    if seen is None:
-        seen = set()
-
-    lazy_keys_by_depth = {}  # depth -> list of (path, lazy_key)
-    lazy_values = []  # list of (path, lazy_value)
-
-    def _collect(o, p, seen_set):
-        obj_id = id(o)
-        if obj_id in seen_set:
-            return
-        seen_set.add(obj_id)
-
-        depth = len(p)
-
-        if isinstance(o, LazyInterpolable):
-            if p.is_mapping_key():
-                if depth not in lazy_keys_by_depth:
-                    lazy_keys_by_depth[depth] = []
-                lazy_keys_by_depth[depth].append((p, o))
-            else:
-                lazy_values.append((p, o))
-            return
-
-        if dict_like(o):
-            for k, v in list(o.items()):
-                if isinstance(k, LazyInterpolable):
-                    key_path = p.copy().down(MAPPING_KEY).down(str(k))
-                    if depth not in lazy_keys_by_depth:
-                        lazy_keys_by_depth[depth] = []
-                    lazy_keys_by_depth[depth].append((key_path, k))
-
-                value_path = p.copy().down(str(k))
-                _collect(v, value_path, seen_set)
-
-        elif list_like(o) and not isinstance(o, (str, bytes)) and not num_array_like(o):
-            for i, item in enumerate(o):
-                item_path = p.copy().down(str(i))
-                _collect(item, item_path, seen_set)
-
-    _collect(obj, path, seen)
-    return lazy_keys_by_depth, lazy_values
+    return hasattr(obj, 'dtype') and hasattr(obj, 'shape') and hasattr(obj, 'ndim')
 
 
 def resolve_single_key(path, key, root, context_override=None):
@@ -291,6 +236,121 @@ def resolve_single_value(path, value, root, context_override=None):
         return False
 
 
+def set_val(parent: Any, key, value: Any) -> None:
+    if list_like(parent):
+        parent[int(key)] = value
+    elif isinstance(parent, BaseModel):
+        # handle pydantic models specifically
+        setattr(parent, key, value)
+    elif hasattr(parent, key):
+        setattr(parent, key, value)
+    else:
+        try:
+            parent[key] = value
+        except TypeError:
+            try:
+                # last fallback: try setting attribute anyway
+                setattr(parent, key, value)
+            except AttributeError:
+                raise AttributeError(f'Could not set attribute {key} in {parent}') from None
+
+
+def collect_lazy_by_depth(obj, path=ROOTPATH, seen=None):
+    """collect all lazy objects grouped by depth"""
+    if seen is None:
+        seen = set()
+
+    lazy_keys_by_depth = {}  # depth -> list of (path, lazy_key)
+    lazy_values = []  # list of (path, lazy_value)
+
+    def _collect(o, p, seen_set):
+        # skip None values and class types
+        if o is None or isinstance(o, type):
+            return
+
+        obj_id = id(o)
+        if obj_id in seen_set:
+            return
+        seen_set.add(obj_id)
+
+        depth = len(p)
+
+        # handle LazyInterpolable directly
+        if isinstance(o, LazyInterpolable):
+            if p.is_mapping_key():
+                if depth not in lazy_keys_by_depth:
+                    lazy_keys_by_depth[depth] = []
+                lazy_keys_by_depth[depth].append((p, o))
+            else:
+                lazy_values.append((p, o))
+            return
+
+        # handle dict-like objects
+        if dict_like(o):
+            for k, v in list(o.items()):
+                if isinstance(k, LazyInterpolable):
+                    key_path = p.copy().down(MAPPING_KEY).down(str(k))
+                    if depth not in lazy_keys_by_depth:
+                        lazy_keys_by_depth[depth] = []
+                    lazy_keys_by_depth[depth].append((key_path, k))
+
+                value_path = p.copy().down(str(k))
+                _collect(v, value_path, seen_set)
+
+        # handle list-like objects (excluding strings, bytes, and numeric arrays)
+        elif list_like(o) and not isinstance(o, (str, bytes, type)) and not num_array_like(o):
+            try:
+                # Double-check that we can actually enumerate this object
+                for i, item in enumerate(o):
+                    item_path = p.copy().down(str(i))
+                    _collect(item, item_path, seen_set)
+            except TypeError:
+                # If enumeration fails, just skip this object
+                pass
+
+        # handle Pydantic models
+        elif isinstance(o, BaseModel):
+            # access model's fields directly through __dict__ to get raw values
+            for field_name, field_value in o.__dict__.items():
+                # skip private attributes and special pydantic fields
+                if field_name.startswith('_'):
+                    continue
+
+                item_path = p.copy().down(field_name)
+                _collect(field_value, item_path, seen_set)
+
+        # handle other objects with attributes
+        elif hasattr(o, '__dict__') and not isinstance(o, (str, int, float, bool, bytes, type)):
+            # skip traversing built-in types and callables
+            if (
+                o.__class__.__module__ in ('builtins', '__builtin__')
+                or callable(o)
+                or inspect.isclass(o)
+                or inspect.ismodule(o)
+            ):
+                return
+
+            try:
+                # get object attributes
+                for attr_name, attr_value in vars(o).items():
+                    # skip private attributes, methods, and special attributes
+                    if (
+                        attr_name.startswith('_')
+                        or callable(attr_value)
+                        or attr_name in {'__dict__', '__weakref__'}
+                    ):
+                        continue
+
+                    attr_path = p.copy().down(attr_name)
+                    _collect(attr_value, attr_path, seen_set)
+            except (TypeError, ValueError, AttributeError):
+                # If we can't get attributes for some reason, skip this object
+                pass
+
+    _collect(obj, path, seen)
+    return lazy_keys_by_depth, lazy_values
+
+
 def resolve_all_lazy(
     obj,
     root_obj=None,
@@ -298,6 +358,7 @@ def resolve_all_lazy(
     visited=None,
     context_override=None,
     max_passes=20,
+    min_passes=2,
 ):
     """resolves all lazy objects in a multi-pass approach by depth level"""
     if visited is None:
@@ -349,8 +410,10 @@ def resolve_all_lazy(
 
         pass_num += 1
 
-    if unresolved_count > 0:
-        return resolve_all_lazy(obj, root_obj, current_path, visited, context_override, max_passes)
+    if unresolved_count > 0 or min_passes > 0:
+        return resolve_all_lazy(
+            obj, root_obj, current_path, visited, context_override, max_passes, min_passes - 1
+        )
 
     return obj
 

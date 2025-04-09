@@ -1,3 +1,4 @@
+# filename: dracon/tests/configs/edge_cases.yaml
 # Keys with names that could clash with internals
 value: not_an_internal_value
 context: not_an_internal_context
@@ -17,12 +18,13 @@ dotted.keys:
 !define items: [1, 2, 3]
 each_with_dots:
   !each(item) "${items}":
+    # these keys MUST be interpolable for !each on mappings
     item.${item}: value_${item}
     nested.item.${item}: nested_value_${item}
-    value: not_an_internal_value
-    context: not_an_internal_context
-    tag: not_an_internal_tag
-    anchor: not_an_internal_anchor
+    value_${item}: not_an_internal_value # made dynamic
+    context_${item}: not_an_internal_context # made dynamic
+    tag_${item}: not_an_internal_tag # made dynamic
+    anchor_${item}: not_an_internal_anchor # made dynamic
 
 # Nested structures with dot-containing keys
 nested:
