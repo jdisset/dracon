@@ -30,25 +30,30 @@ class ClassB(BaseModel):
 
 
 def test_dict():
+    # using '/' as separator now
     kp = find_field_references(
-        r"@/name.greeting..back+2 + / @path.to.list[2] = @haha./../p\[3{]"
-    )  # -> [ @/name.greeting..back ,  @path.to.list , @haha./../p\[3 ]
+        r"@/name/greeting/../back+2 + / @path/to/list[2] = @haha/../p\[3{]"
+    )  # -> [ @/name/greeting/../back ,  @path/to/list , @haha/../p\[3 ]
 
     assert len(kp) == 3
     assert kp[0].start == 0
     assert kp[0].end == 21
-    assert kp[0].expr == "/name.greeting..back"
+    # '/' is the separator, '..' goes up
+    assert kp[0].expr == "/name/greeting/../back"
 
     assert kp[1].start == 28
     assert kp[1].end == 41
-    assert kp[1].expr == "path.to.list"
+    # '.' is now allowed in segment names without escaping
+    assert kp[1].expr == "path/to/list"
 
     assert kp[2].start == 47
     assert kp[2].end == 61
-    assert kp[2].expr == r"haha./../p[3"
+    # no change needed here, escaping '[' is fine
+    assert kp[2].expr == r"haha/../p[3"
 
-    test_expr2 = "${@/name\\.greeting..back+2 + / @path.${'haha' + @inner.match }to.list\\[2] } = @haha./../p\\[3{] + ${2+2}"
-    test_expr_paren = "$(@/name\\.greeting..back+2 + / @path.${'haha' + @inner.match }to.list\\[2] ) = @haha./../p\\[3{] + ${2+2}"
+    # updated expressions with '/' separator and potential need to escape '/' in segments
+    test_expr2 = "${@/name/greeting/../back+2 + / @path/${'haha' + @inner/match}/to/list\\[2] } = @haha/../p\\[3{] + ${2+2}"
+    test_expr_paren = "$(@/name/greeting/../back+2 + / @path/${'haha' + @inner/match}/to/list\\[2] ) = @haha/../p\\[3{] + ${2+2}"
 
     interp_matches = outermost_interpolation_exprs(test_expr2)
     assert len(interp_matches) == 2
@@ -65,6 +70,7 @@ def test_dict():
         'nested': {
             'inner': {
                 'greeting': 'greetings, ${@/name}!',
+                # use '/' as separator and ../.. to go up levels
                 'list': '${[@/name + "_" + str(i) for i in range(@/n)]}',
                 'ref': '${@/greetingroot}',
             }
@@ -92,7 +98,8 @@ def test_lazy():
         'nested': {
             'inner': {
                 'greeting': 'greetings, ${"dear "+  @/name}!',
-                'list': '${[@/name + "_" + str(i) for i in range(@....n)]}',
+                # use '/' as separator and ../.. to go up levels
+                'list': '${[@/name + "_" + str(i) for i in range(@/n)]}',
                 'ref': '${@/greetingroot}',
             }
         },
@@ -122,9 +129,9 @@ def test_lazy():
     assert loaded.nested.inner.ref == 'Hello, John!'
     assert loaded.nested.inner.list == ['John_0', 'John_1', 'John_2', 'John_3', 'John_4']
 
-    assert loaded.nested.inner._dracon_current_path == KeyPath('/nested.inner')
+    assert loaded.nested.inner._dracon_current_path == KeyPath('/nested/inner')
 
-    newstr = '${@/name + " " + @/nested.inner.greeting}'
+    newstr = '${@/name + " " + @/nested/inner/greeting}'  # use '/'
     loaded.nested.inner['new'] = newstr
     assert loaded.nested.inner.new == newstr
     loaded.nested.inner['new'] = LazyInterpolable(loaded.nested.inner['new'])
@@ -139,10 +146,10 @@ def test_ampersand_interpolation_simple():
 
     config:
       key3: ${&/base}
-      key4: ${&/base.key1}
+      key4: ${&/base/key1} # use '/'
       full: ${&base_anchor}
-      key1_amp: ${&base_anchor.key1}
-      key1_at: ${@/base.key1}
+      key1_amp: ${&base_anchor/key1} # use '/'
+      key1_at: ${@/base/key1} # use '/'
     """
 
     loader = DraconLoader(enable_interpolation=True)
@@ -157,10 +164,12 @@ def test_ampersand_interpolation_simple():
     assert config['config']['key1_at'] == 'value1'
 
     config_copy.base.key1 = 'new_value1'
+    # & references are evaluated earlier, so they capture the original value
     assert config_copy['config']['key3'] == {'key1': 'value1', 'key2': 'value2'}
     assert config_copy['config']['full'] == {'key1': 'value1', 'key2': 'value2'}
     assert config_copy['config']['key4'] == 'value1'
     assert config_copy['config']['key1_amp'] == 'value1'
+    # @ references are evaluated later, so they see the change
     assert config_copy['config']['key1_at'] == 'new_value1'
 
 
@@ -178,8 +187,8 @@ def test_recursive_interpolation(n):
         key4: ${@key3}
         key5: ${&key4}
         key6: ${&key5}
-        key7: ${&base_anchor.key6}
-        key8: ${@/base.key7}
+        key7: ${&base_anchor/key6} # use '/'
+        key8: ${@/base/key7} # use '/'
 
     base2: ${&base_anchor}
     base3: ${&base2}
@@ -220,7 +229,7 @@ def test_ampersand_interpolation_complex(n):
             index: ${i + 1}
             name: "Name ${&index}"
 
-        all_objs: ${[&/__dracon__.simple_obj:i=j for j in range(5)]}
+        all_objs: ${[&/__dracon__/simple_obj:i=j for j in range(5)]} # use '/'
         all_objs_by_anchor: ${[&smpl:i=i for i in range(5)]}
     """
 
@@ -249,7 +258,7 @@ def test_ampersand_interpolation_complex_copy(n):
             index: ${i + 1}
             name: "Name ${&index}"
 
-        all_objs: ${[&/__dracon__.simple_obj:i=j for j in range(5)]}
+        all_objs: ${[&/__dracon__/simple_obj:i=j for j in range(5)]} # use '/'
         all_objs_by_anchor: ${[&smpl:i=i for i in range(5)]}
     """
 
@@ -294,7 +303,7 @@ def test_obj_references():
             name: "Name ${@index}"
 
     obj4: &o4 ${&smpl:i=3}
-    prop4: ${@obj4.name_index}
+    prop4: ${@obj4.name_index} # attribute access doesn't change
 
     as_ampersand_anchor: ${[&smpl:i=i for i in range(5)]}
     """
@@ -539,7 +548,7 @@ def test_instruct_on_nodes():
             - <<: *$elt
               <<{+}: {name: "new_name ${@index}"}
               <<{<+}: 
-                index: !include $elt@index
+                index: !include $elt@index # @ syntax for node properties
 
     """
 
@@ -624,7 +633,7 @@ def test_defines():
     nested:
         !define aid: ${get_index(construct(&/a_obj))}
         a_index: ${aid}
-        aname: ${&/a_obj.name}
+        aname: ${&/a_obj/name} # use '/'
         constructed_name: ${construct(&/a_obj).name}
         constructed_nameindex: ${construct(&/a_obj).name_index}
 
@@ -660,6 +669,7 @@ def test_include():
     loader = DraconLoader(enable_interpolation=True, context={'ClassA': ClassA})
     loader.context['get_index'] = lambda obj: obj.index
     loader.context['get_nameindex'] = lambda obj: obj.name_index
+    # assume interp_include.yaml has been updated to use '/'
     compres = compose_from_include_str(loader, 'pkg:dracon:tests/configs/interp_include.yaml')
     config = loader.load_composition_result(compres)
     config.resolve_all_lazy()
@@ -676,6 +686,7 @@ def test_include():
 
     assert config.nested.alist == [ClassA(index=1, name='name 1'), ClassA(index=2, name='name 2')]
 
+    # assume include_define.yaml has been updated to use '/'
     assert config.other.a == 3
     assert config.other.var_b_value == 15
 
@@ -693,6 +704,7 @@ def test_each_ctx_is_shallow():
     assert isinstance(config, dict)
     assert isinstance(config['list_content'], list)
     assert len(config['list_content']) == 2
+    # the context objects should still be the same instance if they refer to the same initial object
     assert (
         config['list_content'][0]['val'].context['varlist']
         is config['list_content'][1]['val'].context['varlist']

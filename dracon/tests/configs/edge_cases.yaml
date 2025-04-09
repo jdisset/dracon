@@ -36,8 +36,8 @@ nested:
 
 # References to dotted keys using @ syntax
 reference_test:
-  simple_ref: ${@dotted.keys/nested.value} # changed \. to . and . to /
-  nested_ref: ${@nested/level1/dotted.key} # changed . to /
+  simple_ref: ${@dotted.keys/nested.value}
+  nested_ref: ${@nested/level1/dotted.key}
 
 !define suffix: dynamic
 interpolated.keys.${suffix}:
@@ -48,7 +48,7 @@ base.with.dots:
   key1: base_value1
   nested.key: base_nested
 
-<<{+<}@base.with.dots: # changed \. to .
+<<{+<}@base.with.dots:
   key2: override_value2
   nested.key: override_nested
 
