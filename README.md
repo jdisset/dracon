@@ -64,7 +64,7 @@ Use Python expressions with `${...}` syntax:
 
 service:
   port: ${base_port + instance_id}
-  url: ${"http://" + host + ":" + str(@/service/port)}
+  url: "http://${host}:${@/service.port}"
   mode: ${'production' if env == 'prod' else 'development'}
 ```
 
@@ -74,7 +74,7 @@ Control how configurations are merged using merge operators:
 
 ```yaml
 # Merge with different strategies
-<<{+>}: *file:base.yaml          # Append recursively, existing values take priority
+<<{+>}[>+]: *file:base.yaml          # Merge dictionnaries recursively, existing values take priority, existing lists are appended
 <<{~<}: *file:overrides.yaml     # Replace values, new values take priority
 <<{+>}@settings: *file:settings  # Merge at specific path
 ```
