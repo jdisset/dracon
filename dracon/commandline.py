@@ -117,7 +117,9 @@ def format_type_str(arg_type: type) -> str:
                 return format_type_str(types[0])
             return arg_type.__origin__.__name__.upper()
         return format_type_str(arg_type.__args__[0])
-    return arg_type.__name__.upper()
+    if hasattr(arg_type, "__name__"):
+        return arg_type.__name__.upper()
+    return arg_type.__class__.__name__.upper()
 
 
 def format_default_value(value: Any) -> str:
