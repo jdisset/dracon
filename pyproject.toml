@@ -32,3 +32,9 @@ include = [
 
 [tool.hatch.version]
 path = "dracon/__init__.py"
+
+docs = [
+    "mkdocs>=1.5",           
+    "mkdocs-material>=9.0", 
+    "pymdown-extensions>=10.0"
+]

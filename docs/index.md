@@ -1,139 +1,134 @@
-# Dracon
+# Welcome to Dracon!
 
-Dracon is a modular configuration system for Python that extends YAML with powerful features. It bridges the gap between simple configuration files and more complex application needs with features like file inclusion, expression interpolation, and type validation.
+Dracon is a configuration system for Python applications built on top of YAML. It aims to solve common configuration headaches by adding powerful features for modularity, dynamic value generation, type safety, and even command-line interface creation.
 
-## Why Dracon?
+Think of it as YAML++, supercharged for complex application needs.
 
-Regular configuration systems often fall short when your application gets more complex:
+## Why Use Dracon?
 
-- Need to share settings across multiple files? Dracon lets you include and merge files.
-- Have environment-specific settings? Use expressions and interpolation.
-- Want type safety? Dracon integrates with Pydantic for validation.
-- Building a CLI? Generate full command-line interfaces from your config models.
+Plain YAML is great for simple configs, but as applications grow, you often run into challenges:
 
-## Core Features
+- **Repetition:** How do you share common settings across different parts of your config or different environments?
+- **Dynamic Values:** How do you derive configuration values from environment variables, calculations, or other config keys?
+- **Environment Management:** How do you manage distinct configurations for development, staging, and production without excessive duplication?
+- **Secrets:** How do you safely include sensitive data?
+- **Type Safety:** How do you ensure your configuration matches the types expected by your Python code?
+- **CLI Integration:** How do you bridge the gap between config files and command-line arguments smoothly?
 
-- **File Inclusion**: Include and merge other configuration files
-- **Expression Interpolation**: Use Python expressions within your YAML files
-- **Advanced Merging**: Control exactly how configurations combine with flexible merge strategies
-- **Deferred Construction**: Postpone object creation until you have all the context you need
-- **Pydantic Integration**: Build type-safe configuration models
-- **CLI Support**: Generate full-featured command-line programs from your models
+Dracon addresses these by providing:
+
+- **Includes:** Load and merge configuration from files, Python packages, environment variables, and even other parts of the same document.
+- **Interpolation:** Embed Python expressions directly into your YAML to compute values dynamically.
+- **Merging:** Define precisely how different configuration sources should be combined using flexible merge strategies.
+- **Pydantic Integration:** Leverage Pydantic models for robust type validation and easy object construction.
+- **Deferred Nodes:** Control _when_ parts of your configuration are constructed, allowing for complex setup sequences.
+- **CLI Generation:** Automatically build command-line interfaces directly from your Pydantic configuration models.
 
 ## Quick Start
 
-### Installation
+Let's see a small example.
+
+**1. Install Dracon:**
 
 ```bash
 pip install dracon
 ```
 
-### Basic Usage
+**2. Define a Pydantic Model (e.g., `models.py`):**
 
 ```python
-from dracon import DraconLoader
-
-# Load a configuration file with some context variables
-loader = DraconLoader(context={"instance_id": 1})
-config = loader.load("config.yaml")
-
-# Access your configuration values
-print(config.database.host)
-print(config.service.port)
-```
-
-### Example Configuration
-
-Here's a simple configuration file that shows some of Dracon's features:
-
-```yaml
-# Define variables for use throughout the config
-!define env: ${os.getenv('ENV', 'development')}
-!define debug: ${env != 'production'}
-
-# Include common settings
-common: !include file:./common.yaml
-
-# Database configuration
-database:
-  host: ${env.get('DB_HOST', 'localhost')}
-  port: 5432
-  # Include credentials from a separate file
-  credentials: !include file:./credentials/${env}.yaml
-
-# Service configuration
-service:
-  name: "MyService"
-  # Dynamic port calculation
-  port: ${8080 + instance_id}
-  # Include environment-specific settings
-  settings: !include file:./settings/${env}.yaml
-  # Conditional configuration
-  !if ${debug}:
-    log_level: "DEBUG"
-    profiling: true
-```
-
-## Working with Models
-
-Dracon integrates well with Pydantic for type validation:
-
-```python
+# models.py
 from pydantic import BaseModel
-from typing import List, Optional
-from dracon import DraconLoader
 
 class DatabaseConfig(BaseModel):
     host: str
     port: int
-    user: str
-    password: str
-
-class ServiceConfig(BaseModel):
-    name: str
-    port: int
-    log_level: Optional[str] = "INFO"
-    profiling: bool = False
-
-class AppConfig(BaseModel):
-    database: DatabaseConfig
-    service: ServiceConfig
-    version: str
-
-# Load and validate configuration
-loader = DraconLoader()
-config_data = loader.load("config.yaml")
-app_config = AppConfig(**config_data)
-
-# Now you have a fully validated configuration
-print(f"Connecting to database at {app_config.database.host}:{app_config.database.port}")
+    username: str
 ```
 
-## Architecture Overview
+**3. Create a Configuration File (`config.yaml`):**
 
-Dracon works in several phases:
+```yaml
+# config.yaml
+app_name: MyAwesomeApp
+log_level: ${getenv('LOG_LEVEL', 'INFO')} # Use an env var or default
 
-1. **Composition**: Parse YAML and handle includes and merges
-2. **Interpolation**: Resolve expressions and references
-3. **Construction**: Build Python objects from the composed config
-4. **Validation**: Optionally validate using Pydantic models
-
+database: !DatabaseConfig # Tells Dracon to use your Pydantic model
+  host: localhost
+  port: 5432
+  # Include username from another file (e.g., for secrets)
+  username: !include file:db_user.yaml
 ```
-┌──────────┐   ┌─────────────┐   ┌─────────────┐   ┌───────────┐
-│ YAML File│──>│ Composition │──>│Construction │──>│  Python   │
-└──────────┘   │  (include,  │   │ (objects,   │   │  Objects  │
-               │   interp,   │   │ validation) │   └───────────┘
-               │    merge)   │   └─────────────┘
-               └─────────────┘
+
+**4. Create `db_user.yaml`:**
+
+```yaml
+# db_user.yaml
+admin
 ```
+
+**5. Load the Configuration (`main.py`):**
+
+```python
+# main.py
+from dracon import DraconLoader
+from models import DatabaseConfig # Import your model
+
+# Provide the model class in the context so Dracon can find it
+loader = DraconLoader(context={'DatabaseConfig': DatabaseConfig})
+
+# Load the main config file
+config = loader.load('config.yaml')
+
+# Access values - note that config.database is now a DatabaseConfig instance!
+print(f"App Name: {config.app_name}")
+print(f"Log Level: {config.log_level}")
+print(f"Database Host: {config.database.host}")
+print(f"Database Port: {config.database.port}")
+print(f"Database User: {config.database.username}")
+
+assert isinstance(config.database, DatabaseConfig)
+```
+
+**6. Run it:**
+
+```bash
+python main.py
+```
+
+This simple example demonstrates environment variable access (`${getenv(...)`), file inclusion (`!include`), and automatic Pydantic model construction (`!DatabaseConfig`).
+
+## The Dracon Lifecycle: How it Works
+
+Understanding how Dracon processes your configuration is key. It happens in several stages:
+
+1.  **Input:** Dracon starts with your root YAML file(s), initial context, and potentially CLI arguments.
+2.  **Composition Phase:** This is where Dracon's magic happens _before_ creating Python objects.
+    - **YAML Parsing:** Reads the YAML structure using `ruamel.yaml`.
+    - **Include Resolution:** Processes `!include` tags (and `*anchor` copies), fetching and inserting content from files, packages, environment variables, anchors, etc. This is recursive.
+    - **Instruction Processing:** Executes directives like `!define`, `!if`, `!each` which modify the YAML node structure itself (e.g., adding context, removing nodes, generating multiple nodes).
+    - **Merge Resolution:** Processes `<<:` merge keys, combining different YAML structures according to specified rules.
+    - **(Internal Steps):** Prepares nodes for interpolation, handles deferred node wrapping.
+3.  **Construction Phase:** Dracon builds the final Python objects from the composed YAML node tree.
+    - Uses type tags (`!TypeName`) to determine the target Python class.
+    - Leverages Pydantic for validation and construction if a model is specified.
+    - Creates `LazyInterpolable` wrappers for `${...}` expressions.
+    - Creates `Resolvable` wrappers if specified.
+    - Builds standard Python dicts/lists or Dracon's `Mapping`/`Sequence` containers.
+4.  **Runtime Phase:** Your Python code interacts with the loaded configuration object.
+    - Accessing values triggers lazy evaluation of `${...}` expressions.
+    - Calling `.construct()` on `DeferredNode` objects triggers their delayed composition and construction.
+    - Calling `.resolve()` on `Resolvable` objects triggers their final processing.
+
+This multi-stage process allows Dracon to handle complex dependencies and dynamic configurations effectively.
 
 ## Next Steps
 
-Check out the detailed guides for each feature:
+Dive deeper into the core features:
 
-- [File Inclusion](includes.md): Learn how to modularize your configurations
-- [Expression Interpolation](interpolation.md): Add dynamic expressions to your configs
-- [Advanced Merging](merging.md): Control how configurations are combined
-- [Node Instructions](instructions.md): Use special directives like `!if` and `!each`
-- [Command Line Programs](cli.md): Generate CLIs from your config models
-- [Advanced Usage](advanced.md): Explore deferred nodes and more advanced features
+- [Loading Configuration](loading.md)
+- [Includes (Modularity)](includes.md)
+- [Interpolation (Dynamic Values)](interpolation.md)
+- [Merging Configurations](merging.md)
+- [Instructions (Composition Logic)](instructions.md)
+- [Working with Types](types.md)

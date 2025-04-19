@@ -1,219 +1,141 @@
-# File Inclusion
+# Includes (Modularity)
 
-Dracon's file inclusion system allows you to break down your configurations into reusable, modular files. This is particularly useful for handling environment-specific settings, separating credentials, or organizing large configurations.
+As configurations grow, keeping everything in one file becomes unwieldy. Dracon's `!include` system lets you split your configuration into logical, reusable parts and compose them together.
+You can include YAML files from the filesystem or embedded in Python packages, and even include environment variables or other nodes defined in the document.
 
-## Inclusion Syntax
+## Basic Syntax: `!include`
 
-Dracon offers two ways to include files:
-
-### 1. Tag Syntax
-
-The `!include` tag is the most explicit way to include a file:
+The primary way to include content is using the `!include` tag followed by a source identifier string.
 
 ```yaml
-# Include a file using the default (file) loader
-settings: !include "config/settings.yaml"
+# Include content from settings.yaml in the same directory
+app_settings: !include file:$DIR/settings.yaml # $DIR holds the current file's directory. see [Automatic Context Variables](#automatic-context-variables)
 
-# Explicitly specify the file loader
-database: !include file:config/database.yaml
+# Include default config from an installed Python package
+defaults: !include pkg:my_package:path/to/configs/defaults.yaml
 
-# Include from a Python package
-templates: !include pkg:my_package:configs/templates.yaml
+# Include an API key directly from an environment variable
+api_key: !include env:MY_API_KEY
+
+common_config: &common
+  timeout: 30
+  retries: 3
+
+# Include a block defined by an anchor in THIS document
+service_a:
+  <<: !include common # Include using anchor name
+  endpoint: /a
 ```
 
-### 2. Anchor Syntax
+## Include Sources
 
-The `*loader:` syntax is shorter and can be used in more contexts:
+Dracon supports several source types for `!include`:
+
+1.  **Loaders (`loader:path`):**
+
+    - `file:path/to/file.yaml`: Loads from the filesystem. Relative paths are resolved based on the including file's directory.
+    - `pkg:package_name:path/to/resource.yaml`: Loads from resources within an installed Python package.
+    - `env:VARIABLE_NAME`: Directly includes the string value of an environment variable.
+    - `custom_loader:identifier`: Uses a custom loader function registered with `DraconLoader`.
+
+2.  **Anchors (`anchor_name`):**
+
+    - If the source string matches an anchor (`&anchor_name`) defined _earlier_ in the current effective document (including previous includes), Dracon includes a **deep copy** of the anchored node structure.
+
+    ```yaml
+    base_params: ¶ms
+      rate: 0.5
+      limit: 100
+
+    feature1:
+      # Gets a copy of the base_params dictionary
+      params: !include params
+      specific: value1
+    ```
+
+    !!! warning "Copy vs. Reference (`*anchor`)"
+    Standard YAML uses `*anchor_name` (aliases) to create **references** to the _same object instance_. Dracon intercepts `*anchor_name` syntax during composition and treats it like `!include anchor_name`, performing a **deep copy** of the node structure. This is useful for templating but differs from standard YAML behavior regarding object identity, especially for mutable types like lists and dicts. If you need object identity, use value references (`${@/path}`).
+
+3.  **Context Variables (`$variable_name`):**
+
+    - If the source string starts with `$` and matches a key in the _current node's context_, Dracon includes the value associated with that variable. The value is typically expected to be a node or something Dracon can represent as a node.
+
+    ```yaml
+    !define template_node: &tpl
+      setting: default
+
+    config:
+      # Includes the node referenced by the 'template_node' variable
+      instance1: !include $template_node
+    ```
+
+## Targeting Sub-keys (`source@path.to.key`)
+
+You can include just a specific part of a source document by appending `@` followed by a [KeyPath](keypaths.md) to the key you want to extract.
 
 ```yaml
-# Include a file using the file loader
-database: *file:config/database.yaml
-
-# Include an environment variable
-api_key: *env:API_KEY
-
-# Include from a package
-defaults: *pkg:my_package:configs/defaults.yaml
+# settings.yaml
+database:
+  host: db.example.com
+  port: 5432
+  pool:
+    size: 10
+logging:
+  level: INFO
 ```
 
-Both syntaxes work in most cases, but the anchor syntax (`*`) is more concise and has better compatibility with other YAML processors.
-
-## Available Loaders
-
-Dracon comes with these built-in loaders:
-
-### File Loader
-
-Loads files from the filesystem:
-
 ```yaml
-# Absolute path
-config: *file:/etc/myapp/config.yaml
+# main.yaml
+# Include only the database host
+db_host: !include file:settings.yaml@database.host # Result: "db.example.com"
 
-# Relative path (to current file)
-settings: *file:./settings.yaml
+# Include the entire database section
+database_config: !include file:settings.yaml@database
 
-# Path with filename only (searches in relative paths)
-logging: *file:logging.yaml
+# Include the pool size
+pool_size: !include file:settings.yaml@database.pool.size # Result: 10
 ```
 
-### Environment Variables
+!!! note
+Keys containing literal dots (`.`) within the source document need to be escaped with a backslash (`\.`) in the KeyPath target. E.g., `source@section\.with\.dots`.
 
-Loads values from environment variables:
+## Interpolation in Include Paths
+
+Include paths themselves can contain [Interpolation](interpolation.md) expressions, allowing for dynamic includes based on context.
 
 ```yaml
-api_key: *env:API_KEY
-debug_mode: *env:DEBUG
-port: ${int(env.get('PORT', '8080'))}
+!define ENV: ${getenv('DEPLOY_ENV', 'dev')}
+
+# Include environment-specific settings
+env_settings: !include file:./config/settings_${ENV}.yaml
+
+# Include version-specific config from a package
+versioned_api: !include pkg:my_api:v${API_VERSION}/config.yaml
 ```
 
-### Package Resources
+## Automatic Context Variables
 
-Loads files from installed Python packages:
+When using `file:` or `pkg:` loaders, Dracon automatically adds variables to the context of the _included_ file's nodes, which are useful for relative path resolution:
 
-```yaml
-defaults: *pkg:my_package:configs/defaults.yaml
-```
-
-## Context Variables
-
-When Dracon loads a file, it adds special variables to the context that you can use in expressions:
-
-```yaml
-# These values are set automatically for each included file
-file_info:
-  directory: ${$DIR} # Directory containing the current file
-  full_path: ${$FILE} # Full path to the current file
-  filename: ${$FILE_STEM} # Filename without extension
-  extension: ${$FILE_EXT} # File extension
-  load_time: ${$FILE_LOAD_TIME} # Timestamp when the file was loaded
-```
-
-These variables are particularly useful when including files that need to reference their location:
+- `$DIR`: The directory containing the included file.
+- `$FILE`: The full path to the included file.
+- `$FILE_STEM`: The filename without the extension.
+- `$FILE_EXT`: The file extension (including the dot).
+- `$FILE_LOAD_TIME`: Timestamp (YYYY-MM-DD HH:MM:SS).
+- `$FILE_LOAD_TIME_UNIX`: Unix timestamp (seconds).
+- `$FILE_LOAD_TIME_UNIX_MS`: Unix timestamp (milliseconds).
+- `$FILE_SIZE`: File size in bytes.
+- `$PACKAGE_NAME`: (For `pkg:` loader only) The name of the package.
 
 ```yaml
-# In config/app.yaml
-log_directory: ${$DIR}/logs
-templates: ${$DIR}/templates
-log_file: ${$FILE_STEM}.log # Will resolve to "app.log"
-```
-
-## Including Specific Keys
-
-You can include just a part of another file using the `@` syntax:
-
-```yaml
-# Include only the database section from settings.yaml
-database: *file:settings.yaml@database
-
-# Include a deeply nested key
-timeout: *file:config.yaml@services.api.timeout
-
-# Note: Keys with dots must be escaped
-dotted_key: *file:config.yaml@section\.with\.dots
-```
-
-## Variables in Paths
-
-You can use interpolation in include paths:
-
-```yaml
-# Use environment-specific settings
-!define env: "production"
-settings: !include "configs/${env}/settings.yaml"
-
-# Use version-specific configurations
-version_config: *file:configs/v${version}/config.yaml
+# Example: inside includes/component.yaml
+template_dir: ${$DIR}/templates # Path relative to this file
+log_file: /var/log/${$FILE_STEM}.log # Log file named after this file
 ```
 
 ## Best Practices
 
-### 1. Organize by Feature or Component
-
-Group related settings into separate files:
-
-```yaml
-# main.yaml
-database: !include "components/database.yaml"
-api: !include "components/api.yaml"
-logging: !include "components/logging.yaml"
-```
-
-### 2. Layer by Environment
-
-Create a base config and environment-specific overrides:
-
-```yaml
-# prod.yaml
-<<{+<}: *file:base.yaml
-database:
-  host: "prod-db.example.com"
-  ssl: true
-```
-
-### 3. Manage Secrets Separately
-
-Keep sensitive data in separate files:
-
-```yaml
-# app.yaml
-database:
-  host: "db.example.com"
-  port: 5432
-  credentials: !include "secrets/db_creds.yaml"
-```
-
-### 4. Use Relative Paths
-
-For portable configurations, use relative paths:
-
-```yaml
-# utils/config.yaml
-templates: *file:${$DIR}/templates
-resources: *file:${$DIR}/../resources
-```
-
-## Error Handling
-
-Dracon will raise an error if an included file cannot be found. For optional includes, use interpolation with fallbacks:
-
-```yaml
-# Try to include a file, fallback to an empty dict if not found
-overrides: ${try_include('file:overrides.yaml', {})}
-
-# Helper function in your context
-def try_include(path, default=None):
-  try: return loader.load(path)
-  except FileNotFoundError: return default
-```
-
-## Custom Loaders
-
-You can create custom loaders for additional sources:
-
-```python
-def read_from_redis(path: str, loader=None):
-    """Load configuration from Redis"""
-    import redis
-    r = redis.Redis()
-
-    # Path format: redis:key
-    key = path
-    yaml_data = r.get(key)
-
-    if yaml_data is None:
-        raise FileNotFoundError(f"Redis key not found: {key}")
-
-    return yaml_data.decode('utf-8'), {
-        '$REDIS_KEY': key,
-        '$REDIS_TIMESTAMP': time.time()
-    }
-
-# Register the loader
-loader = DraconLoader(
-    custom_loaders={'redis': read_from_redis}
-)
-
-# Now you can use it
-# config: *redis:app:settings
-```
+- **Organize:** Group related settings (database, logging, features) into separate files.
+- **Layer:** Create a `base.yaml` and environment-specific files (`dev.yaml`, `prod.yaml`) that include and merge the base.
+- **Secrets:** Keep sensitive data in separate, appropriately permissioned files and include them.
+- **Relative Paths:** Use `$DIR` for includes within the same component/directory structure to make configurations more portable.

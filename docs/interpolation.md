@@ -1,238 +1,138 @@
-# Expression Interpolation
+# Interpolation (Dynamic Values)
 
-Dracon's interpolation system enables you to embed Python expressions in your YAML configurations. This brings dynamic value generation, calculations, and complex logic to what would otherwise be static configuration files.
+Interpolation allows you to embed dynamic Python expressions directly within your YAML configuration strings. This makes your configurations more flexible and adaptable to different environments or runtime conditions.
 
-## Interpolation Types
+Dracon supports two main types of interpolation:
 
-Dracon supports two distinct types of interpolation:
+## 1. Lazy Interpolation: `${...}`
 
-### 1. Lazy Interpolation - `${...}`
+This is the primary and most common form. Dracon uses the [asteval](https://asteval.readthedocs.io/en/latest/) library to evaluate the expressions. It provides a safe and controlled environment for evaluating Python expressions, allowing you to use standard Python syntax and functions.
+You can also explicitely chose to use the much more dangerous raw `eval` function, but this is obviously not recommended.
 
-The primary syntax uses curly braces and evaluates expressions when the value is accessed:
-
-```yaml
-port: ${8080 + instance_id}
-debug: ${env != 'production'}
-greeting: ${"Hello, " + username + "!"}
-```
-
-Lazy interpolation means the expression is calculated "just in time" when the value is actually used. This allows referencing values that might not be available during parsing.
-
-### 2. Immediate Interpolation - `$(...)`
-
-This alternative syntax with parentheses evaluates expressions during parsing:
+- **Syntax:** `${python_expression}`
+- **Evaluation:** **Deferred (Lazy)**. The expression is _not_ evaluated immediately when the YAML is parsed. Instead, Dracon creates a special `LazyInterpolable` object. The actual Python expression is evaluated only when the corresponding configuration value is first accessed in your Python code after loading.
+- **Use Cases:** Calculating values based on other config keys, environment variables, or context provided at runtime. This is ideal for most dynamic configuration needs.
 
 ```yaml
-!define current_time: $(time.strftime('%Y-%m-%d'))
-tag_immediate: !$(str('float')) 5.0 # Results in: !float 5.0
-```
+!define base_port: 8000
+!define instance_num: ${getenv('INSTANCE_NUM', 0)} # Evaluated later
 
-Immediate interpolation is useful for type tags and other values needed during the parsing phase.
+server:
+  # Simple arithmetic, uses context vars evaluated lazily
+  port: ${base_port + instance_num}
+  # String formatting
+  host: "server-${instance_num}.example.com"
+  # Conditional logic
+  log_level: ${'DEBUG' if getenv('ENV') == 'dev' else 'INFO'}
 
-## Using Python Expressions
-
-You can use most Python expressions inside interpolation:
-
-### Basic Operations
-
-```yaml
-# Arithmetic
-memory_mb: ${1024 * 8}
-timeout_sec: ${timeout_min * 60}
-
-# String operations
-greeting: ${"Hello, " + username.title() + "!"}
-uppercase: ${service_name.upper()}
-
-# Boolean logic
-is_admin: ${role == 'admin' or username in admin_list}
-debug_logging: ${env != 'production' and enable_debug}
-```
-
-### Conditional Expressions
-
-```yaml
-# Ternary conditionals
-mode: ${'production' if env == 'prod' else 'development'}
-log_level: ${'DEBUG' if debug else 'INFO'}
-```
-
-### Working with Collections
-
-```yaml
-# List operations
-first_item: ${items[0]}
-item_count: ${len(items)}
-filtered: ${[x for x in items if x > threshold]}
-
-# Dictionary operations
-api_url: ${urls.get('api', 'https://api.default.com')}
-```
-
-## Path References
-
-Dracon has a special syntax for referencing other values in your configuration using `@`:
-
-### Absolute Paths
-
-Use a leading slash (`/`) to reference from the root of the configuration:
-
-```yaml
 database:
-  host: "db.example.com"
-  port: 5432
-  url: ${"postgresql://" + @/database/host + ":" + str(@/database/port)}
-# This references database.host from the root config
+  # Referencing another final configuration value using @
+  url: "postgresql://${user}:${password}@${@/server.host}:${@server.port}/main_db"
+  pool_size: ${max(4, instance_num * 2)} # Using built-in functions
 ```
 
-### Relative Paths
+### Referencing Other Values (`@`)
 
-Reference values relative to the current location:
+Inside a `${...}` expression, you can reference the _final, constructed value_ of another key using the `@` symbol followed by a [KeyPath](keypaths.md).
 
-```yaml
-service:
-  name: "api-service"
-  # Reference the sibling "name" field
-  log_prefix: ${@name + ": "}
-
-  logging:
-    # Reference parent's "name" field
-    file: ${@../name + ".log"}
-```
-
-### Parent References
-
-Navigate up the tree with `..`:
-
-```yaml
-deep:
-  nested:
-    structure:
-      value: 42
-      # Go up two levels and access a sibling
-      reference: ${@../../sibling}
-  sibling: "hello"
-```
-
-## Node References
-
-Use `&` to reference entire nodes (not just their values):
-
-```yaml
-__dracon__template: # This node won't appear in final config
-  base_service: &base_service
-    created_at: ${datetime.now()}
-    version: ${VERSION}
-
-# Create multiple objects from the template
-services:
-  web: &base_service
-  api:
-    <<: &base_service
-    port: 8080
-```
-
-The difference between `&` and `@`:
-
-- `&` creates a reference to a node, which can be duplicated and modified
-- `@` references a value in the final, constructed configuration
-
-## Context and Variables
-
-### Predefined Variables
-
-Dracon provides several built-in variables:
-
-```yaml
-# Environment variables
-host: ${env.get('HOST', 'localhost')}
-
-# Special file context variables (available in included files)
-file_dir: ${$DIR}
-file_name: ${$FILE_STEM}
-```
-
-### Custom Context Variables
-
-You can provide additional variables when loading configurations:
-
-```python
-loader = DraconLoader(
-    context={
-        'VERSION': '1.0.0',
-        'ENVIRONMENT': 'production',
-        'get_uuid': lambda: str(uuid.uuid4()),
-        'now': datetime.now
-    }
-)
-```
-
-Then use them in your YAML:
+- **Absolute Path:** `${@/path/from/root}` starts from the configuration root.
+- **Relative Path:** `${@.sibling_key}`, `${@../parent_key}`, `${@../sibling/key}` navigate relative to the current value's location.
 
 ```yaml
 app:
-  version: ${VERSION}
-  env: ${ENVIRONMENT}
-  id: ${get_uuid()}
-  start_time: ${now()}
+  name: "MyService"
+  port: 9000
+
+logging:
+  # Absolute path reference
+  filename: "/var/log/${@/app.name}.log" # -> /var/log/MyService.log
+  # Relative path reference
+  level_info: "Log level for ${@.filename}" # -> Log level for /var/log/MyService.log
+
+subcomponent:
+  value: 10
+  # Relative path going up
+  reference: "App port is ${@../app.port}" # -> App port is 9000
 ```
 
-## Type Interpolation
+!!! note
+`@` references point to the value _after_ all composition (includes, merges) and construction (including Pydantic validation) for that target key are complete. The evaluation is still lazy, triggered when the referencing value is accessed.
 
-You can interpolate both values and types:
+### Referencing Nodes (`&`)
+
+Inside a `${...}` expression, you can also reference the raw **node object** itself from _before_ construction using `&` followed by an anchor name or a path.
+
+- **Syntax:** `${&anchor_name}`, `${&/path/to/node}`, `${&relative/path}`.
+- **Behavior:** This gives the expression access to the YAML node object (e.g., a `DraconMappingNode`) as it exists during the _composition_ phase, potentially modified by includes or merges but _before_ it's converted into a final Python object.
+- **Use Cases:** This is primarily useful for **templating**. You can use it inside list comprehensions or function calls to create multiple _copies_ or variations of a base node structure before they get constructed.
 
 ```yaml
-# Interpolate the type tag
-value: !${type_name} ${value}
+# Template node (often hidden using !noconstruct or __dracon__)
+__dracon__:
+  service_template: &service_tpl
+    protocol: http
+    port: ${port_num} # port_num needs to be in context for this node
+    retries: 3
 
-# Examples
-as_int: !${'int'} ${2.5}          # Results in integer 2
-as_str: !${'str'} ${123}          # Results in string "123"
-dynamic_type: !${chosen_type} 42  # Type from variable
+# Generate multiple service configurations from the template
+services:
+  # Uses a list comprehension with the node reference (&)
+  # For each i, it creates a copy of the node referenced by &service_tpl,
+  # providing 'port_num' in its context.
+  ${[&service_tpl:port_num=8080+i for i in range(3)]}
+  # Resulting structure before final construction:
+  # - !mapping # Copy 1 with port_num=8080 in context
+  #   protocol: http
+  #   port: ${port_num}
+  #   retries: 3
+  # - !mapping # Copy 2 with port_num=8081 in context
+  #   protocol: http
+  #   port: ${port_num}
+  #   retries: 3
+  # - !mapping # Copy 3 with port_num=8082 in context
+  #   protocol: http
+  #   port: ${port_num}
+  #   retries: 3
 ```
 
-## Advanced Techniques
+!!! important "`&` vs `@` Summary"
+_ Use `${@path}` to get the **final constructed value** of another key (most common).
+_ Use `${&node_ref}` (inside expressions) to work with the **node object before construction**, primarily for templating/duplication during composition. Evaluating _just_ `${&node_ref}` typically gives you a deep copy of the node's _value representation_ at evaluation time.
 
-### Multiple Interpolations
+## 2. Immediate Interpolation: `$(...)`
 
-You can nest interpolations:
+This form is less common and serves specific purposes.
+
+- **Syntax:** `$(python_expression)`
+- **Evaluation:** **Immediate**. The expression is evaluated _during_ the initial YAML parsing and composition phase. The result of the expression replaces the `$(...)` token _before_ Dracon proceeds with parsing that part of the structure.
+- **Use Cases:**
+  - Dynamically generating **YAML tags**: `!$(type_name_var)`
+  - Calculating simple scalar values needed immediately during parsing.
+- **Limitations:**
+  - Cannot use `@` or `&` references (the target nodes/values don't reliably exist yet).
+  - Can only access context variables that are already defined _statically_ before this point in the parsing process. Cannot reliably access values defined using `${...}`.
 
 ```yaml
-# Nested interpolations
-double: ${int(${value} * 2)}
+!define type_name: "str"
+!define scale: 10
 
-# Multiple interpolations in a string
-connection: ${"Host=" + host + ";Port=" + str(${port})}
+config:
+  # Tag is determined immediately based on type_name variable
+  value: !$(type_name) 123.45 # Node gets tag !str
+
+  # Value calculated immediately
+  scaled_value: $(scale * 5.5) # Node gets value 55.0
 ```
 
-### Function Calls
+## Context Availability
 
-Call functions from your context:
+Expressions within both `${...}` and `$(...)` can access:
 
-```yaml
-# Assuming these are in your context
-uuid: ${generate_uuid()}
-timestamp: ${time.time()}
-random_value: ${random.choice(['a', 'b', 'c'])}
-```
+- Variables provided in the `DraconLoader(context=...)`.
+- Standard Python built-ins.
+- Variables defined using `!define` or `!set_default` in the current or parent scope _before_ the expression is encountered (more reliable for `$(...)`).
+- Special loader context variables like `${$DIR}`, `${$FILE}` (only available within included files).
 
-### Working with Defaults
+## How Lazy Evaluation Works (`Dracontainer`)
 
-Handle potentially undefined values:
-
-```yaml
-# Default if the variable doesn't exist
-region: ${globals().get('AWS_REGION', 'us-east-1')}
-
-# Using or with interpolation
-db_url: ${database_url or "sqlite:///app.db"}
-```
-
-## Best Practices
-
-1. **Keep expressions simple** - Complex logic belongs in your code, not config
-2. **Use meaningful defaults** - Handle missing values gracefully
-3. **Watch for side effects** - Avoid expressions with unintended consequences
-4. **Define common values** - Use `!define` for values referenced multiple times
-
-By using interpolation effectively, you can create flexible configurations that adapt to their environment without sacrificing readability or maintainability.
+When you load a configuration with `${...}` expressions, Dracon typically constructs mappings and sequences using its internal `dracon.dracontainer.Mapping` and `dracon.dracontainer.Sequence` types. These containers override attribute access (`__getattr__`, `__getitem__`) to automatically trigger the resolution of `LazyInterpolable` objects the first time they are accessed. If you configure `DraconLoader` to use standard `dict` and `list`, this automatic resolution doesn't happen, and you might need to manually trigger resolution if needed (e.g., by iterating through the structure or using helper functions not explicitly provided by Dracon itself, like `resolve_all_lazy`).

@@ -44,11 +44,18 @@ markdown_extensions:
   - md_in_html
 
 nav:
-  - Home: index.md
-  - Guides:
-      - File Inclusion: includes.md
-      - Expression Interpolation: interpolation.md
-      - Merging: merging.md
-      - Command Line Programs: cli.md
-      - Node Instructions: instructions.md
-      - Advanced Usage: advanced.md
+  - "Introduction": "index.md"
+  - "Core Concepts":
+      - "Loading Configuration": "loading.md"
+      - "Includes (Modularity)": "includes.md"
+      - "Interpolation (Dynamic Values)": "interpolation.md"
+      - "Merging Configurations": "merging.md"
+      - "Instructions (Composition Logic)": "instructions.md"
+      - "Working with Types": "types.md"
+  - "Advanced Features":
+      - "Deferred Nodes": "deferred.md"
+      - "Resolvable Values": "resolvable.md"
+      - "KeyPaths": "keypaths.md"
+  - "Command-Line Interfaces": "cli.md"
+  # - 'API Reference': 'api.md'
+  # - 'Recipes': 'recipes.md'
