@@ -84,6 +84,7 @@ class DraconLoader:
         enable_interpolation: bool = False,
         context: Optional[Dict[str, Any]] = None,
         deferred_paths: Optional[list[KeyPath | str]] = None,
+        use_cache: bool = True,
     ):
         self.custom_loaders = DEFAULT_LOADERS.copy()
         self.custom_loaders.update(custom_loaders or {})
@@ -94,6 +95,7 @@ class DraconLoader:
         self.deferred_paths = [KeyPath(p) for p in (deferred_paths or [])]
         self.base_dict_type = base_dict_type
         self.base_list_type = base_list_type
+        self.use_cache = use_cache
 
         self._init_yaml()
 
@@ -168,7 +170,10 @@ class DraconLoader:
 
     @ftrace()
     def compose_config_from_str(self, content: str) -> CompositionResult:
-        composed_content = cached_compose_config_from_str(self.yaml, content)
+        if self.use_cache:
+            composed_content = cached_compose_config_from_str(self.yaml, content)
+        else:
+            composed_content = compose_config_from_str(self.yaml, content)
         return self.post_process_composed(composed_content)
 
     @ftrace()

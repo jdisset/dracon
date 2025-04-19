@@ -10,6 +10,10 @@ DraconLoader = ForwardRef('DraconLoader')
 
 
 @cached(LRUCache(maxsize=50))
+def read_from_pkg_cached(*args, **kwargs):
+    return read_from_pkg(*args, **kwargs)
+
+
 def read_from_pkg(path: str):
     pkg = None
 

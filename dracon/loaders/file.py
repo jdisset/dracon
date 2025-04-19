@@ -11,6 +11,10 @@ DraconLoader = ForwardRef('DraconLoader')
 
 
 @cached(LRUCache(maxsize=50))
+def read_from_file_cached(*args, **kwargs):
+    return read_from_file(*args, **kwargs)
+
+
 def read_from_file(path: str, extra_paths=None):
     """
     Reads the content of a file, searching in the specified path and additional paths if provided.
