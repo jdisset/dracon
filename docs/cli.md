@@ -1,234 +1,194 @@
-# Command Line Programs
+# Command-Line Interfaces
 
-Dracon provides utilities to generate command line programs from Pydantic models, leveraging the configuration system for flexible program configuration.
+Dracon allows you to automatically generate command-line interfaces (CLIs) directly from your Pydantic configuration models. You can define your application's parameters and configuration structure in one place (the Pydantic model) and get a type-safe, well-documented CLI with integrated configuration file loading and overrides.
 
 ## Basic Usage
 
-Define your program model:
+1.  **Define Your Configuration Model:** Use a Pydantic `BaseModel`.
+2.  **(Optional) Annotate Fields:** Use `typing.Annotated` and `dracon.Arg` to customize CLI arguments (help text, short names, etc.).
+3.  **Create the Program:** Use `dracon.make_program()`.
+4.  **Parse Arguments:** Call `program.parse_args()`.
+
+```python
+# main.py
+import sys
+from pydantic import BaseModel
+from typing import Annotated
+from dracon import DraconLoader, make_program, Arg # Import necessary parts
+
+# 1. Define the model
+class CliConfig(BaseModel):
+    input_file: Annotated[str, Arg(
+        positional=True, # Make this a positional argument
+        help="Path to the input data file."
+    )]
+    output_dir: Annotated[str, Arg(
+        short='o', # Add a short flag -o
+        help="Directory to save results."
+    )]
+    threshold: Annotated[float, Arg(help="Processing threshold.")] = 0.5 # Add default
+    verbose: Annotated[bool, Arg(short='v', help="Enable verbose output.")] = False
+
+    # Example application logic method
+    def run(self):
+        print(f"Running with config:")
+        print(f"  Input: {self.input_file}")
+        print(f"  Output Dir: {self.output_dir}")
+        print(f"  Threshold: {self.threshold}")
+        print(f"  Verbose: {self.verbose}")
+        # ... your actual logic here ...
+
+# 3. Create the program instance
+program = make_program(
+    CliConfig,
+    name="my-data-processor", # Optional: Program name for help message
+    description="Processes data files based on configuration." # Optional help description
+)
+
+if __name__ == "__main__":
+    try:
+        # 4. Parse arguments
+        # Returns the populated Pydantic model instance and the raw args dict
+        config_model, raw_args = program.parse_args(sys.argv[1:])
+
+        # 5. Use the populated and validated model
+        config_model.run()
+
+    except Exception as e: # Catch potential parsing/validation errors
+        print(f"Error: {e}", file=sys.stderr)
+        # Consider calling program.print_help() here or letting it exit
+        sys.exit(1)
+```
+
+## Running the CLI
+
+The generated CLI supports several features automatically:
+
+- **Help Message:**
+  ```bash
+  $ python main.py --help
+  # Output: (Formatted help message based on model and Arg annotations)
+  # Usage: my-data-processor [OPTIONS] INPUT_FILE
+  #
+  # Arguments:
+  #   INPUT_FILE    Path to the input data file.
+  #                 type: STR
+  #                 REQUIRED
+  # ... etc ...
+  ```
+- **Positional Arguments:**
+  ```bash
+  $ python main.py path/to/data.csv --output-dir results/
+  # input_file='path/to/data.csv', output_dir='results/', threshold=0.5, verbose=false
+  ```
+- **Optional Arguments (Long/Short):**
+
+  ```bash
+  $ python main.py data.csv -o out/ --threshold 0.8 -v
+  # input_file='data.csv', output_dir='out/', threshold=0.8, verbose=true
+  ```
+
+  !!! note
+  Option names are automatically derived from field names (e.g., `output_dir` -> `--output-dir`). Use `Arg(long='custom-name')` to override.
+
+- **Boolean Flags:** Fields typed as `bool` become flags. Simply including the flag sets it to `True`.
+  ```bash
+  $ python main.py data.csv -o out # verbose is false (default)
+  $ python main.py data.csv -o out -v # verbose is true
+  ```
+
+## Customizing Arguments with `Arg`
+
+The `dracon.Arg` class, used within `Annotated`, provides fine-grained control:
 
 ```python
 from typing import Annotated
-from pydantic import BaseModel
-from dracon import Arg, make_program
+from dracon import Arg
 
-class DatabaseConfig(BaseModel):
-    host: str
-    port: int
-    username: str
-    password: str
-
-class MyProgram(BaseModel):
-    database: Annotated[DatabaseConfig, Arg(
-        help='Database configuration',
-        short='d',
-        expand_help=True,
-    )]
-    verbose: Annotated[bool, Arg(help='Enable verbose output')]
-
-    def run(self):
-        # Your program logic here
-        if self.verbose:
-            print(f"Connecting to {self.database.host}...")
-```
-
-Create and run the program:
-
-```python
-program = make_program(
-    MyProgram,
-    name='my-program',
-    description='My awesome program'
-)
-
-if __name__ == '__main__':
-    program_model, args = program.parse_args(sys.argv[1:])
-    program_model.run()
-```
-
-## Configuration Loading
-
-Your program can load configuration from files:
-
-```yaml
-# config.yaml
-database:
-    host: localhost
-    port: 5432
-    username: *env:DB_USER
-    password: *env:DB_PASSWORD
-verbose: false
-```
-
-Run with configuration:
-
-```bash
-# Load config file
-python my_program.py +config.yaml
-
-# Override values
-python my_program.py +config.yaml --database.host remotehost --verbose
-```
-
-## Argument Annotations
-
-Control how arguments are handled:
-
-```python
-class ProcessingConfig(BaseModel):
-    input_file: Annotated[str, Arg(
-        help='Input file to process',
-        short='i',
-        is_file=True,
-        positional=True
-    )]
-    output_dir: Annotated[str, Arg(
-        help='Output directory',
-        short='o',
-        is_file=True
+class AdvancedConfig(BaseModel):
+    config_file: Annotated[str, Arg(
+        long='config', # Custom long name (--config instead of --config-file)
+        short='c',
+        help='Path to primary configuration YAML file.'
     )]
     threads: Annotated[int, Arg(
-        help='Number of processing threads',
-        short='t',
-        default=1
+        help='Number of processing threads (0 for auto).',
+        default=1 # Override Pydantic default for CLI help if needed
+    )]
+    input_path: Annotated[str, Arg(
+        positional=True, # A positional argument
+        help='Input data source.'
+    )]
+    force_update: Annotated[bool, Arg(
+        short='f',
+        help='Force update even if output exists.'
+    )]
+    log_setup_level: Annotated[str, Arg(
+        # Execute this function when the arg is parsed
+        action=setup_logging_action, # Define this function elsewhere
+        help='Set logging level (DEBUG, INFO, etc).'
+    )]
+    output_path: Annotated[Resolvable[str], Arg(
+        # Mark as resolvable for post-processing
+        resolvable=True,
+        help='Output file path (can be derived).'
+    )]
+    metadata_file: Annotated[str, Arg(
+         # Automatically treat value as 'file:...' for Dracon includes/loading
+        is_file=True,
+        help='Path to metadata YAML file.'
     )]
 ```
 
-## Resolvable Arguments
+- `short`: Single character for the short flag (e.g., `'c'` for `-c`).
+- `long`: Custom long flag name (e.g., `'config'` for `--config`).
+- `help`: Description shown in `--help`.
+- `positional`: If `True`, the argument is positional instead of an option flag. Order is determined by field definition order in the model.
+- `action`: A function `func(program: Program, value: Any)` called immediately after the argument value is parsed. Useful for side effects like setting up logging.
+- `resolvable`: If `True`, the argument's value will be wrapped in a `Resolvable` object, delaying its final processing (see [Resolvable Values](resolvable.md)).
+- `is_file`: If `True`, instructs Dracon internally that this argument represents a file path, potentially influencing how it's handled if used within Dracon's loading/include mechanisms activated by CLI arguments.
+- `default`: Can be used to specify a default value specifically for the CLI help message, potentially overriding the Pydantic model default for display purposes.
 
-Some arguments can be resolved after initialization:
+## Integration with Dracon Configuration Loading
 
-```python
-class AdvancedConfig(BaseModel):
-    template: Annotated[str, Arg(
-        help='Template file',
-        is_file=True
-    )]
-    output: Annotated[str, Arg(
-        help='Output file',
-        resolvable=True  # Will be resolved after other args
-    )]
-```
+This is where the CLI module truly integrates with the rest of Dracon:
 
-## Custom Actions
+1.  **Loading Config Files (`+` prefix):** Arguments starting with `+` are treated as configuration files to be loaded and merged _before_ applying CLI overrides.
 
-Add custom argument actions:
+    ```bash
+    # Load base config, then production overrides, then apply CLI args
+    $ python main.py +base.yaml +prod.yaml path/to/data.csv --threshold 0.9
+    ```
 
-```python
-def setup_logging(program: MyProgram, value: Any) -> None:
-    level = logging.DEBUG if value else logging.INFO
-    logging.basicConfig(level=level)
+    Files are merged sequentially using Dracon's default merge strategy (`{~<}[~<]` - roughly, replace keys/lists, new wins).
 
-class LoggingConfig(BaseModel):
-    debug: Annotated[bool, Arg(
-        help='Enable debug logging',
-        action=setup_logging
-    )]
-```
+2.  **CLI Overrides (`--key value`):** Standard option arguments directly override values coming from defaults or loaded config files. Nested keys are supported using dot notation.
 
-## Help Messages
+    ```bash
+    # Assume config.yaml defines database.host = 'localhost'
+    $ python main.py +config.yaml data.csv --database.host db.prod.svc --database.port 5433
+    ```
 
-Dracon generates formatted help messages:
+3.  **Defining Context Variables (`--define.`):** You can set context variables for Dracon's interpolation engine directly from the CLI.
+    ```bash
+    # Define context variables ENV and BATCH_SIZE
+    $ python main.py data.csv --define.ENV=production --define.BATCH_SIZE=100
+    ```
+    These variables (`ENV`, `BATCH_SIZE`) become available within `${...}` expressions in your loaded YAML files.
 
-```bash
-$ python my_program.py --help
+## Order of Precedence
 
-MyProgram (v1.0.0)
-─────────────────
+Dracon applies configuration sources in the following order (later sources override earlier ones):
 
-Usage: my-program [OPTIONS]
+1.  Pydantic Model Defaults.
+2.  First `+config1.yaml` loaded.
+3.  Second `+config2.yaml` loaded (merged onto result of #2).
+4.  ... subsequent `+configN.yaml` files.
+5.  Context variables from `--define.VAR=value`.
+6.  CLI argument overrides (`--key value`).
 
-Options:
-  -d, --database DATABASE
-    Database configuration
-    type: DatabaseConfig
-    default: None
+Dracon's merging, includes, and interpolation rules are applied throughout this process.
 
-  --verbose
-    Enable verbose output
-    default: False
-```
+## Putting It Together
 
-## Advanced Usage
-
-### Environment-Specific Configs
-
-```yaml
-# base.yaml
-database:
-    host: localhost
-    port: 5432
-
-# prod.yaml
-<<{+<}: *file:base.yaml
-database:
-    host: prod-db.example.com
-    ssl: true
-```
-
-Run with environment config:
-
-```bash
-python my_program.py +base.yaml +prod.yaml
-```
-
-### Dynamic Configuration
-
-```python
-class DynamicConfig(BaseModel):
-    template: Annotated[str, Arg(
-        help='Template file',
-        is_file=True
-    )]
-    variables: Annotated[dict, Arg(
-        help='Template variables',
-        resolvable=True
-    )]
-
-    def resolve_variables(self):
-        # Load variables based on template
-        with open(self.template) as f:
-            template = f.read()
-            # Process template to find required variables
-            return extract_variables(template)
-```
-
-## Best Practices
-
-1. **Structured Configuration**:
-   ```python
-   class Config(BaseModel):
-       input: InputConfig
-       processing: ProcessingConfig
-       output: OutputConfig
-   ```
-
-2. **Clear Help Messages**:
-   ```python
-   class Config(BaseModel):
-       threads: Annotated[int, Arg(
-           help='Number of processing threads\n'
-                'Use 0 for auto-detection',
-           short='t'
-       )]
-   ```
-
-3. **Default Values**:
-   ```python
-   class Config(BaseModel):
-       log_level: Annotated[str, Arg(
-           help='Logging level',
-           default='INFO',
-       )]
-   ```
-
-## Error Handling
-
-```python
-try:
-    program_model, args = program.parse_args(sys.argv[1:])
-except ValidationError as e:
-    print("Configuration error:")
-    for error in e.errors():
-        print(f"  - {error['loc'][0]}: {error['msg']}")
-    sys.exit(1)
-```
+The `commandline` module provides a seamless way to build robust, type-safe CLIs that fully integrate with Dracon's powerful configuration loading capabilities, allowing users to configure your application through a combination of defaults, files, environment variables (via YAML), and command-line arguments.
