@@ -16,8 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    name: Deploy Docs
+  build:
     runs-on: ubuntu-latest
 
     steps:
