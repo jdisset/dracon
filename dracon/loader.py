@@ -1,6 +1,3 @@
-# -*- coding: utf-8 -*-
-# dracon/loader.py
-
 ## {{{                          --     imports     --
 from ruamel.yaml import Node
 import os
@@ -55,22 +52,22 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_CONTEXT = {
-    # some SAFE os functions (not all of them are safe)
-    # need no side effects, and no access to the filesystem
+    # some relatively safe os functions (not all of them are safe)
     'getenv': os.getenv,
     'getcwd': os.getcwd,
+    'listdir': os.listdir,
+    'join': os.path.join,
+    'basename': os.path.basename,
+    'dirname': os.path.dirname,
+    'expanduser': os.path.expanduser,
 }
-
-
-def dillcopy(obj):
-    import dill
-
-    return dill.loads(dill.dumps(obj))
 
 
 @ftrace()
 def construct(node_or_val, **kwargs):
-    if isinstance(node_or_val, Node):
+    if isinstance(node_or_val, DeferredNode):
+        return node_or_val.construct(**kwargs)
+    elif isinstance(node_or_val, Node):
         loader = DraconLoader(**kwargs)
         compres = CompositionResult(root=node_or_val)
         return loader.load_composition_result(compres, post_process=True)

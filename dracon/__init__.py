@@ -11,6 +11,7 @@ from dracon.loader import (
     serialize_loaded_config,
     dump,
     dump_to_node,
+    construct,
 )
 
 from dracon.lazy import resolve_all_lazy
@@ -27,3 +28,4 @@ from dracon.lazy import DraconError
 from dracon.representer import DraconRepresenter
 from dracon.interpolation import evaluate_expression, InterpolableNode
 from dracon.nodes import DraconScalarNode, DraconMappingNode, DraconSequenceNode, ContextNode
+from dracon.deferred import DeferredNode
