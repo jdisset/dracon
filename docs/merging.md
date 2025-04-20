@@ -11,7 +11,7 @@ Dracon's extended merge key follows this pattern:
 - `<<:`: The standard YAML merge key indicator.
 - `{dict_opts}`: (Optional) Controls how **dictionaries** are merged.
 - `[list_opts]`: (Optional) Controls how **lists** are merged.
-- `@target_path`: (Optional) A [KeyPath](keypaths.md) specifying a sub-key within the _current_ mapping where the merge should be applied. If omitted, the merge applies directly to the current mapping.
+- `@target_path`: (Optional) A [KeyPath](keypaths.md) specifying a sub-key within the _current_ mapping where the merge should be applied (relative to the current node). If omitted, the merge applies directly to the current mapping.
 - `merge_source`: The node providing the data to be merged in. This is often an alias (`*anchor`) or an `!include` directive, but can also be an inline mapping or sequence.
 
 ## Dictionary Merging Options (`{dict_opts}`)
@@ -19,11 +19,11 @@ Dracon's extended merge key follows this pattern:
 These options control behavior when merging two dictionaries (mappings).
 
 - **Mode:**
-  - `+` (Append/Recurse - Default): Adds new keys from `merge_source`. For existing keys, if both values are dictionaries, it merges them recursively. If values are not both dictionaries (or are lists), the conflict is resolved by priority.
+  - `+` (Append/Recurse - Default): Adds new keys from `merge_source`. For existing keys, if both values are dictionaries, it merges them recursively by default. If values are not both dictionaries (or are lists), the conflict is resolved by priority.
   - `~` (Replace): Adds new keys from `merge_source`. For existing keys, the value is _always_ determined by the priority setting, completely replacing the other value (no recursion).
 - **Priority:**
-  - `>` (Existing Wins - Default for `+`): If a key exists in both, the value from the _existing_ dictionary (the one containing the `<<:` key) is kept.
-  - `<` (New Wins - Default for `~`): If a key exists in both, the value from the `merge_source` dictionary is kept.
+  - `>` (Existing Wins - Default for `+` mode): If a key exists in both, the value from the _existing_ dictionary (the one containing the `<<:` key) is kept.
+  - `<` (New Wins - Default for `~` mode): If a key exists in both, the value from the `merge_source` dictionary is kept.
 - **Depth (`N`):**
   - `+N` (e.g., `{+2>}`): Limits recursive merging (`+` mode) to `N` levels deep. Beyond this depth, conflicts are resolved by priority without further recursion.
 
@@ -38,18 +38,18 @@ base: &base
   list1: [a, b]
 
 # Example 1: Default-like (Append keys, Existing wins, No dict recursion unless forced)
-merged1:
+merged1: # Equivalent to <<{+>}[~<]
   <<: *base
   x: 2 # base.x (1) wins because existing wins by default
   y:
-    b: 20 # Added, y is replaced because base dict merge isn't recursive by default
+    b: 20 # Added, base.y is replaced because base dict merge isn't recursive by default
   w: 300 # Added
 
 # Result merged1: { x: 1, y: { b: 20 }, z: 100, w: 300, list1: [a, b] }
 
 # Example 2: Recursive Append, New wins
 merged2:
-  <<{+<}: *base # Recursively merge dicts, new values win
+  <<{+<}: *base # Recursively merge dicts (+), new values win (<)
   x: 2 # New x (2) wins
   y:
     b: 20 # Added to existing y
@@ -59,7 +59,7 @@ merged2:
 
 # Example 3: Replace, Existing wins
 merged3:
-  <<{~>}: *base # Replace conflicting, existing wins
+  <<{~>}: *base # Replace conflicting keys (~), existing wins (>)
   x: 2 # Existing x (1) wins
   y:
     b: 20 # Existing y ({a: 10}) wins entirely, {b: 20} is ignored
@@ -95,28 +95,28 @@ base: &base
 
 # Example 1: Replace list, New wins (Default list behavior)
 merged_list1:
-  <<: *base # Implicitly uses [~<]
+  <<: *base # Implicitly uses [~<] for lists
   items: [c, d]
 
 # Result merged_list1: { items: [c, d], config: { ports: [80, 443] } }
 
 # Example 2: Concatenate, Existing first (Append new)
 merged_list2:
-  <<[+>]: *base # Concatenate, existing items first
+  <<[+>]: *base # Concatenate (+), existing items first (>)
   items: [c, d]
 
 # Result merged_list2: { items: [a, b, c, d], config: { ports: [80, 443] } }
 
 # Example 3: Concatenate, New first (Prepend new)
 merged_list3:
-  <<[+<]: *base # Concatenate, new items first
+  <<[+<]: *base # Concatenate (+), new items first (<)
   items: [c, d]
 # Result merged_list3: { items: [c, d, a, b], config: { ports: [80, 443] } }
 ```
 
 ## Targeting Sub-keys (`@target_path`)
 
-Apply the merge operation specifically to a nested key within the current mapping.
+Apply the merge operation specifically to a nested key within the current mapping using a [KeyPath](keypaths.md). The path is relative to the node containing the merge key.
 
 ```yaml
 base: &base
@@ -130,7 +130,7 @@ config:
   common:
     timeout: 30
     # Merge *base into the 'common' sub-dictionary
-    # Using recursive append, new values win for dictionaries
+    # Uses KeyPath 'common'. Apply recursive append ({+}), new values win (<)
     <<{+<}@common: *base # Result: common: { timeout: 30, host: base_host, port: 1000 }
 
 # Result config:
@@ -140,7 +140,7 @@ config:
 
 ## Combining Options
 
-You can specify both dictionary and list options together.
+You can specify both dictionary and list options together. The order (`{}[ ]` or `[]{}`) doesn't matter.
 
 ```yaml
 defaults: &defaults
@@ -150,8 +150,9 @@ defaults: &defaults
   users: ["admin"]
 
 production:
-  # For dicts: Recursive Append, New wins
-  # For lists: Concatenate, Existing first (Append new)
+  # Note: Order of {} and [] doesn't matter
+  # For dicts: Recursive Append ({+}), New wins (<)
+  # For lists: Concatenate ([+]), Existing first (>)
   <<{+<}[+>]: *defaults
   settings:
     active: true # Overrides default
@@ -165,4 +166,4 @@ production:
 
 ## Standard YAML Merge (`<<: *anchor`)
 
-Dracon still respects the standard YAML merge key `<<: *anchor` if no specific Dracon options (`{}`, `[]`, `@`) are provided _on that specific key_. However, the standard YAML merge has semantics roughly equivalent to Dracon's `{~<}` (Replace keys, New value wins). If you need finer control or different behavior (like recursion), use Dracon's explicit syntax.
+Dracon still respects the standard YAML merge key `<<: *anchor` if no specific Dracon options (`{}`, `[]`, `@`) are provided _on that specific key_. However, the standard YAML merge has semantics roughly equivalent to Dracon's `{~<}` (Replace keys, New value wins). If you need finer control or different behavior (like recursion or list concatenation), use Dracon's explicit syntax.

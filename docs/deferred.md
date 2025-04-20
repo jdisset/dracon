@@ -30,7 +30,9 @@ Sometimes, you need more control over _when_ a part of your configuration is ful
       password: ${DB_PASSWORD}
     ```
 
-3.  **`!deferred::clear_ctx=var1,var2` Tag:** Defer construction and specify context variables that should be _ignored_ from the parent scope when this node is eventually constructed. This isolates the deferred node's context.
+3.  **`!deferred::clear_ctx=VAR1,VAR2` Tag:** Defer construction and specify context variables that should be _ignored_ from the parent scope when this node is eventually constructed. This isolates the deferred node's context.
+
+    - Using `!deferred::clear_ctx` (with no variables listed) or `!deferred::clear_ctx=True` clears _all_ inherited context.
 
     ```yaml
     !define ENV: production
@@ -38,9 +40,16 @@ Sometimes, you need more control over _when_ a part of your configuration is ful
     component: !deferred::clear_ctx=ENV # Don't inherit ENV
       !define ENV: development # Use a local ENV for this component
       setting: ${ENV} # Will resolve to 'development'
+
+    isolated_component: !deferred::clear_ctx
+      # Clear all inherited context
+      # Define local context only
+      !define LOCAL_VAR: "isolated"
+      value: ${LOCAL_VAR}
+      # parent_var: ${ENV} # This would cause an error if uncommented
     ```
 
-4.  **`DraconLoader(deferred_paths=...)`:** Force nodes matching specific [KeyPaths](keypaths.md) to be deferred, even without an explicit tag.
+4.  **`DraconLoader(deferred_paths=...)`:** Force nodes matching specific [KeyPaths](keypaths.md) to be deferred, even without an explicit tag. Paths use glob-like syntax (`*`, `**`).
     ```python
     # Force anything under 'services.*.database' to be deferred
     loader = DraconLoader(deferred_paths=['/services/*/database'])
@@ -53,8 +62,8 @@ Sometimes, you need more control over _when_ a part of your configuration is ful
 When Dracon encounters a node marked for deferral, it doesn't construct it immediately. Instead, it creates a `dracon.deferred.DeferredNode` object. This object acts as a placeholder and contains:
 
 - The original YAML **node structure**.
-- A **snapshot of the context** available at that point in the composition.
-- A reference to the **`DraconLoader`** instance used.
+- A **snapshot of the context** available at that point in the composition (potentially excluding cleared variables).
+- A reference to the **`DraconLoader`** instance used (important for pickling).
 - The full **`CompositionResult`** at the time of deferral.
 
 This captured state allows the construction process to be resumed later accurately.
@@ -63,7 +72,7 @@ This captured state allows the construction process to be resumed later accurate
 from dracon import DraconLoader
 from dracon.deferred import DeferredNode
 
-loader = DraconLoader()
+loader = DraconLoader(enable_interpolation=True) # Enable interpolation for example
 yaml_content = '''
 api_client: !deferred
     base_url: "https://api.example.com"
@@ -98,9 +107,9 @@ config.api_client = final_api_client
 
 ### Selective Deferral within `.construct()`
 
-You can even defer sub-parts _within_ the manually constructed node using the `deferred_paths` argument in `.construct()`. Paths are relative to the deferred node itself.
+You can even defer sub-parts _within_ the manually constructed node using the `deferred_paths` argument in `.construct()`. Paths are relative to the deferred node itself and use [KeyPath](keypaths.md) syntax (`*`, `**` supported).
 
-```python
+```yaml
 complex_service: !deferred
   database:
     host: db
@@ -108,13 +117,16 @@ complex_service: !deferred
   cache:
     host: cache
     credentials: ${CACHE_CREDS} # Needs late binding
+```
 
+```python
 # --- Python ---
 deferred_node = config.complex_service
 
 # Construct the service, but keep 'database' and 'cache' deferred
+# Paths are relative to complex_service
 partially_constructed = deferred_node.construct(
-    deferred_paths=['/database', '/cache'] # Paths relative to complex_service
+    deferred_paths=['/database', '/cache']
 )
 
 assert isinstance(partially_constructed.database, DeferredNode)
@@ -133,7 +145,7 @@ final_cache = partially_constructed.cache.construct(context={'CACHE_CREDS': cach
 
 - A `DeferredNode` captures the context present when it was created during the initial load.
 - Context provided via `.construct(context=...)` is **merged** with the captured context. By default, the provided runtime context takes priority (`{<~}`).
-- Variables specified in `!deferred::clear_ctx=...` are removed from the captured context before merging, preventing inheritance from the parent scope.
+- Variables specified in `!deferred::clear_ctx=...` (or `!deferred::clear_ctx`) are removed from the captured context _before_ merging with runtime context, preventing inheritance from the parent scope.
 
 ## Pickling and Parallelism
 
@@ -146,11 +158,6 @@ This allows you to:
 3.  Provide process-specific context and call `.construct()` in parallel to build different components independently.
 
 ```python
-import multiprocessing
-import pickle
-from dracon import DraconLoader
-from dracon.deferred import DeferredNode
-
 # --- config.yaml ---
 # workers:
 #   - !deferred::clear_ctx=WORKER_ID
@@ -162,6 +169,12 @@ from dracon.deferred import DeferredNode
 #     config:
 #       param: ${WORKER_ID * 10}
 
+# --- Python ---
+import multiprocessing
+import pickle
+from dracon import DraconLoader
+from dracon.deferred import DeferredNode
+
 def process_worker(pickled_deferred_node_data):
     worker_id, pickled_node = pickled_deferred_node_data
     # Unpickle the node in the new process
@@ -172,7 +185,7 @@ def process_worker(pickled_deferred_node_data):
     return worker_config
 
 if __name__ == "__main__":
-    loader = DraconLoader()
+    loader = DraconLoader(enable_interpolation=True) # Ensure interpolation is on
     config = loader.load('config.yaml')
 
     deferred_workers = config.workers
