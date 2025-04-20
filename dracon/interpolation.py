@@ -132,14 +132,10 @@ def preprocess_expr(expr: str, symbols: Optional[dict] = None):
     return expr
 
 
-USE_SAFE_EVAL = False
-
-
-def do_safe_eval(expr: str, symbols: Optional[dict] = None) -> Any:
+def do_safe_eval(expr: str, engine: str, symbols: Optional[dict] = None) -> Any:
     expr = preprocess_expr(expr, symbols)
 
-    if USE_SAFE_EVAL:
-        # Original safe implementation using asteval
+    if engine == 'asteval':
         safe_eval = Interpreter(user_symbols=symbols or {}, max_string_length=1000)
         res = safe_eval.eval(expr, raise_errors=False)
         errors = safe_eval.error
@@ -148,7 +144,7 @@ def do_safe_eval(expr: str, symbols: Optional[dict] = None) -> Any:
             errormsg = '\n'.join(errors)
             raise InterpolationError(f"Error evaluating expression {expr}:\n{errormsg}")
         return res
-    else:
+    elif engine == 'eval':
         import traceback
 
         try:
@@ -159,9 +155,10 @@ def do_safe_eval(expr: str, symbols: Optional[dict] = None) -> Any:
         except Exception as e:
             import traceback
 
-            # Get the actual error traceback, skipping the wrapping
-            # error_tb = '\n'.join(traceback.format_exception(type(e), e, e.__traceback__))
-            raise InterpolationError(f"Error evaluating expression {expr}") from e
+            error_tb = '\n'.join(traceback.format_exception(type(e), e, e.__traceback__))
+            raise InterpolationError(f"Error evaluating expression {expr}:\n{error_tb}") from e
+    else:
+        raise ValueError(f"Unknown interpolation engine: {engine}")
 
 
 @ftrace(watch=[])
@@ -215,6 +212,7 @@ def evaluate_expression(
     root_obj: Any = None,
     allow_recurse: int = 5,
     init_outermost_interpolations: Optional[List[InterpolationMatch]] = None,
+    engine: str = 'asteval',
     context: Optional[Dict[str, Any]] = None,
 ) -> Any:
     from dracon.merge import merged, MergeKey
@@ -257,9 +255,10 @@ def evaluate_expression(
             current_path,
             root_obj,
             allow_recurse=allow_recurse,
+            engine=engine,
             context=context,
         )
-        evaluated_expr = do_safe_eval(str(resolved_expr), symbols)
+        evaluated_expr = do_safe_eval(str(resolved_expr), engine, symbols)
         endexpr = recurse_lazy_resolve(evaluated_expr)
     else:
         # Process and replace each interpolation within the expression
@@ -270,9 +269,10 @@ def evaluate_expression(
                 current_path,
                 root_obj,
                 allow_recurse=allow_recurse,
+                engine=engine,
                 context=context,
             )
-            evaluated_expr = do_safe_eval(str(resolved_expr), symbols)
+            evaluated_expr = do_safe_eval(str(resolved_expr), engine, symbols)
             newexpr = str(recurse_lazy_resolve(evaluated_expr))
             expr = expr[: match.start + offset] + newexpr + expr[match.end + offset :]
             offset += len(newexpr) - (match.end - match.start)
@@ -280,7 +280,14 @@ def evaluate_expression(
 
     # Recurse if allowed and necessary
     if allow_recurse != 0 and isinstance(endexpr, str):
-        return evaluate_expression(endexpr, current_path, root_obj, allow_recurse=allow_recurse - 1)
+        return evaluate_expression(
+            endexpr,
+            current_path,
+            root_obj,
+            allow_recurse=allow_recurse - 1,
+            engine=engine,
+            context=context,
+        )
     return endexpr
 
 
@@ -324,13 +331,14 @@ class InterpolableNode(ContextNode):
         self.init_outermost_interpolations = state['init_outermost_interpolations']
         self.referenced_nodes = state['referenced_nodes']
 
-    def evaluate(self, path='/', root_obj=None, context=None):
+    def evaluate(self, path='/', root_obj=None, engine='asteval', context=None):
         context = context or {}
         context = {**self.context, **context}
         newval = evaluate_expression(
             self.value,
             current_path=path,
             root_obj=root_obj,
+            engine=engine,
             context=context,  # type: ignore
         )
         return newval

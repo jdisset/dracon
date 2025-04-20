@@ -73,6 +73,7 @@ class LazyInterpolable(Lazy[T]):
         root_obj: Any = None,
         init_outermost_interpolations: Optional[List[InterpolationMatch]] = None,
         permissive: bool = False,
+        engine: str = 'asteval',
         context: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(value, validator, name)
@@ -82,6 +83,7 @@ class LazyInterpolable(Lazy[T]):
         self.root_obj = root_obj
         self.init_outermost_interpolations = init_outermost_interpolations
         self.permissive = permissive
+        self.engine = engine
         if not self.permissive:
             assert isinstance(
                 value, (str, tuple)
@@ -95,13 +97,12 @@ class LazyInterpolable(Lazy[T]):
             'current_path': self.current_path,
             'permissive': self.permissive,
             'context': self.context,
-            # Store init_outermost_interpolations if it's picklable
+            'engine': self.engine,
             'init_outermost_interpolations': self.init_outermost_interpolations
             if self.init_outermost_interpolations
             else None,
         }
 
-        # Handle root_obj specially if needed
         if hasattr(self.root_obj, '__getstate__'):
             state['root_obj'] = self.root_obj
         else:
@@ -120,6 +121,7 @@ class LazyInterpolable(Lazy[T]):
             root_obj=state['root_obj'],
             init_outermost_interpolations=state['init_outermost_interpolations'],
             permissive=state['permissive'],
+            engine=state['engine'],
             context=state['context'],
             validator=None,  # Validator will be reattached by the owner if needed
         )
@@ -138,6 +140,7 @@ class LazyInterpolable(Lazy[T]):
                     self.current_path,
                     self.root_obj,
                     init_outermost_interpolations=self.init_outermost_interpolations,
+                    engine=self.engine,
                     context=ctx,
                 )
             except Exception as e:

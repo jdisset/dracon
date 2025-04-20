@@ -43,7 +43,7 @@ Dracon supports several source types for `!include`:
     - If the source string matches an anchor (`&anchor_name`) defined _earlier_ in the current effective document (including previous includes), Dracon includes a **deep copy** of the anchored node structure.
 
     ```yaml
-    base_params: ¶ms
+    base_params:
       rate: 0.5
       limit: 100
 

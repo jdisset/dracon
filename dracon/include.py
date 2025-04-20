@@ -112,6 +112,7 @@ def compose_from_include_str(
         include_str,
         current_path=include_node_path,
         root_obj=composition_result.root if composition_result else None,
+        engine=draconloader.interpolation_engine,
         context=context,
     )
     include_str = resolve_interpolable_variables(include_str, context)  # type: ignore

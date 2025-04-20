@@ -1,7 +1,7 @@
 ## {{{                          --     imports     --
 from ruamel.yaml import Node
 import os
-from typing import Any, Callable, Dict, Optional, Type, Annotated, TypeVar
+from typing import Any, Callable, Dict, Optional, Type, Annotated, TypeVar, Literal
 from functools import partial
 
 from cachetools import cached, LRUCache
@@ -19,7 +19,7 @@ from dracon.composer import (
 )
 
 from dracon.draconstructor import Draconstructor
-from dracon.keypath import KeyPath, ROOTPATH
+from dracon.keypath import KeyPath
 from dracon.yaml import PicklableYAML
 
 from dracon.utils import (
@@ -31,7 +31,6 @@ from dracon.utils import (
     deepcopy,
     make_hashable,
     ser_debug,
-    node_repr,
 )
 
 from dracon.interpolation import InterpolableNode, preprocess_references
@@ -82,6 +81,7 @@ class DraconLoader:
         base_dict_type: Type[DictLike] = dracontainer.Mapping,
         base_list_type: Type[ListLike] = dracontainer.Sequence,
         enable_interpolation: bool = False,
+        interpolation_engine: Literal['asteval', 'eval'] = 'asteval',
         context: Optional[Dict[str, Any]] = None,
         deferred_paths: Optional[list[KeyPath | str]] = None,
         use_cache: bool = True,
@@ -96,6 +96,12 @@ class DraconLoader:
         self.base_dict_type = base_dict_type
         self.base_list_type = base_list_type
         self.use_cache = use_cache
+
+        if interpolation_engine not in ['asteval', 'eval', 'none']:
+            raise ValueError(
+                f"Invalid interpolation_engine: {interpolation_engine}. Choose 'asteval', 'eval', or 'none'."
+            )
+        self.interpolation_engine = interpolation_engine
 
         self._init_yaml()
 
@@ -115,6 +121,7 @@ class DraconLoader:
 
         self.yaml.composer.interpolation_enabled = self._enable_interpolation
         self.yaml.constructor.yaml_base_dict_type = self.base_dict_type
+        self.yaml.constructor.interpolation_engine = self.interpolation_engine
 
     def reset_context(self):
         self.update_context(DEFAULT_CONTEXT)
@@ -184,7 +191,7 @@ class DraconLoader:
                 self.yaml.constructor.context = self.context.copy() or {}
             return self.yaml.constructor.construct_document(node)
         except Exception as e:
-            raise DraconError(f"Error loading node {node}") from e
+            raise DraconError(f"Error loading config node {str(node)[:200]}...") from e
 
     @ftrace()
     def load_composition_result(self, compres: CompositionResult, post_process=True):

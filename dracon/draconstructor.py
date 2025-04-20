@@ -189,6 +189,7 @@ class Draconstructor(Constructor):
         preserve_quotes=None,
         loader=None,
         reference_nodes=None,
+        interpolation_engine='asteval',
         resolve_interpolations=False,
         capture_globals=False,
     ):
@@ -208,6 +209,7 @@ class Draconstructor(Constructor):
         self._root_node = None
         self._current_path = ROOTPATH
         self.resolve_interpolations = resolve_interpolations
+        self.interpolation_engine = interpolation_engine
         self.context = None
 
     def base_construct_object(self, node: Any, deep: bool = False) -> Any:
@@ -337,6 +339,7 @@ class Draconstructor(Constructor):
             validator=validator,
             current_path=self._current_path,
             root_obj=self._root_node,
+            engine=self.interpolation_engine,
             context=context,
         )
 
@@ -347,6 +350,7 @@ class Draconstructor(Constructor):
             preserve_quotes=self.preserve_quotes,
             loader=self.loader,
             reference_nodes=self.referenced_nodes,
+            interpolation_engine=self.interpolation_engine,
         )
         ctor.context = self.context.copy()
 

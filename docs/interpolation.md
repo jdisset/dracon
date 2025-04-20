@@ -10,7 +10,7 @@ This is the primary and most common form. Dracon uses the [asteval](https://aste
 You can also explicitely chose to use the much more dangerous raw `eval` function, but this is obviously not recommended.
 
 - **Syntax:** `${python_expression}`
-- **Evaluation:** **Deferred (Lazy)**. The expression is _not_ evaluated immediately when the YAML is parsed. Instead, Dracon creates a special `LazyInterpolable` object. The actual Python expression is evaluated only when the corresponding configuration value is first accessed in your Python code after loading.
+- **Evaluation:** **Deferred (Lazy)**. The expression is _not_ evaluated immediately when the YAML is parsed. Instead, Dracon creates a special `LazyInterpolable` object. The actual Python expression is evaluated only when the corresponding configuration value is first accessed in your Python code after loading, or when you call `resolve_all_lazy` on the loaded configuration.
 - **Use Cases:** Calculating values based on other config keys, environment variables, or context provided at runtime. This is ideal for most dynamic configuration needs.
 
 ```yaml
