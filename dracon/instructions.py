@@ -107,6 +107,7 @@ class Define(Instruction):
                 value_node.value,
                 current_path=path,
                 root_obj=comp_res.root,
+                engine=loader.interpolation_engine,
                 context=value_node.context,
             )
         else:
@@ -225,6 +226,7 @@ class Each(Instruction):
             key_node.value,
             current_path=path,
             root_obj=comp_res.root,
+            engine=loader.interpolation_engine,
             context=key_node.context,
         )
 
@@ -276,7 +278,13 @@ class Each(Instruction):
                     ), f"Keys inside an !each instruction must be interpolable (so that they're unique), but got {knode}"
                     new_knode = deepcopy(knode)
                     add_to_context(item_ctx, new_knode, mkey)
-                    scalar_knode = DraconScalarNode(tag=new_knode.tag, value=new_knode.evaluate())
+                    scalar_knode = DraconScalarNode(
+                        tag=new_knode.tag,
+                        value=new_knode.evaluate(
+                            engine=loader.interpolation_engine,
+                            context=item_ctx,
+                        ),
+                    )
                     new_parent.append((scalar_knode, new_vnode))
                     walk_node(
                         node=new_vnode,
@@ -354,6 +362,7 @@ class If(Instruction):
                     expr,
                     current_path=path,
                     root_obj=comp_res.root,
+                    engine=loader.interpolation_engine,
                     context=key_node.context,
                 )
             )
