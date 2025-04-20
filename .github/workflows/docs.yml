@@ -22,10 +22,14 @@ jobs:
         with:
           python-version: 3.11
 
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          pip install mkdocs mkdocs-material "mkdocstrings[python]" mkdocs-macros-plugin pymdown-extensions mkdocs-literate-nav mkdocs-section-index
           pip install .[docs]
+
+
 
       - name: Build MkDocs site
         run: mkdocs build --clean --verbose --site-dir _site --config-file mkdocs.yml
