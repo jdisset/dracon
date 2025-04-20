@@ -1,7 +1,10 @@
+# -*- coding: utf-8 -*-
+# dracon/loader.py
+
 ## {{{                          --     imports     --
 from ruamel.yaml import Node
 import os
-from typing import Any, Callable, Dict, Optional, Type, Annotated, TypeVar, Literal
+from typing import Any, Callable, Dict, Optional, Type, Annotated, TypeVar, Literal, List, Union
 from functools import partial
 
 from cachetools import cached, LRUCache
@@ -19,7 +22,7 @@ from dracon.composer import (
 )
 
 from dracon.draconstructor import Draconstructor
-from dracon.keypath import KeyPath
+from dracon.keypath import KeyPath, ROOTPATH
 from dracon.yaml import PicklableYAML
 
 from dracon.utils import (
@@ -38,12 +41,14 @@ from dracon.merge import process_merges, add_to_context, merged, MergeKey
 from dracon.instructions import process_instructions
 from dracon.deferred import DeferredNode, process_deferred
 from dracon.representer import DraconRepresenter
+from dracon.nodes import MergeNode, DraconMappingNode  # Added MergeNode, DraconMappingNode
 
 from dracon.lazy import DraconError
 
 from dracon import dracontainer
+import logging
 
-
+logger = logging.getLogger(__name__)
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 ## {{{                       --     DraconLoader     --
@@ -200,17 +205,80 @@ class DraconLoader:
         return self.load_node(compres.root)
 
     @ftrace()
-    def load(self, config_path: str | Path):
+    def load(
+        self,
+        config_paths: Union[str, Path, List[Union[str, Path]]],
+        merge_key: str = "<<{<+}[<~]",
+    ):
+        """
+        Loads configuration from one or more paths.
+
+        If multiple paths are provided, they are merged sequentially
+        using the specified merge_key strategy.
+
+        Args:
+            config_paths: A single path (str or Path) or a list of paths.
+            merge_key: The Dracon merge key string to use when merging multiple files.
+                       Defaults to "<<{<+}[<~]" (recursive append dicts, new wins; replace list, new wins).
+
+        Returns:
+            The loaded and potentially merged configuration object.
+        """
         self.reset_context()
-        if isinstance(config_path, Path):
-            config_path = config_path.resolve().as_posix()
-        if ":" not in config_path:
-            config_path = f"file:{config_path}"
-        comp = compose_from_include_str(self, config_path, custom_loaders=self.custom_loaders)
-        return self.load_composition_result(comp)
+
+        if not isinstance(config_paths, list):
+            paths = [config_paths]
+        else:
+            paths = list(config_paths)  # ensure it's a mutable list
+
+        if not paths:
+            raise ValueError("No configuration paths provided.")
+
+        processed_paths = []
+        for p in paths:
+            if isinstance(p, Path):
+                p_str = p.resolve().as_posix()
+            else:
+                p_str = str(p)
+
+            if ":" not in p_str:
+                processed_paths.append(f"file:{p_str}")
+            else:
+                processed_paths.append(p_str)
+
+        # load the first configuration as the base
+        base_comp_res = compose_from_include_str(
+            self, processed_paths[0], custom_loaders=self.custom_loaders
+        )
+
+        mkey = MergeKey(raw=merge_key)
+
+        for next_path in processed_paths[1:]:
+            next_comp_res = compose_from_include_str(
+                self, next_path, custom_loaders=self.custom_loaders
+            )
+
+            if not isinstance(base_comp_res.root, DraconMappingNode):
+                logger.warning(
+                    f"Base configuration from {processed_paths[0]} is not a mapping. Replacing with content from {next_path}."
+                )
+                base_comp_res = next_comp_res
+                continue
+
+            new_root = merged(
+                base_comp_res.root,
+                next_comp_res.root,
+                mkey,
+            )
+            base_comp_res.root = new_root
+
+        final_comp_res = self.post_process_composed(base_comp_res)
+
+        return self.load_node(final_comp_res.root)
 
     @ftrace()
     def loads(self, content: str):
+        """Loads configuration from a YAML string."""
         comp = self.compose_config_from_str(content)
         return self.load_composition_result(comp)
 
@@ -264,7 +332,7 @@ class DraconLoader:
 
         return comp_res
 
-    @ftrace(watch=[])
+    @ftrace()
     def save_references(self, comp_res: CompositionResult):
         # the preprocessed refernces are stored as paths that point to refered nodes
         # however, after all the merging and including is done, we need to save
@@ -278,7 +346,7 @@ class DraconLoader:
 
         for path in comp_res.pop_all_special('interpolable'):
             node = path.get_obj(comp_res.root)
-            assert isinstance(node, InterpolableNode), f"Invalid node type: {type(node)}"
+            assert isinstance(node, InterpolableNode), f"Invalid node type: {type(node)}  => {node}"
             node.flush_references()
             for i, n in node.referenced_nodes.items():
                 if i not in referenced_nodes:
@@ -340,12 +408,33 @@ def dump_to_node(data):
     return representer.represent_data(data)
 
 
-def load(config_path: str | Path, raw_dict=False, **kwargs):
+def load(
+    config_paths: Union[str, Path, List[Union[str, Path]]],
+    raw_dict=False,
+    merge_key: str = "<<{<+}[<~]",
+    **kwargs,
+):
+    """
+    Loads configuration from one or more paths using a DraconLoader instance.
+
+    If multiple paths are provided, they are merged sequentially
+    using the specified merge_key strategy.
+
+    Args:
+        config_paths: A single path (str or Path) or a list of paths.
+        raw_dict: If True, use standard Python dict/list instead of Dracon containers.
+        merge_key: The Dracon merge key string to use when merging multiple files.
+                   Defaults to "<<{<+}[<~]".
+        **kwargs: Additional arguments passed to the DraconLoader constructor.
+
+    Returns:
+        The loaded and potentially merged configuration object.
+    """
     loader = DraconLoader(**kwargs)
     if raw_dict:
         loader.yaml.constructor.yaml_base_dict_type = dict
         loader.yaml.constructor.yaml_base_list_type = list
-    return loader.load(config_path)
+    return loader.load(config_paths, merge_key=merge_key)
 
 
 def load_node(node: Node, **kwargs):
@@ -354,11 +443,21 @@ def load_node(node: Node, **kwargs):
 
 
 def load_file(config_path: str | Path, raw_dict=True, **kwargs):
-    return load(f'file:{config_path}', raw_dict, **kwargs)
+    """Convenience function to load a single file path."""
+    if isinstance(config_path, Path):
+        path_str = config_path.resolve().as_posix()
+    else:
+        path_str = str(config_path)
+
+    if ":" not in path_str:
+        path_str = f"file:{path_str}"
+
+    return load(path_str, raw_dict=raw_dict, **kwargs)
 
 
 @ftrace()
 def loads(config_str: str, raw_dict=False, **kwargs):
+    """Loads configuration from a YAML string."""
     loader = DraconLoader(**kwargs)
     if raw_dict:
         loader.yaml.constructor.yaml_base_dict_type = dict
