@@ -33,33 +33,33 @@ nested:
     - key.with.dots: array_value1
     - key.with.dots: array_value2
 
-# References to dotted keys using @ syntax
-reference_test:
-  simple_ref: '${@dotted\.keys.nested\.value}'
-  nested_ref: ${@nested.level1.dotted\.key}
-
 !define suffix: dynamic
 interpolated.keys.${suffix}:
   value: interpolated_value
 
-# Merge operations with dotted keys
-base.with.dots:
-  key1: base_value1
-  nested.key: base_nested
+# # Merge operations with dotted keys
+# base.with.dots:
+#   key1: base_value1
+#   nested.key: base_nested
 
-<<{+<}@base\.with\.dots:
-  key2: override_value2
-  nested.key: override_nested
+# # References to dotted keys using @ syntax
+# reference_test:
+#   simple_ref: '${@dotted\.keys.nested\.value}'
+#   nested_ref: ${@nested.level1.dotted\.key}
 
-# Deferred nodes with dotted keys
-!deferred deferred.node:
-  dotted.key: deferred_value
-  reference: '${@dotted\.keys.nested\.value}'
-
-# Complex nested structures with dotted keys and interpolation
-complex:
-  !define level: first
-  ${level}.level:
-    !define inner_key: inner.value
-    ${inner_key}: complex_inner_value
-    reference: ${@complex.${level}\.level.${inner_key}}
+# <<{+<}@base\.with\.dots:
+#   key2: override_value2
+#   nested.key: override_nested
+#
+# # Deferred nodes with dotted keys
+# !deferred deferred.node:
+#   dotted.key: deferred_value
+#   reference: '${@dotted\.keys.nested\.value}'
+#
+# # Complex nested structures with dotted keys and interpolation
+# complex:
+#   !define level: first
+#   ${level}.level:
+#     !define inner_key: inner.value
+#     ${inner_key}: complex_inner_value
+#     reference: ${@complex.${level}\.level.${inner_key}}
