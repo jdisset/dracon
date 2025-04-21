@@ -344,6 +344,7 @@ def ftrace(**kwargs):
                         return None
 
                     sys.settrace(global_trace)
+                    result = None
                     try:
                         result = func(*args, **kwargs)
                     finally:
