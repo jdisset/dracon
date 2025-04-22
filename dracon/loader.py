@@ -40,7 +40,7 @@ from dracon.deferred import DeferredNode, process_deferred
 from dracon.representer import DraconRepresenter
 from dracon.nodes import MergeNode, DraconMappingNode  # Added MergeNode, DraconMappingNode
 
-from dracon.lazy import DraconError
+from dracon.lazy import DraconError, resolve_all_lazy
 
 from dracon import dracontainer
 import logging
@@ -64,15 +64,22 @@ DEFAULT_CONTEXT = {
 
 
 @ftrace(watch=[])
-def construct(node_or_val, **kwargs):
+def construct(node_or_val, resolve=True, **kwargs):
     if isinstance(node_or_val, DeferredNode):
-        return node_or_val.construct(**kwargs)
+        n = node_or_val.construct(**kwargs)
     elif isinstance(node_or_val, Node):
         loader = DraconLoader(**kwargs)
         compres = CompositionResult(root=node_or_val)
-        return loader.load_composition_result(compres, post_process=True)
+        n = loader.load_composition_result(compres, post_process=True)
+    else:
+        n = node_or_val
 
-    return node_or_val
+    if resolve:
+        logger.debug(f"Resolving node: {n}")
+        n = resolve_all_lazy(n)
+        logger.debug(f"Resolved node: {n}")
+
+    return n
 
 
 class DraconLoader:
