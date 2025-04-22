@@ -112,7 +112,6 @@ class DraconLoader:
             if self._context_arg
             else ShallowDict[str, Any]()
         )
-        self.yaml.constructor.context = self.context.copy()
         self.reset_context()
 
     def _init_yaml(self):
@@ -122,6 +121,7 @@ class DraconLoader:
         self.yaml.Representer = DraconRepresenter
 
         self.yaml.composer.interpolation_enabled = self._enable_interpolation
+        self.yaml.constructor.dracon_loader = self
         self.yaml.constructor.yaml_base_dict_type = self.base_dict_type
         self.yaml.constructor.interpolation_engine = self.interpolation_engine
 
@@ -189,8 +189,7 @@ class DraconLoader:
     def load_node(self, node):
         try:
             self.yaml.constructor.referenced_nodes = self.referenced_nodes
-            if self.yaml.constructor.context is None:
-                self.yaml.constructor.context = self.context.copy() or {}
+            self.yaml.constructor.dracon_loader = self
             return self.yaml.constructor.construct_document(node)
         except Exception as e:
             raise DraconError(f"Error loading config node {str(node)[:200]}...") from e
