@@ -63,7 +63,7 @@ DEFAULT_CONTEXT = {
 }
 
 
-@ftrace()
+@ftrace(watch=[])
 def construct(node_or_val, **kwargs):
     if isinstance(node_or_val, DeferredNode):
         return node_or_val.construct(**kwargs)
@@ -148,7 +148,6 @@ class DraconLoader:
             )
         )
 
-    @ftrace()
     def update_context(self, kwargs):
         add_to_context(kwargs, self)
 
@@ -177,7 +176,6 @@ class DraconLoader:
     def __setstate__(self, state):
         self.__dict__.update(state)
 
-    @ftrace()
     def compose_config_from_str(self, content: str) -> CompositionResult:
         if self.use_cache:
             composed_content = cached_compose_config_from_str(self.yaml, content)
@@ -185,7 +183,6 @@ class DraconLoader:
             composed_content = compose_config_from_str(self.yaml, content)
         return self.post_process_composed(composed_content)
 
-    @ftrace()
     def load_node(self, node):
         try:
             self.yaml.constructor.referenced_nodes = self.referenced_nodes
@@ -194,13 +191,12 @@ class DraconLoader:
         except Exception as e:
             raise DraconError(f"Error loading config node {str(node)[:200]}...") from e
 
-    @ftrace()
     def load_composition_result(self, compres: CompositionResult, post_process=True):
         if post_process:
             compres = self.post_process_composed(compres)
         return self.load_node(compres.root)
 
-    @ftrace()
+    @ftrace(watch=[])
     def load(
         self,
         config_paths: Union[str, Path, List[Union[str, Path]]],
@@ -272,13 +268,13 @@ class DraconLoader:
 
         return self.load_node(final_comp_res.root)
 
-    @ftrace()
+    @ftrace(watch=[])
     def loads(self, content: str):
         """Loads configuration from a YAML string."""
         comp = self.compose_config_from_str(content)
         return self.load_composition_result(comp)
 
-    @ftrace()
+    @ftrace(watch=[])
     def post_process_composed(self, comp: CompositionResult):
         ser_debug(self, operation='deepcopy')
         ser_debug(comp, operation='deepcopy')
@@ -304,7 +300,7 @@ class DraconLoader:
 
         return comp
 
-    @ftrace()
+    @ftrace(watch=[], output=False)
     def update_deferred_nodes(self, comp_res: CompositionResult):
         # copies the loader into deferred nodes so they can resume their composition by themselves
 
@@ -328,7 +324,7 @@ class DraconLoader:
 
         return comp_res
 
-    @ftrace()
+    @ftrace(watch=[], output=False)
     def save_references(self, comp_res: CompositionResult):
         # the preprocessed refernces are stored as paths that point to refered nodes
         # however, after all the merging and including is done, we need to save
@@ -397,6 +393,7 @@ class DraconLoader:
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
+@ftrace(watch=[])
 def dump_to_node(data):
     if isinstance(data, Node):
         return data
@@ -451,7 +448,6 @@ def load_file(config_path: str | Path, raw_dict=True, **kwargs):
     return load(path_str, raw_dict=raw_dict, **kwargs)
 
 
-@ftrace()
 def loads(config_str: str, raw_dict=False, **kwargs):
     """Loads configuration from a YAML string."""
     loader = DraconLoader(**kwargs)

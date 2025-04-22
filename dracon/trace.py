@@ -101,9 +101,9 @@ class TraceConfig:
         config = cls(
             colors=DEFAULT_COLORS.copy(),
             glyphs=DEFAULT_GLYPHS.copy(),
-            truncate_length=200,
+            truncate_length=400,
             preface_filename=True,
-            inputs=True,
+            inputs=False,
             output=True,
             watch=None,
             name=None,
