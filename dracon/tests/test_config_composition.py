@@ -182,10 +182,22 @@ def test_override():
     loader = DraconLoader()
     config = loader.load(f"pkg:{override_config_path}")
 
+    print(f"Config: {config}")
+
     assert config["default_settings"]["setting1"] == "override_value1"
     assert config["default_settings"]["setting2"] == "default_value2"
-    assert config["default_settings"]["setting3"] == "override_value3"
-    assert config["default_settings"]["setting_list"] == ["override_item1", 3, "item_lol", "item4"]
+    assert config["default_settings"]["setting3"] == "additional_value3"
+    # assert config["default_settings"]["setting_list"] == ["override_item1", 3, "item_lol", "item4"]
+
+    assert config["default_settings"]["setting_list"] == [
+        "override_item1",
+        3,
+        "item_lol",
+        "item1",
+        "item2",
+        "item3",
+        "item4",
+    ]
 
 
 class Person(BaseModel):

@@ -578,7 +578,7 @@ def test_each_with_mapping():
         !each(i) ${range(2)}:
             obj_${i}:
                 <<: *obj
-                <<{+}: 
+                <<{+<}: 
                     name: "Modified ${i}"
     """
 
