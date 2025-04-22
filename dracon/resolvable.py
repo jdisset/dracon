@@ -76,7 +76,7 @@ class Resolvable(Generic[T]):
         assert self.ctor is not None
         assert self.node is not None
         ctor = deepcopy(self.ctor)
-        ctor.context.update(context or {})
+        ctor.dracon_loader.context.update(context or {})
         return ctor.construct_object(self.node)
 
     def copy(self):

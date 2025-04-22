@@ -192,11 +192,13 @@ class Draconstructor(Constructor):
         interpolation_engine='asteval',
         resolve_interpolations=False,
         capture_globals=False,
+        dracon_loader=None,
     ):
         Constructor.__init__(self, preserve_quotes=preserve_quotes, loader=loader)
         self.preserve_quotes = preserve_quotes
         self.yaml_base_dict_type = dracontainer.Mapping
         self.yaml_base_sequence_type = dracontainer.Sequence
+        self.dracon_loader = dracon_loader
 
         self.localns = collect_all_types(
             DEFAULT_MODULES_FOR_TYPES,
@@ -210,7 +212,6 @@ class Draconstructor(Constructor):
         self._current_path = ROOTPATH
         self.resolve_interpolations = resolve_interpolations
         self.interpolation_engine = interpolation_engine
-        self.context = None
 
     def base_construct_object(self, node: Any, deep: bool = False) -> Any:
         """deep is True when creating an object/mapping recursively,
@@ -238,18 +239,11 @@ class Draconstructor(Constructor):
             self.deep_construct = old_deep
         return data
 
-    # def construct_scalar(self, node):
-    # if isinstance(node.value, str):
-    # # Convert the string value to a raw string interpretation
-    # rawstr = rf"{node.value}"
-    # return rawstr
-    # return super().construct_scalar(node)
-    # @ftrace()
     def construct_object(self, node, deep=True):
-        assert self.context is not None, "Context must be set before constructing objects"
+        current_loader_context = self.dracon_loader.context if self.dracon_loader else {}
 
         self.localns.update(DEFAULT_TYPES)
-        self.localns.update(get_all_types(self.context))
+        self.localns.update(get_all_types(current_loader_context))
 
         is_root = False
         if self._depth == 0:
@@ -312,6 +306,7 @@ class Draconstructor(Constructor):
 
     # @ftrace(watch=[])
     def construct_interpolable(self, node):
+        current_loader_context = self.dracon_loader.context if self.dracon_loader else {}
         node_value = node.value
         init_outermost_interpolations = node.init_outermost_interpolations
         validator = partial(pydantic_validate, node.tag, localns=self.localns)
@@ -328,7 +323,7 @@ class Draconstructor(Constructor):
 
             validator = partial(validator_f)
 
-        context = ShallowDict(merged(self.context, node.context, MergeKey(raw='{<+}')))
+        context = ShallowDict(merged(current_loader_context, node.context, MergeKey(raw='{<+}')))
         context['__DRACON_NODES'] = {
             i: Resolvable(node=n, ctor=self.copy()) for i, n in self.referenced_nodes.items()
         }
@@ -351,8 +346,8 @@ class Draconstructor(Constructor):
             loader=self.loader,
             reference_nodes=self.referenced_nodes,
             interpolation_engine=self.interpolation_engine,
+            dracon_loader=self.dracon_loader,
         )
-        ctor.context = self.context.copy()
 
         return ctor
 
