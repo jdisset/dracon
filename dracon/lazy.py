@@ -20,6 +20,9 @@ from dracon.utils import list_like, dict_like
 
 import inspect
 
+import logging
+
+logger = logging.getLogger(__name__)
 
 ## {{{                     --     LazyInterpolable     --
 
@@ -85,9 +88,9 @@ class LazyInterpolable(Lazy[T]):
         self.permissive = permissive
         self.engine = engine
         if not self.permissive:
-            assert isinstance(
-                value, (str, tuple)
-            ), f"LazyInterpolable expected string, got {type(value)}. Did you mean to contruct with permissive=True?"
+            assert isinstance(value, (str, tuple)), (
+                f"LazyInterpolable expected string, got {type(value)}. Did you mean to contruct with permissive=True?"
+            )
 
     def __getstate__(self):
         """Get the object's state for pickling."""
@@ -152,9 +155,9 @@ class LazyInterpolable(Lazy[T]):
         """Get the value of the lazy object, and optionally set it as an attribute of the owner instance."""
         if hasattr(owner_instance, '_dracon_root_obj'):
             self.root_obj = owner_instance._dracon_root_obj
-            assert hasattr(
-                owner_instance, '_dracon_current_path'
-            ), f"Instance {owner_instance} has no current path"
+            assert hasattr(owner_instance, '_dracon_current_path'), (
+                f"Instance {owner_instance} has no current path"
+            )
             self.current_path = owner_instance._dracon_current_path + self.name
 
         newval = self.resolve()
@@ -187,35 +190,66 @@ def resolve_single_key(path, key, root, context_override=None):
         key.root_obj = root
         key.current_path = path.removed_mapping_key()
 
-        # find the actual key in parent
-        lazy_key = None
-        for k in parent.keys():
-            if isinstance(k, LazyInterpolable) and (id(k) == id(key) or str(k) == str(key)):
-                lazy_key = k
-                break
-
-        if lazy_key is None:
-            raise DraconError(f"couldn't find LazyInterpolable key in parent at {path}")
-
-        # resolve the key
         resolved_key = key.resolve(context_override=context_override)
         if not isinstance(resolved_key, (str, int, float, bool)):
             resolved_key = str(resolved_key)
 
-        # update mapping
-        value = parent[lazy_key]
-        del parent[lazy_key]
-        parent[resolved_key] = value
+        original_lazy_key_object = None
+        for k_in_parent in parent.keys():
+            if id(k_in_parent) == id(key) or (
+                isinstance(k_in_parent, LazyInterpolable) and k_in_parent.value == key.value
+            ):
+                original_lazy_key_object = k_in_parent
+                break
 
-        if hasattr(parent, '_recompute_map'):
-            parent._recompute_map()
+        if original_lazy_key_object is None:
+            logger.warning(
+                f"Lazy key {key!r} not found as object in parent keys at {parent_path}: {list(parent.keys())}"
+            )
+            if resolved_key in parent:
+                return False, None
+            logger.error(f"Lazy key {key!r} truly missing from parent {parent_path}.")
+            return False, None
 
-        # return the transformation info
-        old_path = parent_path.down(str(lazy_key))
-        new_path = parent_path.down(str(resolved_key))
-        return True, (old_path, new_path)
+        if (
+            resolved_key != str(original_lazy_key_object.value)
+            or original_lazy_key_object in parent
+        ):
+            try:
+                value = parent[original_lazy_key_object]
+                logger.debug(f"Got value associated with lazy key: {type(value)}")
+
+                if original_lazy_key_object in parent:
+                    del parent[original_lazy_key_object]
+
+                parent[resolved_key] = value
+
+                if hasattr(parent, '_recompute_map'):
+                    parent._recompute_map()
+
+                # return transformation info only if a structural change occurred
+                old_path = parent_path.down(MAPPING_KEY).down(str(original_lazy_key_object.value))
+                new_path = parent_path.down(str(resolved_key))
+                return True, (old_path, new_path)
+
+            except KeyError:
+                logger.error(
+                    f"KeyError trying to access/delete lazy key {original_lazy_key_object!r} even after finding it."
+                )
+                return False, None
+            except Exception as e_inner:
+                logger.error(f"Error during key update for {path}: {e_inner}", exc_info=True)
+                return False, None
+        else:
+            logger.debug(
+                f"Resolved key '{resolved_key}' is same as lazy value representation. No update needed."
+            )
+            return True, None  # indicate success but no transformation
 
     except Exception as e:
+        import traceback
+
+        logger.error(f"Error resolving key {key} at {path}: {e}\n{traceback.format_exc()}")
         return False, None
 
 
@@ -230,12 +264,15 @@ def resolve_single_value(path, value, root, context_override=None):
 
         stem = path.stem
         if stem == '/' or stem == ROOTPATH:
-            raise ValueError("cannot resolve root path")
+            return False  # indicate no action taken here
 
         set_val(parent, stem, resolved_value)
         return True
 
     except Exception as e:
+        import traceback
+
+        logger.debug(f"error resolving value {value} at {path}: {e}\n{traceback.format_exc()}")
         return False
 
 
@@ -308,7 +345,6 @@ def collect_lazy_by_depth(obj, path=ROOTPATH, seen=None):
                     item_path = p.copy().down(str(i))
                     _collect(item, item_path, seen_set)
             except TypeError:
-                # If enumeration fails, just skip this object
                 pass
 
         # handle Pydantic models
@@ -346,8 +382,10 @@ def collect_lazy_by_depth(obj, path=ROOTPATH, seen=None):
 
                     attr_path = p.copy().down(attr_name)
                     _collect(attr_value, attr_path, seen_set)
-            except (TypeError, ValueError, AttributeError):
-                # If we can't get attributes for some reason, skip this object
+            except (TypeError, ValueError, AttributeError) as e:
+                logger.debug(
+                    f"Error accessing attributes of object {o} at path {p}: {e}. Skipping."
+                )
                 pass
 
     _collect(obj, path, seen)
@@ -358,14 +396,18 @@ def resolve_all_lazy(
     obj,
     root_obj=None,
     current_path=None,
-    visited=None,
+    visited_ids=None,
     context_override=None,
     max_passes=20,
-    min_passes=2,
 ):
-    """resolves all lazy objects in a multi-pass approach by depth level"""
-    if visited is None:
-        visited = set()
+    """Resolves all lazy objects in a multi-pass approach by depth level."""
+    if visited_ids is None:
+        visited_ids = set()
+
+    obj_id = id(obj)
+    if obj_id in visited_ids:
+        return obj
+    visited_ids.add(obj_id)
 
     if root_obj is None:
         root_obj = obj if not hasattr(obj, '_dracon_root_obj') else obj._dracon_root_obj
@@ -375,49 +417,63 @@ def resolve_all_lazy(
             ROOTPATH if not hasattr(obj, '_dracon_current_path') else obj._dracon_current_path
         )
 
-    # process key resolution in multiple passes by depth
-    unresolved_count = 0
-    pass_num = 0
+    # handle case where the root object itself is lazy
+    if isinstance(obj, LazyInterpolable) and current_path == ROOTPATH:
+        try:
+            obj.root_obj = root_obj  # ensure root is set
+            resolved_root = obj.resolve(context_override=context_override)
+            return resolve_all_lazy(
+                resolved_root, root_obj, current_path, set(), context_override, max_passes - 1
+            )
+        except Exception as e:
+            logger.warning(f"Error resolving root lazy object: {e}")
+            return obj
 
-    while pass_num < max_passes:
-        lazy_keys_by_depth, lazy_values = collect_lazy_by_depth(obj, current_path)
+    resolved_something_in_last_pass = True
+    pass_num = 0
+    while resolved_something_in_last_pass and pass_num < max_passes:
+        resolved_something_in_last_pass = False
+        pass_num += 1
+
+        lazy_keys_by_depth, lazy_values = collect_lazy_by_depth(obj, current_path, seen=set())
 
         if not lazy_keys_by_depth and not lazy_values:
             break
 
+        keys_resolved_this_pass = 0
+        values_resolved_this_pass = 0
+        keys_transformed = False
+
         # resolve keys by depth (shallowest first)
         depths = sorted(lazy_keys_by_depth.keys())
-        if not depths:  # no more keys to resolve, move on to values
-            keys_resolved = 0
-        else:  # resolve keys at the shallowest depth only
+        if depths:
             current_depth = depths[0]
-            keys_resolved = 0
-            for path, key in lazy_keys_by_depth[current_depth]:
-                success, _ = resolve_single_key(path, key, root_obj, context_override)
+            keys_to_resolve = lazy_keys_by_depth.get(current_depth, [])
+            for path, key in keys_to_resolve:
+                success, transform = resolve_single_key(path, key, root_obj, context_override)
                 if success:
-                    keys_resolved += 1
+                    keys_resolved_this_pass += 1
+                    if transform:  # checks if path structure actually changed
+                        keys_transformed = True
 
-        # if no keys were resolved, move on to values
-        if not keys_resolved:
-            values_resolved = 0
+        if not keys_transformed:
             for path, value in lazy_values:
                 success = resolve_single_value(path, value, root_obj, context_override)
                 if success:
-                    values_resolved += 1
+                    values_resolved_this_pass += 1
 
-            unresolved_count += values_resolved
-            if values_resolved == 0:  # nothing more to resolve
-                break
-        else:
-            unresolved_count += keys_resolved
+        if keys_resolved_this_pass > 0 or values_resolved_this_pass > 0:
+            resolved_something_in_last_pass = True
 
-        pass_num += 1
+    if pass_num == max_passes and resolved_something_in_last_pass:
+        _, remaining_values = collect_lazy_by_depth(obj, current_path, seen=set())
+        remaining_keys_by_depth, _ = collect_lazy_by_depth(obj, current_path, seen=set())
+        if remaining_values or remaining_keys_by_depth:
+            logger.warning(
+                f"Max passes ({max_passes}) reached during resolve_all_lazy, potentially unresolved lazy objects remain."
+            )
 
-    if unresolved_count > 0 or min_passes > 0:
-        return resolve_all_lazy(
-            obj, root_obj, current_path, visited, context_override, max_passes, min_passes - 1
-        )
-
+    visited_ids.remove(obj_id)
     return obj
 
 
