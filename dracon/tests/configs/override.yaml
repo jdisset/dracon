@@ -5,14 +5,27 @@ default_settings:
     - item1
     - item2
     - item3
-  <<{<}[<]: *pkg:dracon:tests/configs/simple@additional_settings
+  <<{<+}[<+]: *pkg:dracon:tests/configs/simple@additional_settings
+  # after the merge, we should get:
+  # default_settings:
+  #  setting1: default_value1
+  #  setting2: default_value2
+  #  setting3: additional_value3
+  #  setting_list:
+  #  - item_lol
+  #  - 3
+  #  - item_lol
+  #  - item1
+  #  - item2
+  #  - item3
 
-<<{<}@default_settings.setting1: override_value1
+<<{<+}@default_settings.setting1: override_value1 # setting1 becomes override_value1
 
-<<[>+]@default_settings:
-  setting3: override_value3
-  setting_list:
+<<[+>]{>+}@default_settings:
+  setting3: override_value3 # ignored! because priority to existing setting3, which is additional_value3
+  setting_list: # append to the list
     - item4
 
-<<@default_settings.setting_list.0: override_item1
+<<@default_settings.setting_list.0: override_item1 # setting_list.0 becomes override_item1 as it's a scalar (always replace)
+
 

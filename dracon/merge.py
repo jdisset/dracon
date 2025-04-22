@@ -13,6 +13,10 @@ from ruamel.yaml.nodes import Node
 from dracon.keypath import KeyPath
 from functools import lru_cache
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def make_default_empty_mapping_node():
     return DraconMappingNode(
@@ -41,6 +45,7 @@ def process_merges(comp_res):
         any_merges = True
 
         for merge_path in comp_res.pop_all_special('merge'):
+            logger.debug(f'Processing merge node: {merge_path}')
             # Get value path (remove mapping key)
             merge_path = merge_path.removed_mapping_key()
             merge_node = merge_path.get_obj(comp_res.root)
@@ -60,9 +65,9 @@ def process_merges(comp_res):
             # Get the merge key node and validate
             assert node_key in parent_node, f'Key {node_key} not found in parent node'
             key_node = parent_node.get_key(node_key)
-            assert isinstance(
-                key_node, MergeNode
-            ), f'Invalid merge node type: {type(key_node)} at {node_key}. {merge_path=}'
+            assert isinstance(key_node, MergeNode), (
+                f'Invalid merge node type: {type(key_node)} at {node_key}. {merge_path=}'
+            )
 
             try:
                 merge_key = MergeKey(raw=key_node.merge_key_raw)
@@ -110,12 +115,17 @@ class MergePriority(Enum):
 
 class MergeKey(BaseModel):
     raw: str
+
+    # dict mode default is >+
     dict_mode: MergeMode = MergeMode.APPEND
     dict_priority: MergePriority = MergePriority.EXISTING
     dict_depth: Optional[int] = None
+
+    # list mode default is >~
     list_mode: MergeMode = MergeMode.REPLACE
     list_priority: MergePriority = MergePriority.EXISTING
     list_depth: Optional[int] = None
+
     keypath: Optional[str] = None
 
     @staticmethod
@@ -133,16 +143,16 @@ class MergeKey(BaseModel):
         # > means EXISTING
         # < means NEW
         mode, priority = default_mode, default_priority
-        assert (
-            '+' not in mode_str or '~' not in mode_str
-        ), 'Only one of + or ~ is allowed in dict_mode'
+        assert '+' not in mode_str or '~' not in mode_str, (
+            'Only one of + or ~ is allowed in dict_mode'
+        )
         if '+' in mode_str:
             mode = MergeMode.APPEND
         if '~' in mode_str:
             mode = MergeMode.REPLACE
-        assert (
-            '>' not in mode_str or '<' not in mode_str
-        ), 'Only one of > or < is allowed in dict_priority'
+        assert '>' not in mode_str or '<' not in mode_str, (
+            'Only one of > or < is allowed in dict_priority'
+        )
 
         if '>' in mode_str:
             priority = MergePriority.EXISTING
@@ -272,7 +282,6 @@ def reset_context(item, ignore_dracon_namespace=True):
         item.context = newctx
 
 
-@ftrace(inputs=False, output=False, watch=[])
 def context_add(base, newcontext, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
     m = merged(base, newcontext, merge_key)
     return m
