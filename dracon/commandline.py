@@ -1,13 +1,8 @@
-from pydantic import BaseModel, ValidationError, ConfigDict
-from pydantic_core import PydanticUndefined
-from dracon import DraconLoader
-from dracon.composer import DRACON_UNSET_VALUE
 import sys
-from rich.console import Console
-from rich.box import ROUNDED
-from rich.text import Text
-from rich.panel import Panel
 import typing
+import logging
+import traceback
+from dataclasses import dataclass, field
 from typing import (
     List,
     Dict,
@@ -21,31 +16,35 @@ from typing import (
     ForwardRef,
     Union,
     Type,
+    Literal,
+    get_args,
+    get_origin as typing_get_origin,
 )
-from dataclasses import dataclass, field
-from dracon.lazy import resolve_all_lazy
-from dracon.resolvable import Resolvable, get_inner_type
-from dracon.deferred import DeferredNode
+
+from pydantic import BaseModel, ValidationError, ConfigDict
+from pydantic_core import PydanticUndefined
+from rich.box import ROUNDED
+from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
+
+from dracon import DraconLoader
+from dracon.deferred import DeferredNode, make_deferred
 from dracon.keypath import KeyPath
-from dracon.loader import DEFAULT_LOADERS
-import traceback
-import logging
+from dracon.lazy import resolve_all_lazy, LazyInterpolable
 from dracon.merge import MergeKey, merged
+from dracon.resolvable import Resolvable, get_inner_type
+from dracon.utils import dict_like
 
 logger = logging.getLogger(__name__)
 
 B = TypeVar("B", bound=BaseModel)
-
 ProgramType = ForwardRef("Program")
 
 
 @dataclass(frozen=True)
 class Arg:
-    """
-    configuration for command-line argument generation.
-
-    maps a pydantic field to cli arguments like --my-arg, -m.
-    """
+    """maps a pydantic field to cli arguments."""
 
     real_name: Optional[str] = None
     short: Optional[str] = None
@@ -56,7 +55,16 @@ class Arg:
     positional: bool = False
     resolvable: bool = False
     is_file: bool = False
-    auto_dash_alias: Optional[bool] = None  # defaults handled by Program
+    auto_dash_alias: Optional[bool] = None
+
+
+def _get_arg_resolvable_status(arg_type: Optional[Type[Any]]) -> bool:
+    """determine if an arg type implies resolvable status."""
+    origin = getattr(arg_type, '__origin__', None)
+    try:
+        return issubclass(origin, (DeferredNode, Resolvable))
+    except TypeError:
+        return isinstance(arg_type, type) and issubclass(arg_type, (DeferredNode, Resolvable))
 
 
 def getArg(program: "Program", name: str, pydantic_field) -> Arg:
@@ -66,291 +74,230 @@ def getArg(program: "Program", name: str, pydantic_field) -> Arg:
         arg_type=pydantic_field.annotation,
         auto_dash_alias=program.default_auto_dash_alias,
     )
-
-    user_arg_settings = {}
-    for m in pydantic_field.metadata:
-        if isinstance(m, Arg):
-            user_arg_settings = {
-                k: v for k, v in vars(m).items() if v is not None and k != 'real_name'
-            }
-            break  # assume only one Arg instance in metadata
-
+    user_settings = next((m for m in pydantic_field.metadata if isinstance(m, Arg)), None)
+    user_arg_settings = (
+        {k: v for k, v in vars(user_settings).items() if v is not None and k != 'real_name'}
+        if user_settings
+        else {}
+    )
     final_settings = {**vars(base_arg), **user_arg_settings}
 
-    # determine final 'long' name
-    final_long = final_settings.get('long')
     auto_dash = final_settings.get('auto_dash_alias')
-
-    if final_long is None:  # user didn't specify long
-        if auto_dash and '_' in name:
-            final_long = name.replace('_', '-')
-        else:
-            final_long = name
-    final_settings['long'] = final_long
-
-    # determine final 'resolvable' status
-    type_to_check = final_settings.get('arg_type')
-    # use getattr to safely access __origin__ which might not exist on all types
-    origin = getattr(type_to_check, '__origin__', None)
-    if origin is Resolvable:
-        final_settings['resolvable'] = True
-    elif isinstance(type_to_check, type) and issubclass(type_to_check, DeferredNode):
-        # also mark as resolvable if it's DeferredNode (which implies late construction)
-        final_settings['resolvable'] = True
-
+    final_settings['long'] = final_settings.get('long') or (
+        name.replace('_', '-') if auto_dash and '_' in name else name
+    )
+    final_settings['resolvable'] = _get_arg_resolvable_status(final_settings.get('arg_type'))
+    logger.debug(f"field {name}: resolvable={final_settings['resolvable']}")
     return Arg(**final_settings)
 
 
 T = TypeVar("T")
 
 
-## {{{                        --     print help     --
+## {{{                        --     Help Printing     --
 
 console = Console()
 
 
-def format_type_str(arg_type) -> str:
+def _format_type_str(arg_type, is_file: bool = False) -> str:
+    """formats a type annotation into a display string for help."""
     if arg_type is None:
         return ""
+
+    # handle ForwardRef first
     if isinstance(arg_type, ForwardRef):
         try:
-            evaluated_type = typing._eval_type(arg_type, globals(), locals())  # type: ignore
-            return format_type_str(evaluated_type)
-        except (NameError, AttributeError):  # Fallback if eval fails or _eval_type not available
-            return arg_type.__forward_arg__.upper()
+            return _format_type_str(typing._eval_type(arg_type, globals(), locals()))  # type: ignore
+        except (NameError, AttributeError):
+            return arg_type.__forward_arg__
 
-    origin = getattr(arg_type, "__origin__", None)
-    args = getattr(arg_type, "__args__", [])
+    origin = typing_get_origin(arg_type)
+    args = get_args(arg_type)
 
-    if origin:
-        if origin is Annotated:
-            return format_type_str(args[0]) if args else ""
-        if origin is Resolvable:
-            inner_type_str = format_type_str(args[0]) if args else "ANY"
-            return f"RESOLVABLE[{inner_type_str}]"
-        if origin is DeferredNode:
-            inner_type_str = format_type_str(args[0]) if args else "ANY"
-            return f"DEFERREDNODE[{inner_type_str}]"
+    # unwrap Annotated, DeferredNode, Resolvable
+    if origin is Annotated:
+        return _format_type_str(args[0], is_file) if args else ""
+    if origin is DeferredNode:
+        return _format_type_str(args[0], is_file) if args else "Any"
+    if origin is Resolvable:
+        return _format_type_str(args[0], is_file) if args else "Any"
 
-        if origin is Union:
-            non_none_types = [t for t in args if t is not type(None)]
-            if len(non_none_types) == 1:
-                return format_type_str(non_none_types[0])
-            type_names = [format_type_str(t) for t in non_none_types]
-            return f"UNION[{', '.join(type_names)}]"
-        origin_name = getattr(origin, "__name__", str(origin)).upper()
-        arg_strs = [format_type_str(arg) for arg in args]
-        return f"{origin_name}[{', '.join(arg_strs)}]"
+    # handle specific origins
+    if origin is Literal:
+        vals = [repr(a) for a in args]
+        return f"{', '.join(vals[:-1])} or {vals[-1]}" if len(vals) > 1 else vals[0]
+    if origin is Union:
+        non_none = [_format_type_str(t, is_file) for t in args if t is not type(None)]
+        return non_none[0] if len(non_none) == 1 else f"Union[{', '.join(non_none)}]"
+    if origin in (list, List):
+        return f"List[{_format_type_str(args[0], is_file) if args else 'Any'}]"
+    if origin in (dict, Dict):
+        key_type = _format_type_str(args[0], is_file) if args else 'Any'
+        val_type = _format_type_str(args[1], is_file) if len(args) > 1 else 'Any'
+        return f"Dict[{key_type}, {val_type}]"
 
-    if hasattr(arg_type, "__name__"):
-        return arg_type.__name__.upper()
-    return str(arg_type).upper()
+    type_name = getattr(arg_type, "__name__", str(arg_type))
+    if is_file and type_name == 'str':
+        return "FILE"
+    if type_name in ('str', 'int', 'float', 'bool'):
+        return type_name
+    return type_name
 
 
-def format_default_value(value: Any) -> str:
+def _format_default_value(value: Any) -> Optional[str]:
+    """formats a field's default value for display."""
     if value is PydanticUndefined:
         return None
     if isinstance(value, str):
         return f'"{value}"'
-    if isinstance(value, DeferredNode):
-        inner_value = getattr(value, 'value', None)
-        if isinstance(inner_value, (str, int, float, bool)):
-            return f'deferred({format_default_value(inner_value)})'
-        elif isinstance(inner_value, (list, dict)) and len(str(inner_value)) < 30:
-            return f'deferred({inner_value!r})'
-        else:
-            return 'deferred(...)'
+    if isinstance(value, DeferredNode):  # Show inner value for deferred defaults
+        inner = getattr(value, 'value', None)
+        return _format_default_value(inner)
     return str(value)
 
 
-def is_optional_field(field) -> bool:
-    return (
-        (field.default is not None and field.default is not PydanticUndefined)
-        or field.default_factory is not None
-        or (
-            hasattr(field.annotation, "__origin__")
-            and field.annotation.__origin__ is Union
-            and type(None) in field.annotation.__args__
-        )
+def _is_optional_field(field) -> bool:
+    """checks if a pydantic field is optional."""
+    # Simplified check: Pydantic considers fields with defaults as non-required,
+    # and handles Union[T, None] automatically.
+    return field.default is not PydanticUndefined or field.default_factory is not None
+
+
+def _append_arg_details(content: Text, arg: Arg, field: Optional[Any], is_positional: bool) -> None:
+    """appends details for a single argument to the help text."""
+    help_text = arg.help or ""
+    arg_type_str = _format_type_str(arg.arg_type, is_file=arg.is_file)
+    default = _format_default_value(field.default) if field else None
+    required = not _is_optional_field(field) if field else False
+    required_marker = (
+        Text(" (required)", style="red")
+        if required and (is_positional or '.' not in arg.real_name)
+        else Text("")
     )
 
+    if is_positional:
+        content.append(f"  {arg.real_name.upper()}", style="yellow")
+        content.append(required_marker)
+        content.append(f" ({arg_type_str})\n", style="blue" if arg_type_str else "")
+    else:
+        parts = [f"-{arg.short}"] if arg.short else []
+        if arg.long:
+            parts.append(f"--{arg.long}")
+        option_str = ", ".join(parts)
+        is_flag = get_inner_type(arg.arg_type) is bool
 
-def format_type_display(name: str, arg_type: str, text: Text) -> None:
-    text.append(f"  {name}", style="yellow")
-    if arg_type:
-        text.append(f" ")
-        text.append(arg_type, style="blue")
-    text.append("\n")
-
-
-def print_help(prg: "Program", _) -> None:
-    positionals = []
-    options = []
-    flags = []
-
-    for arg in prg._args:
-        if arg.positional:
-            positionals.append(arg)
-        elif arg.arg_type is bool:
-            flags.append(arg)
+        if not is_flag:
+            content.append(f"  {option_str}", style="yellow")
+            if arg_type_str:
+                content.append(f" {arg_type_str}", style="blue")
+            content.append(required_marker)
+            content.append("\n")
         else:
-            options.append(arg)
+            content.append(f"  {option_str}", style="yellow")  # flags can't be required
+            content.append("\n")
 
-    # generate nested options for help display only
-    processed_nested = set()
+    # Indented details
+    if help_text:
+        content.append(f"    {help_text}\n")
+    if default is not None:
+        content.append(f"    [default: {default}]\n", style="dim")
+    content.append("\n")  # Add a blank line after each option/argument
+
+
+def _gather_all_args(prg: "Program") -> Tuple[List[Arg], List[Arg]]:
+    """gathers top-level and nested args for help display."""
+    top_level_args = {a.real_name: a for a in prg._args}
+    options_flags = sorted(top_level_args.values(), key=lambda a: (a.long or a.real_name).lower())
+    nested_args = []
+    processed_models = set()
     queue = [(prg.conf_type, "")]
+
     while queue:
         model_type, prefix = queue.pop(0)
-        # use id for set check as types might be dynamically created
-        if id(model_type) in processed_nested:
+        if id(model_type) in processed_models:
             continue
-        processed_nested.add(id(model_type))
+        processed_models.add(id(model_type))
 
-        for name, field in model_type.model_fields.items():
-            if not prefix and name in [a.real_name for a in prg._args]:
-                continue
+        for name, field in getattr(model_type, 'model_fields', {}).items():
+            if not prefix and name in top_level_args:
+                continue  # already handled
 
             current_prefix = f"{prefix}{name}"
-            # use program default for dash alias in help for nested fields
-            long_name_base = (
+            long_name = (
                 current_prefix.replace('_', '-') if prg.default_auto_dash_alias else current_prefix
             )
-            current_long = f"--{long_name_base}"
-
-            # check if this exact long name already exists
-            if any(a.long == current_long[2:] for a in options + flags):
+            if any(a.long == long_name for a in options_flags + nested_args):
                 continue
 
             field_type = get_inner_type(field.annotation)
-
             if isinstance(field_type, type) and issubclass(field_type, BaseModel):
                 queue.append((field_type, f"{current_prefix}."))
 
-            nested_arg = Arg(
-                real_name=current_prefix,
-                long=current_long[2:],
-                help=field.description or "",
-                arg_type=field.annotation,
+            # check if the field itself corresponds to a registered top-level Arg (e.g., for is_file)
+            # this happens if a nested structure is also a top-level argument field
+            corresponding_arg = top_level_args.get(current_prefix)
+            is_file_hint = corresponding_arg.is_file if corresponding_arg else False
+
+            nested_args.append(
+                Arg(
+                    real_name=current_prefix,
+                    long=long_name,
+                    help=field.description or "",
+                    arg_type=field.annotation,
+                    is_file=is_file_hint,
+                )
             )
 
-            if get_inner_type(nested_arg.arg_type) is bool:  # handle Annotated[bool, ...]
-                flags.append(nested_arg)
-            elif not isinstance(field_type, type) or not issubclass(field_type, BaseModel):
-                options.append(nested_arg)
+    return options_flags, sorted(nested_args, key=lambda a: a.long.lower())
+
+
+def print_help(prg: "Program", _) -> None:
+    """prints the help message and exits."""
+    positionals = [a for a in prg._args if a.positional]
+    options_flags, nested_args = _gather_all_args(prg)
+    all_options_flags = [
+        a for a in options_flags if not a.positional and a.real_name != 'help'
+    ] + nested_args
+    help_arg = next((a for a in options_flags if a.real_name == 'help'), None)
 
     content = Text()
-
     if prg.description:
-        content.append("\n" + prg.description + "\n\n", style="italic")
+        content.append(f"\n{prg.description}\n\n", style="italic")
         content.append("─" * min(console.width - 4, 80) + "\n\n", style="bright_black")
 
-    usage = [prg.name or "command"]
-    if options or flags:
-        usage.append("[OPTIONS]")
-    for pos in positionals:
-        usage.append(pos.real_name.upper())
-
+    usage = [prg.name or "command"] + ["[OPTIONS]"] if all_options_flags else []
+    usage.extend(pos.real_name.upper() for pos in positionals)
     content.append("Usage: ", style="bold")
     content.append(" ".join(usage) + "\n\n", style="yellow")
 
     if positionals:
         content.append("Arguments:\n", style="bold green")
         for arg in positionals:
-            name = arg.real_name.upper()
-            help_text = arg.help or ""
-            arg_type = format_type_str(arg.arg_type)
-
             field = prg.conf_type.model_fields.get(arg.real_name)
-            default = None
-            required = False
+            _append_arg_details(content, arg, field, is_positional=True)
 
-            if field:
-                if field.default is not None and field.default is not PydanticUndefined:
-                    default = format_default_value(field.default)
-                elif field.default_factory is not None:
-                    default = "<factory>"
-                else:
-                    required = not is_optional_field(field)
-
-            content.append(f"  {name}\n", style="yellow")
-            content.append(f"    type: ", style="bright_black")
-            content.append(f"{arg_type}\n", style="blue")
-            if required:
-                content.append("    REQUIRED\n", style="red")
-            elif default is not None:
-                content.append("    default: ", style="bright_black")
-                content.append(f"{default}\n", style="dim")
-            if help_text:
-                content.append(f"    {help_text}\n", style="default")
-            content.append("\n")
-
-    if options or flags:
+    if all_options_flags or help_arg:
         content.append("Options:\n", style="bold green")
-        sorted_options = sorted(options + flags, key=lambda a: a.long)  # sort by long name
-        for arg in sorted_options:
-            parts = []
-            if arg.short:
-                parts.append(f"-{arg.short}")
-            if arg.long:
-                parts.append(f"--{arg.long}")  # use long here
-
-            option_str = ", ".join(parts)
-            # check inner type for bools to handle Annotated[bool] etc.
-            is_flag = get_inner_type(arg.arg_type) is bool
-
-            if not is_flag:
-                name = option_str
-                type_str = format_type_str(arg.arg_type)
-                format_type_display(name, type_str, content)
-            else:
-                content.append(f"  {option_str}\n", style="yellow")
-
-            help_text = arg.help or ""
-
-            field = None
-            model = prg.conf_type
-            path_parts = arg.real_name.split('.')
+        for arg in all_options_flags:
+            # find corresponding field definition if possible
+            field, model = None, prg.conf_type
             try:
-                for part in path_parts:
-                    current_model_fields = getattr(model, 'model_fields', {})
-                    field = current_model_fields.get(part)
-                    if field and hasattr(field.annotation, 'model_fields'):
-                        # check if annotation is actually a model type
-                        anno_type = get_inner_type(field.annotation)
-                        if isinstance(anno_type, type) and issubclass(anno_type, BaseModel):
-                            model = anno_type
-                        else:  # stop traversing if not a model
-                            break
+                for part in arg.real_name.split('.'):
+                    field = getattr(model, 'model_fields', {}).get(part)
+                    annotation = get_inner_type(field.annotation) if field else None
+                    if field and isinstance(annotation, type) and issubclass(annotation, BaseModel):
+                        model = annotation
                     elif not field:
                         break
             except (AttributeError, TypeError):
                 field = None
+            _append_arg_details(content, arg, field, is_positional=False)
+        if help_arg:  # ensure help is always last
+            _append_arg_details(content, help_arg, None, is_positional=False)
 
-            default = None
-            required = False
-
-            if field:
-                if field.default is not None and field.default is not PydanticUndefined:
-                    default = format_default_value(field.default)
-                elif field.default_factory is not None:
-                    default = "<factory>"
-                else:
-                    required = not is_optional_field(field)
-
-            if help_text:
-                content.append(f"    {help_text}\n")
-            if '.' not in arg.real_name and required:
-                content.append("    REQUIRED\n", style="red")
-            elif default is not None:
-                content.append("    default: ", style="bright_black")
-                content.append(f"{default}\n", style="dim")
-            content.append("\n")
-
-    title = Text()
-    title.append(prg.name if prg.name else "Command", style="bold cyan")
+    title = Text(prg.name or "Command", style="bold cyan")
     if prg.version:
         title.append(f" (v{prg.version})", style="cyan")
-
     console.print(
         Panel(content, title=title, box=ROUNDED, border_style="bright_black", expand=False)
     )
@@ -386,45 +333,63 @@ class Program(BaseModel, Generic[T]):
                 action=print_help,
             )
         )
-        self._arg_map = {}
-        for arg in self._args:
-            if arg.short:
-                self._arg_map[f'-{arg.short}'] = arg
-            if arg.long:
-                self._arg_map[f'--{arg.long}'] = arg
+        self._arg_map = {f'-{a.short}': a for a in self._args if a.short}
+        self._arg_map.update({f'--{a.long}': a for a in self._args if a.long})
 
     def parse_args(self, argv: List[str], **kwargs) -> tuple[Optional[T], Dict[str, Any]]:
-        self._positionals = [arg for arg in self._args if arg.positional]
-        self._positionals.reverse()
-
-        logger.debug(f"positional args: {self._positionals}")
-        logger.debug(f"arg map: {self._arg_map}")
-        logger.debug(f"args: {self._args}")
+        """parses command line arguments and generates configuration."""
+        self._positionals = [arg for arg in self._args if arg.positional][::-1]  # reverse for pop()
+        logger.debug(f"positional args: {self._positionals}, arg map: {self._arg_map}")
 
         raw_args, defined_vars, actions, confs_to_merge = {}, {}, [], []
         nested_args = {}
 
-        i = 0
-        while i < len(argv):
-            i = self._parse_single_arg(
-                argv, i, raw_args, nested_args, defined_vars, actions, confs_to_merge
+        try:
+            i = 0
+            while i < len(argv):
+                i = self._parse_single_arg(
+                    argv, i, raw_args, nested_args, defined_vars, actions, confs_to_merge
+                )
+        except ArgParseError as e:
+            print(f"\nError: {e}\n", file=sys.stderr)
+            print_help(self, None)  # exits
+
+        logger.debug(
+            f"parsed raw_args: {raw_args}, nested_args: {nested_args}, defined_vars: {defined_vars}"
+        )
+        conf = None
+        if print_help in actions:
+            print_help(self, None)
+        try:
+            conf = self._generate_config(
+                raw_args, nested_args, defined_vars, confs_to_merge, **kwargs
             )
-
-        logger.debug(f"defined vars: {defined_vars}")
-
-        conf = self.generate_config(raw_args, nested_args, defined_vars, confs_to_merge, **kwargs)
-        if conf is not None:
-            for action in actions:
+            for action in actions:  # process actions like --help after config generation
                 action_result = action(self, conf)
                 if action_result is not None:
                     conf = action_result
+        except ValidationError as e:
+            logger.debug(f"Validation error: {e}")
+            print(file=sys.stderr)  # newline before errors
+            for error in e.errors():
+                loc = '.'.join(map(str, error['loc'])) or 'root'
+                inp = f" (input type: {type(error['input']).__name__})" if 'input' in error else ""
+                print(f"error: field '{loc}': {error['msg']}{inp}", file=sys.stderr)
+            print(file=sys.stderr)  # newline after errors
+            print_help(self, None)  # exits
+        except Exception as e:  # catch other config generation errors
+            print(f"\nError generating configuration: {e}", file=sys.stderr)
+            traceback.print_exc()
+            sys.exit(1)
 
+        # prepare final raw args dict for return
         final_raw_args = raw_args.copy()
-        for path_str, value in nested_args.items():
-            # use the dashed version for the output dict key if preferred
-            output_key = path_str.replace('_', '-') if self.default_auto_dash_alias else path_str
-            final_raw_args[output_key] = value
-
+        final_raw_args.update(
+            {
+                (k.replace('_', '-') if self.default_auto_dash_alias else k): v
+                for k, v in nested_args.items()
+            }
+        )
         return conf, final_raw_args
 
     def _parse_single_arg(
@@ -437,192 +402,159 @@ class Program(BaseModel, Generic[T]):
         actions: List,
         confs_to_merge: List,
     ) -> int:
+        """parses one argument from argv at index i, returning the next index."""
         argstr = argv[i]
+        target_dict, real_name, arg_obj = raw_args, None, None  # default target is raw_args
 
         if argstr.startswith('--define.'):
-            return self._handle_define(argv, i, defined_vars)
-
+            var_name = argstr[9:]
+            if not var_name:
+                raise ArgParseError("Empty variable name after --define.")
+            var_value, i = self._read_value(argv, i)
+            defined_vars[var_name] = var_value
         elif argstr.startswith('+'):
-            confs_to_merge.append(argv[i][1:])
-            return i + 1
-
+            confs_to_merge.append(argstr[1:])
         elif not argstr.startswith('-'):
-            return self._handle_positional(argv, i, raw_args)
+            if not self._positionals:
+                raise ArgParseError(f"Unexpected positional argument {argstr}")
+            arg_obj = self._positionals.pop()
+            raw_args[arg_obj.real_name] = argstr  # positional args always go to raw_args
+        else:  # handle options (-s, --long, --nested.key)
+            arg_obj = self._arg_map.get(argstr)
+            if arg_obj:  # known top-level option
+                real_name = arg_obj.real_name
+            elif argstr.startswith('--') and '.' in argstr:  # nested option
+                real_name = argstr[2:]  # use full dotted name as key for nested_args
+                target_dict = nested_args
+            else:
+                raise ArgParseError(f"Unknown argument {argstr}")
 
-        else:
-            return self._handle_option(argv, i, raw_args, nested_args, actions)
-
-    def _handle_define(self, argv: List[str], i: int, defined_vars: Dict) -> int:
-        var_name = argv[i][9:]
-        var_value, i = self._read_value(argv, i)
-        defined_vars[var_name] = var_value
-        return i
-
-    def _handle_positional(self, argv: List[str], i: int, raw_args: Dict) -> int:
-        if not self._positionals:
-            raise ArgParseError(f"Unexpected positional argument {argv[i]}")
-        arg_obj = self._positionals.pop()
-        raw_args[arg_obj.real_name] = argv[i]
+            if arg_obj and arg_obj.action:
+                actions.append(arg_obj.action)
+            elif arg_obj and get_inner_type(arg_obj.arg_type) is bool:
+                target_dict[real_name] = True
+            else:  # option requires a value
+                v, i = self._read_value(argv, i)
+                # apply file modifier hint if present
+                modifier = (
+                    (lambda x: f"file:{x}") if (arg_obj and arg_obj.is_file) else (lambda x: x)
+                )
+                target_dict[real_name] = modifier(v)
+                logger.debug(f"setting {real_name} to {target_dict[real_name]}")
         return i + 1
 
-    def _handle_option(
-        self, argv: List[str], i: int, raw_args: Dict, nested_args: Dict, actions: List
-    ) -> int:
-        logger.debug(f"handling option {argv[i]}")
-        argstr = argv[i]
-
-        if argstr in self._arg_map:
-            arg_obj = self._arg_map[argstr]
-            real_name = arg_obj.real_name
-            target_dict = raw_args
-        elif argstr.startswith('--') and '.' in argstr:
-            # use the full dot.path as the key, preserving dashes
-            real_name = argstr[2:]
-            target_dict = nested_args
-            arg_obj = None
-        else:
-            raise ArgParseError(f"Unknown argument {argstr}")
-
-        if arg_obj and arg_obj.action is not None:
-            actions.append(arg_obj.action)
-            logger.debug(f"adding action {arg_obj.action} to the list of actions")
-            return i + 1
-
-        if arg_obj and get_inner_type(arg_obj.arg_type) is bool:
-            target_dict[real_name] = True
-            logger.debug(f"setting {real_name} to true")
-            return i + 1
-
-        v, i = self._read_value(argv, i)
-        modifier = (lambda x: f"file:{x}") if (arg_obj and arg_obj.is_file) else (lambda x: x)
-        modified_v = modifier(v)
-        target_dict[real_name] = modified_v  # store using original field name
-        logger.debug(f"setting {real_name} to {modified_v}")
-        return i
-
     def _read_value(self, argv: List[str], i: int) -> tuple[str, int]:
+        """reads the value for an option, advancing the index."""
+        original_arg = argv[i]
         i += 1
         if i >= len(argv) or argv[i].startswith('-'):
-            raise ArgParseError(f"Expected value for argument {argv[i - 1]}")
-        return argv[i], i + 1
+            raise ArgParseError(f"Expected value for argument {original_arg}")
+        return argv[i], i
 
-    def make_merge_str(self, confs_to_merge):
-        DEFAULT_MERGE_ARGS = "{~<}[~<]"
-        for i, conf in enumerate(confs_to_merge):
-            key = f"<<{DEFAULT_MERGE_ARGS}_merge{i}"
-            has_prefix = any(conf.startswith(f"{prefix}:") for prefix in DEFAULT_LOADERS.keys())
-            if has_prefix:
-                yield f"{key}: !include \"{conf}\""
-            else:
-                safe_conf = conf.replace('\\', '\\\\')
-                yield f"{key}: !include \"file:{safe_conf}\""
+    def _load_value_if_ref(self, value: str, loader: DraconLoader) -> Any:
+        """loads value from file/key reference if value starts with '+'."""
+        if isinstance(value, str) and value.startswith('+'):
+            try:
+                temp_loader = DraconLoader(context=loader.context.copy())
+                loaded_val = temp_loader.load(value[1:])
+                logger.debug(f"loaded override value '{value[1:]}' as: {type(loaded_val)}")
+                return loaded_val
+            except Exception as e:
+                logger.warning(f"failed to load override value '{value}': {e}")
+        return value
 
-    def _build_nested_override(self, nested_args: Dict[str, str]) -> Dict[str, Any]:
+    def _build_nested_override(
+        self, nested_args: Dict[str, str], loader: DraconLoader
+    ) -> Dict[str, Any]:
+        """builds the nested dictionary for --a.b=c overrides."""
         override_dict = {}
         for key_path, value in nested_args.items():
-            # important: convert dashes back to underscores for internal dict structure
+            resolved_value = self._load_value_if_ref(value, loader)
             parts = key_path.replace('-', '_').split('.')
             current_level = override_dict
             for i, part in enumerate(parts):
                 if i == len(parts) - 1:
-                    current_level[part] = value
+                    current_level[part] = resolved_value
                 else:
                     current_level = current_level.setdefault(part, {})
         return override_dict
 
-    def generate_config(
-        self,
-        raw_args: dict[str, str],
-        nested_args: dict[str, str],
-        defined_vars: dict[str, str],
-        confs_to_merge: list[str],
-        **kwargs,
+    def _generate_config(
+        self, raw_args: dict, nested_args: dict, defined_vars: dict, confs_to_merge: list, **kwargs
     ) -> Optional[T]:
-        nested_override_dict = self._build_nested_override(nested_args)
-
+        """generates the final configuration object by merging sources and validating."""
         loader = DraconLoader(
-            enable_interpolation=True,
-            base_dict_type=dict,
-            base_list_type=list,
-            **kwargs,
+            enable_interpolation=True, base_dict_type=dict, base_list_type=list, **kwargs
         )
         loader.update_context(defined_vars)
-
-        empty_model = self.conf_type.model_construct()
-        as_dict = empty_model.model_dump(exclude_unset=False)
+        as_dict = self.conf_type.model_construct().model_dump(exclude_unset=False)
+        logger.debug(f"initial dict from model defaults: {as_dict}")
 
         if confs_to_merge:
-            try:
-                merged_from_files = loader.load(confs_to_merge, merge_key="<<{<+}[<~]")
-                as_dict = merged(as_dict, merged_from_files, MergeKey(raw="{<+}[<~]"))
-            except FileNotFoundError as e:
-                print(f"\nerror: configuration file not found: {e}", file=sys.stderr)
-                sys.exit(1)
-            except Exception as e:
-                print(f"\nerror loading configuration files: {e}", file=sys.stderr)
-                traceback.print_exc()
-                sys.exit(1)
+            merged_from_files = loader.load(confs_to_merge, merge_key="<<{<+}[<~]")
+            as_dict = merged(as_dict, merged_from_files, MergeKey(raw="{<+}[<~]"))
+            logger.debug(f"dict after merging base files: {as_dict}")
 
-        if raw_args:
-            processed_raw_args = {}
-            for k, v in raw_args.items():
-                if isinstance(v, str) and v.startswith('+'):
-                    try:
-                        temp_loader = DraconLoader(context=loader.context.copy(), **kwargs)
-                        processed_raw_args[k] = temp_loader.load(v[1:])
-                    except Exception as e:
-                        logger.warning(f"failed to load override value '{v}' for key '{k}': {e}")
-                        processed_raw_args[k] = v
-                else:
-                    processed_raw_args[k] = v
+        # build combined CLI overrides dictionary
+        cli_overrides = {}
+        for k, v in raw_args.items():  # process raw args (--arg val)
+            resolved_value = self._load_value_if_ref(v, loader)
+            # special handling for file overrides of dicts: replace vs merge
+            if (
+                isinstance(v, str)
+                and v.startswith('+')
+                and dict_like(resolved_value)
+                and list(resolved_value.keys()) == [k]
+            ):
+                cli_overrides[k] = resolved_value[k]  # direct replacement using inner value
+                logger.debug(f"direct replacement for key {k} from CLI file")
+            else:
+                cli_overrides[k] = resolved_value  # normal override value
+        if nested_args:  # process nested args (--a.b val)
+            nested_override_dict = self._build_nested_override(nested_args, loader)
+            cli_overrides = merged(
+                cli_overrides, nested_override_dict, MergeKey(raw="{<+}[<~]")
+            )  # merge nested into raw
 
-            as_dict = merged(as_dict, processed_raw_args, MergeKey(raw="{<+}[<~]"))
+        if cli_overrides:
+            as_dict = merged(as_dict, cli_overrides, MergeKey(raw="{<+}[<~]"))
+            logger.debug(f"dict after merging all CLI overrides: {as_dict}")
 
-        if nested_override_dict:
-            as_dict = merged(as_dict, nested_override_dict, MergeKey(raw="{<+}[<~]"))
+        # pre-resolve top-level lazy values before validation
+        resolved_as_dict = {}
+        for k, v in as_dict.items():
+            if isinstance(v, LazyInterpolable):
+                try:
+                    v.root_obj, v.current_path = as_dict, KeyPath(f"/{k}")
+                    resolved_as_dict[k] = v.resolve(context_override=loader.context)
+                    logger.debug(f"pre-resolved lazy key '{k}': {resolved_as_dict[k]}")
+                except Exception as e:
+                    logger.warning(f"failed to pre-resolve lazy key '{k}': {e}. leaving lazy.")
+                    resolved_as_dict[k] = v  # keep lazy if pre-resolution fails
+            else:
+                resolved_as_dict[k] = v
+        as_dict = resolved_as_dict
+        logger.debug(f"dict after pre-resolving:\n{as_dict}\n")
 
-        logger.debug(f"parsed all args passed to commandline prog: {raw_args}")
-        logger.debug(f"nested args passed: {nested_args}")
-        logger.debug(f"defined vars: {defined_vars}")
-        logger.debug(f"final dict before pydantic validation:\n{as_dict}\n")
+        # wrap resolvable fields
+        real_name_map = {arg.real_name: arg for arg in self._args}
+        for field_name, field in self.conf_type.model_fields.items():
+            arg = real_name_map.get(field_name)
+            if (
+                arg
+                and arg.resolvable
+                and field_name in as_dict
+                and not isinstance(as_dict[field_name], DeferredNode)
+            ):
+                logger.debug(f"wrapping field {field_name} in DeferredNode")
+                as_dict[field_name] = make_deferred(as_dict[field_name], loader=loader)
 
-        try:
-            res = self.conf_type.model_validate(as_dict)
+        res = self.conf_type.model_validate(as_dict)
 
-            real_name_map = {arg.real_name: arg for arg in self._args}
-            for field_name, field in self.conf_type.model_fields.items():
-                if field_name in real_name_map:
-                    arg = real_name_map[field_name]
-                    if arg.resolvable:
-                        current_value = getattr(res, field_name)
-                        if not isinstance(current_value, DeferredNode):
-                            # ensure loader context is attached if available
-                            loader_context = loader.context if loader else None
-                            setattr(
-                                res,
-                                field_name,
-                                DeferredNode(
-                                    value=current_value, loader=loader, context=loader_context
-                                ),
-                            )
-
-            resolve_all_lazy(res)
-            if not isinstance(res, self.conf_type):
-                raise ArgParseError(f"expected {self.conf_type} but got {type(res)}")
-            return res
-        except ValidationError as e:
-            print()
-            for error in e.errors():
-                loc_str = '.'.join(map(str, error['loc'])) if error['loc'] else 'root'
-                print(f"error: field '{loc_str}': {error['msg']} (type: {error['type']})")
-                if 'input' in error and isinstance(error['input'], (str, int, float, bool)):
-                    print(f"  input value: {repr(error['input'])}")
-                elif 'input' in error:
-                    print(f"  input type: {type(error['input']).__name__}")
-            print()
-
-            print_help(self, None)
-            sys.exit(2)  # command line usage errors
+        resolve_all_lazy(res)  # final resolution pass, mainly for deferred nodes
+        if not isinstance(res, self.conf_type):
+            raise ArgParseError(f"Internal error: expected {self.conf_type} but got {type(res)}")
+        return res
 
 
 def make_program(conf_type: type, **kwargs):
