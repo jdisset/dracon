@@ -14,7 +14,7 @@ from pydantic import (
 )
 import typing
 import inspect
-from dracon.utils import ShallowDict, ftrace, deepcopy
+from dracon.utils import ShallowDict, ftrace, deepcopy, DEFAULT_EVAL_ENGINE
 from dracon import dracontainer
 from dracon.interpolation import outermost_interpolation_exprs, InterpolableNode
 from dracon.lazy import LazyInterpolable, resolve_all_lazy, is_lazy_compatible
@@ -183,7 +183,7 @@ class Draconstructor(Constructor):
         preserve_quotes=None,
         loader=None,
         reference_nodes=None,
-        interpolation_engine='asteval',
+        interpolation_engine=DEFAULT_EVAL_ENGINE,
         resolve_interpolations=False,
         capture_globals=False,
         dracon_loader=None,
