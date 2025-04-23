@@ -90,10 +90,13 @@ def test_complex():
     loader = DraconLoader(context={"ClassA": ClassA, "ClassB": ClassB, "ClassC": ClassC})
     loader.yaml.representer.full_module_path = False
     conf = loader.dump(c)
-    assert (
-        conf
-        == "!ClassC\nattr1:\n- custom_hello\n- custom_world\nattrB: !ClassB\n  attr1: hello\n  attr2: 42\n  attrA: !ClassA\n    attr3: 3.14\n"
-    )
+    print(f"actual conf:\n{conf}")
+
+    expected = "!ClassC\nattr1:\n- custom_hello\n- custom_world\nattrB: !ClassB\n  attr1: hello\n  attr2: 42\n  attrA: !ClassA\n    attr3: 3.14\n"
+
+    print(f"expected:\n{expected}")
+
+    assert conf == expected
 
 
 class ClassEx(BaseModel):
