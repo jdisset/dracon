@@ -128,7 +128,7 @@ def _format_type_str(arg_type, is_file: bool = False) -> str:
     # handle specific origins
     if origin is Literal:
         vals = [repr(a) for a in args]
-        return f"{', '.join(vals[:-1])} or {vals[-1]}" if len(vals) > 1 else vals[0]
+        return f"{', '.join(vals[:-1])}, or {vals[-1]}" if len(vals) > 1 else vals[0]
     if origin is Union:
         non_none = [_format_type_str(t, is_file) for t in args if t is not type(None)]
         return non_none[0] if len(non_none) == 1 else f"Union[{', '.join(non_none)}]"
