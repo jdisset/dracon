@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Jean Disset
+# MIT License - see LICENSE file for details.
+
 ## {{{                          --     imports     --{{{}}}
 from ruamel.yaml.composer import Composer
 from ruamel.yaml.nodes import Node, MappingNode, SequenceNode, ScalarNode

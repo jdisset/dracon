@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Jean Disset
+# MIT License - see LICENSE file for details.
+
 from ruamel.yaml.representer import RoundTripRepresenter, RepresenterError
 from ruamel.yaml.nodes import MappingNode, ScalarNode, SequenceNode, Node
 from ruamel.yaml.tag import Tag

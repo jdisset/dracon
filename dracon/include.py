@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Jean Disset
+# MIT License - see LICENSE file for details.
+
 from dataclasses import dataclass
 from typing import Any, Optional, Dict, Tuple, Callable
 import dracon.utils as utils

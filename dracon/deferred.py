@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Jean Disset
+# MIT License - see LICENSE file for details.
+
 from typing import Optional, Any, List, Dict, TypeVar, Generic, Type, ForwardRef
 import dracon.utils as utils
 from dracon.utils import ftrace, deepcopy, ser_debug, node_repr

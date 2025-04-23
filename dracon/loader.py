@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Jean Disset
+# MIT License - see LICENSE file for details.
+
 ## {{{                          --     imports     --
 from ruamel.yaml import Node
 import os
