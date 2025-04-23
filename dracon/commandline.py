@@ -54,7 +54,7 @@ class Arg:
     help: Optional[str] = None
     arg_type: Optional[Type[Any]] = None
     action: Optional[Callable[[ProgramType, Any], Any]] = None
-    default_str = None
+    default_str: Optional[str] = None
     positional: bool = False
     resolvable: bool = False
     is_file: bool = False
