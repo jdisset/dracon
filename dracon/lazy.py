@@ -9,9 +9,18 @@ from typing import (
     Annotated,
     Protocol,
     runtime_checkable,
+    Type,
+    get_args,
 )
 from dracon.keypath import KeyPath, ROOTPATH, MAPPING_KEY
-from pydantic import BaseModel, field_validator, ConfigDict, WrapValidator, Field
+from pydantic import (
+    BaseModel,
+    field_validator,
+    ConfigDict,
+    WrapValidator,
+    Field,
+    GetCoreSchemaHandler,
+)
 from dracon.interpolation_utils import (
     InterpolationMatch,
 )
@@ -19,6 +28,7 @@ from dracon.interpolation import evaluate_expression, InterpolationError, Dracon
 from dracon.utils import list_like, dict_like
 
 import inspect
+from pydantic_core import core_schema  # Added core_schema
 
 import logging
 
@@ -126,7 +136,7 @@ class LazyInterpolable(Lazy[T]):
             permissive=state['permissive'],
             engine=state['engine'],
             context=state['context'],
-            validator=None,  # Validator will be reattached by the owner if needed
+            validator=None,
         )
 
     def __repr__(self):
@@ -136,9 +146,12 @@ class LazyInterpolable(Lazy[T]):
         if isinstance(self.value, str):
             try:
                 ctx = self.context if self.context is not None else {}
+                logger.debug(
+                    f"Resolving lazy value: {self.value}, with context_override: {context_override} and context: {ctx}"
+                )
                 if context_override is not None:
-                    ctx.update(context_override)
-                self.value = evaluate_expression(
+                    ctx = {**ctx, **context_override}
+                resolved_value = evaluate_expression(
                     self.value,
                     self.current_path,
                     self.root_obj,
@@ -146,19 +159,26 @@ class LazyInterpolable(Lazy[T]):
                     engine=self.engine,
                     context=ctx,
                 )
+                return self.validate(resolved_value)
             except Exception as e:
-                raise type(e)(f"Error resolving lazy value \"{self.value}\": {str(e)}") from None
+                import traceback
 
+                logger.error(
+                    f"Error evaluating expression '{self.value}' at path {self.current_path}: {e}\n{traceback.format_exc()}"
+                )
+                raise InterpolationError(
+                    f"Error evaluating expression '{self.value}' at path {self.current_path}: {e}"
+                ) from None
         return self.validate(self.value)
 
     def get(self, owner_instance, setval=False):
-        """Get the value of the lazy object, and optionally set it as an attribute of the owner instance."""
         if hasattr(owner_instance, '_dracon_root_obj'):
             self.root_obj = owner_instance._dracon_root_obj
             assert hasattr(owner_instance, '_dracon_current_path'), (
                 f"Instance {owner_instance} has no current path"
             )
-            self.current_path = owner_instance._dracon_current_path + self.name
+            if self.name and isinstance(self.current_path, KeyPath):
+                self.current_path = owner_instance._dracon_current_path + self.name
 
         newval = self.resolve()
 
@@ -169,7 +189,46 @@ class LazyInterpolable(Lazy[T]):
 
     def reattach_validator(self, validator: Optional[Callable[[Any], Any]]):
         """Reattach a validator after unpickling."""
-        self._validator = validator
+        self.validator = validator
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source: Type[Any], handler: GetCoreSchemaHandler
+    ) -> core_schema.CoreSchema:
+        """
+        Pydantic v2 core schema generation for LazyInterpolable.
+
+        Allows Pydantic to handle LazyInterpolable inputs during validation
+        by attempting to resolve them first.
+        """
+
+        # define a validation function that tries to resolve LazyInterpolable
+        def validate_lazy(value: Any) -> Any:
+            if isinstance(value, cls):
+                try:
+                    # attempt to resolve the lazy value immediately
+                    resolved = value.resolve()
+                    logger.debug(f"pydantic validator resolved {value!r} to {resolved!r}")
+                    return resolved
+                except InterpolationError as e:
+                    logger.debug(
+                        f"failed to resolve {value!r} during pydantic validation: {e}, returning original lazy object."
+                    )
+                    return value
+            return value
+
+        # get the schema for the inner type T if LazyInterpolable[T] is used
+        args = get_args(source)
+        if args:
+            inner_schema = handler(args[0])
+            return core_schema.union_schema(
+                [
+                    core_schema.no_info_before_validator_function(validate_lazy, inner_schema),
+                    core_schema.is_instance_schema(cls),
+                ]
+            )
+        else:
+            return core_schema.no_info_plain_validator_function(validate_lazy)
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
@@ -195,7 +254,7 @@ def resolve_single_key(path, key, root, context_override=None):
             resolved_key = str(resolved_key)
 
         original_lazy_key_object = None
-        for k_in_parent in parent.keys():
+        for k_in_parent in list(parent.keys()):  # iterate over a copy of keys
             if id(k_in_parent) == id(key) or (
                 isinstance(k_in_parent, LazyInterpolable) and k_in_parent.value == key.value
             ):
@@ -213,7 +272,7 @@ def resolve_single_key(path, key, root, context_override=None):
 
         if (
             resolved_key != str(original_lazy_key_object.value)
-            or original_lazy_key_object in parent
+            or original_lazy_key_object in parent  # check if original lazy obj is still a key
         ):
             try:
                 value = parent[original_lazy_key_object]
@@ -224,17 +283,17 @@ def resolve_single_key(path, key, root, context_override=None):
 
                 parent[resolved_key] = value
 
-                if hasattr(parent, '_recompute_map'):
-                    parent._recompute_map()
-
-                # return transformation info only if a structural change occurred
                 old_path = parent_path.down(MAPPING_KEY).down(str(original_lazy_key_object.value))
                 new_path = parent_path.down(str(resolved_key))
-                return True, (old_path, new_path)
+                # report transformation only if key value changed
+                if str(original_lazy_key_object.value) != str(resolved_key):
+                    return True, (old_path, new_path)
+                else:
+                    return True, None
 
             except KeyError:
-                logger.error(
-                    f"KeyError trying to access/delete lazy key {original_lazy_key_object!r} even after finding it."
+                logger.warning(
+                    f"KeyError trying to access/delete lazy key {original_lazy_key_object!r}. It might have been processed already."
                 )
                 return False, None
             except Exception as e_inner:
@@ -242,7 +301,7 @@ def resolve_single_key(path, key, root, context_override=None):
                 return False, None
         else:
             logger.debug(
-                f"Resolved key '{resolved_key}' is same as lazy value representation. No update needed."
+                f"Resolved key '{resolved_key}' matches lazy value and object is gone. No update needed."
             )
             return True, None  # indicate success but no transformation
 
@@ -250,7 +309,7 @@ def resolve_single_key(path, key, root, context_override=None):
         import traceback
 
         logger.error(f"Error resolving key {key} at {path}: {e}\n{traceback.format_exc()}")
-        return False, None
+        raise e
 
 
 def resolve_single_value(path, value, root, context_override=None):
@@ -264,7 +323,8 @@ def resolve_single_value(path, value, root, context_override=None):
 
         stem = path.stem
         if stem == '/' or stem == ROOTPATH:
-            return False  # indicate no action taken here
+            logger.warning(f"Attempted to set value at root path {path}. This is likely an error.")
+            return False
 
         set_val(parent, stem, resolved_value)
         return True
@@ -272,8 +332,8 @@ def resolve_single_value(path, value, root, context_override=None):
     except Exception as e:
         import traceback
 
-        logger.debug(f"error resolving value {value} at {path}: {e}\n{traceback.format_exc()}")
-        return False
+        logger.error(f"error resolving value {value} at {path}: {e}\n{traceback.format_exc()}")
+        raise e
 
 
 def set_val(parent: Any, key, value: Any) -> None:
@@ -282,8 +342,21 @@ def set_val(parent: Any, key, value: Any) -> None:
     elif isinstance(parent, BaseModel):
         # handle pydantic models specifically
         setattr(parent, key, value)
-    elif hasattr(parent, key):
-        setattr(parent, key, value)
+    elif (
+        hasattr(parent, key)
+        and not callable(getattr(parent, key))
+        and not inspect.isclass(getattr(parent, key))
+    ):
+        # try setattr if attribute exists and is not callable/class
+        try:
+            setattr(parent, key, value)
+        except (AttributeError, TypeError):
+            try:
+                parent[key] = value
+            except Exception as e:
+                raise AttributeError(
+                    f"Could not set attribute or item '{key}' in {parent}: {e}"
+                ) from None
     else:
         try:
             parent[key] = value
@@ -292,7 +365,9 @@ def set_val(parent: Any, key, value: Any) -> None:
                 # last fallback: try setting attribute anyway
                 setattr(parent, key, value)
             except AttributeError:
-                raise AttributeError(f'Could not set attribute {key} in {parent}') from None
+                raise AttributeError(
+                    f'Could not set attribute or item \'{key}\' in {parent}'
+                ) from None
 
 
 def collect_lazy_by_depth(obj, path=ROOTPATH, seen=None):
@@ -329,34 +404,40 @@ def collect_lazy_by_depth(obj, path=ROOTPATH, seen=None):
         if dict_like(o):
             for k, v in list(o.items()):
                 if isinstance(k, LazyInterpolable):
-                    key_path = p.copy().down(MAPPING_KEY).down(str(k))
+                    key_path = p.copy().down(MAPPING_KEY).down(str(k.value))
                     if depth not in lazy_keys_by_depth:
                         lazy_keys_by_depth[depth] = []
                     lazy_keys_by_depth[depth].append((key_path, k))
 
-                value_path = p.copy().down(str(k))
+                value_path_key = k.value if isinstance(k, LazyInterpolable) else str(k)
+                value_path = p.copy().down(value_path_key)
                 _collect(v, value_path, seen_set)
 
         # handle list-like objects (excluding strings, bytes, and numeric arrays)
         elif list_like(o) and not isinstance(o, (str, bytes, type)) and not num_array_like(o):
             try:
-                # Double-check that we can actually enumerate this object
-                for i, item in enumerate(o):
+                # iterate over a copy in case list is modified during recursion
+                for i, item in enumerate(list(o)):
                     item_path = p.copy().down(str(i))
                     _collect(item, item_path, seen_set)
             except TypeError:
                 pass
 
-        # handle Pydantic models
+        # Pydantic models
         elif isinstance(o, BaseModel):
-            # access model's fields directly through __dict__ to get raw values
-            for field_name, field_value in o.__dict__.items():
-                # skip private attributes and special pydantic fields
-                if field_name.startswith('_'):
-                    continue
+            # Iterate through model fields directly
+            for field_name in o.model_fields_set:
+                field_value = getattr(o, field_name)
 
                 item_path = p.copy().down(field_name)
                 _collect(field_value, item_path, seen_set)
+
+            if hasattr(o, '__dict__'):
+                for attr_name, attr_value in o.__dict__.items():
+                    if attr_name.startswith('_') or attr_name in o.model_fields:
+                        continue
+                    attr_path = p.copy().down(attr_name)
+                    _collect(attr_value, attr_path, seen_set)
 
         # handle other objects with attributes
         elif hasattr(o, '__dict__') and not isinstance(o, (str, int, float, bool, bytes, type)):
@@ -370,8 +451,7 @@ def collect_lazy_by_depth(obj, path=ROOTPATH, seen=None):
                 return
 
             try:
-                # get object attributes
-                for attr_name, attr_value in vars(o).items():
+                for attr_name, attr_value in list(vars(o).items()):
                     # skip private attributes, methods, and special attributes
                     if (
                         attr_name.startswith('_')
@@ -404,8 +484,21 @@ def resolve_all_lazy(
     if visited_ids is None:
         visited_ids = set()
 
+    if not (dict_like(obj) or list_like(obj) or isinstance(obj, BaseModel)):
+        if isinstance(obj, LazyInterpolable):
+            # if the root object itself is lazy
+            if root_obj is None:
+                root_obj = obj  # Set root_obj if None
+            if current_path is None:
+                current_path = ROOTPATH
+            obj.root_obj = root_obj
+            obj.current_path = current_path
+            return obj.resolve(context_override=context_override)
+        return obj  # return non-lazy, non-container types as is
+
     obj_id = id(obj)
     if obj_id in visited_ids:
+        logger.debug(f"Skipping already visited object {type(obj)} at {current_path}")
         return obj
     visited_ids.add(obj_id)
 
@@ -417,63 +510,127 @@ def resolve_all_lazy(
             ROOTPATH if not hasattr(obj, '_dracon_current_path') else obj._dracon_current_path
         )
 
-    # handle case where the root object itself is lazy
-    if isinstance(obj, LazyInterpolable) and current_path == ROOTPATH:
-        try:
-            obj.root_obj = root_obj  # ensure root is set
-            resolved_root = obj.resolve(context_override=context_override)
-            return resolve_all_lazy(
-                resolved_root, root_obj, current_path, set(), context_override, max_passes - 1
-            )
-        except Exception as e:
-            logger.warning(f"Error resolving root lazy object: {e}")
-            return obj
+    logger.debug(f"Starting resolve_all_lazy for obj {type(obj)} at path {current_path}")
 
     resolved_something_in_last_pass = True
     pass_num = 0
+    max_passes = max_passes
+
     while resolved_something_in_last_pass and pass_num < max_passes:
         resolved_something_in_last_pass = False
         pass_num += 1
+        logger.debug(f"Resolve pass {pass_num} for path {current_path}")
 
         lazy_keys_by_depth, lazy_values = collect_lazy_by_depth(obj, current_path, seen=set())
 
         if not lazy_keys_by_depth and not lazy_values:
+            logger.debug(
+                f"No lazy objects found at path {current_path} in pass {pass_num}. Breaking."
+            )
             break
 
         keys_resolved_this_pass = 0
-        values_resolved_this_pass = 0
         keys_transformed = False
+        transformed_paths = {}  # old_path_str -> new_path
 
-        # resolve keys by depth (shallowest first)
         depths = sorted(lazy_keys_by_depth.keys())
+        logger.debug(f"Lazy keys found at depths: {depths}")
         if depths:
-            current_depth = depths[0]
-            keys_to_resolve = lazy_keys_by_depth.get(current_depth, [])
-            for path, key in keys_to_resolve:
-                success, transform = resolve_single_key(path, key, root_obj, context_override)
+            # Process keys level by level might be complex if structure changes.
+            # Let's try resolving all keys found in this pass first.
+            all_keys_to_resolve = []
+            for depth in depths:
+                all_keys_to_resolve.extend(lazy_keys_by_depth.get(depth, []))
+
+            logger.debug(
+                f"Keys to resolve in pass {pass_num}: {[p for p, k in all_keys_to_resolve]}"
+            )
+            for path, key in all_keys_to_resolve:
+                # Adjust path based on previous transformations in this pass
+                adjusted_path_str = str(path)
+                for old_prefix, new_prefix in transformed_paths.items():
+                    if adjusted_path_str.startswith(old_prefix):
+                        adjusted_path_str = new_prefix + adjusted_path_str[len(old_prefix) :]
+                        break
+                adjusted_path = KeyPath(adjusted_path_str)
+
+                # Pass the container `obj` as the root for key resolution relative to itself
+                success, transform = resolve_single_key(
+                    adjusted_path, key, root_obj, context_override
+                )
                 if success:
+                    resolved_something_in_last_pass = True
                     keys_resolved_this_pass += 1
                     if transform:  # checks if path structure actually changed
                         keys_transformed = True
+                        old_path_str, new_path = transform
+                        # Store transformation relative to the root_obj
+                        transformed_paths[str(old_path_str)] = str(new_path)
+                        logger.debug(f"Key transformation recorded: {old_path_str} -> {new_path}")
 
-        if not keys_transformed:
-            for path, value in lazy_values:
-                success = resolve_single_value(path, value, root_obj, context_override)
-                if success:
-                    values_resolved_this_pass += 1
+        # --- Resolve Values ---
+        values_resolved_this_pass = 0
+        logger.debug(f"Values to resolve in pass {pass_num}: {[p for p, v in lazy_values]}")
+        for path, value in lazy_values:
+            # Adjust path based on key transformations in this pass
+            adjusted_path_str = str(path)
+            for old_prefix, new_prefix in transformed_paths.items():
+                if adjusted_path_str.startswith(old_prefix):
+                    adjusted_path_str = new_prefix + adjusted_path_str[len(old_prefix) :]
+                    break
+            adjusted_path = KeyPath(adjusted_path_str)
 
-        if keys_resolved_this_pass > 0 or values_resolved_this_pass > 0:
-            resolved_something_in_last_pass = True
+            success = resolve_single_value(adjusted_path, value, root_obj, context_override)
+            if success:
+                resolved_something_in_last_pass = True
+                values_resolved_this_pass += 1
+
+        logger.debug(
+            f"Pass {pass_num} summary: Keys resolved: {keys_resolved_this_pass}, Values resolved: {values_resolved_this_pass}, Keys transformed: {keys_transformed}"
+        )
+
+        # --- Recurse into children AFTER resolving current level ---
+        if not resolved_something_in_last_pass:
+            logger.debug(f"No changes in pass {pass_num}, proceeding to children recursion.")
+            if dict_like(obj):
+                for k, v in list(obj.items()):
+                    key_str = k.value if isinstance(k, LazyInterpolable) else str(k)
+                    child_path = current_path + key_str
+                    obj[k] = resolve_all_lazy(
+                        v, root_obj, child_path, visited_ids, context_override, max_passes
+                    )
+            elif list_like(obj) and not isinstance(obj, (str, bytes)):
+                for i, item in enumerate(list(obj)):  # iterate copy
+                    child_path = current_path + str(i)
+                    obj[i] = resolve_all_lazy(
+                        item, root_obj, child_path, visited_ids, context_override, max_passes
+                    )
+            elif isinstance(obj, BaseModel):
+                for field_name in list(obj.model_fields_set):  # iterate copy
+                    child_path = current_path + field_name
+                    current_val = getattr(obj, field_name)
+                    resolved_val = resolve_all_lazy(
+                        current_val, root_obj, child_path, visited_ids, context_override, max_passes
+                    )
+                    try:
+                        setattr(obj, field_name, resolved_val)
+                    except Exception as e:
+                        logger.error(f"Failed to set attribute {field_name} on {type(obj)}: {e}")
 
     if pass_num == max_passes and resolved_something_in_last_pass:
-        _, remaining_values = collect_lazy_by_depth(obj, current_path, seen=set())
-        remaining_keys_by_depth, _ = collect_lazy_by_depth(obj, current_path, seen=set())
-        if remaining_values or remaining_keys_by_depth:
+        # check again if lazy objects remain after max passes
+        remaining_keys_by_depth, remaining_values = collect_lazy_by_depth(
+            obj, current_path, seen=set()
+        )
+        if remaining_values or any(remaining_keys_by_depth.values()):
             logger.warning(
-                f"Max passes ({max_passes}) reached during resolve_all_lazy, potentially unresolved lazy objects remain."
+                f"Max passes ({max_passes}) reached during resolve_all_lazy for path {current_path}, potentially unresolved lazy objects remain."
             )
+            logger.warning(f"Remaining Keys: {remaining_keys_by_depth}")
+            logger.warning(f"Remaining Values: {remaining_values}")
 
     visited_ids.remove(obj_id)
+    logger.debug(f"Finished resolve_all_lazy for obj {type(obj)} at path {current_path}")
     return obj
 
 
@@ -490,6 +647,13 @@ def recursive_update_lazy_container(obj, root_obj, current_path, seen=None):
     if seen is None:
         seen = set()
 
+    # handle non-container types first
+    if not (dict_like(obj) or list_like(obj) or isinstance(obj, BaseModel)):
+        if isinstance(obj, LazyInterpolable):
+            obj.root_obj = root_obj
+            obj.current_path = current_path
+        return
+
     obj_id = id(obj)
     if obj_id in seen:
         return  # skip already processed objects to break cycles
@@ -500,14 +664,43 @@ def recursive_update_lazy_container(obj, root_obj, current_path, seen=None):
         obj._dracon_current_path = current_path
 
     if dict_like(obj):
-        for key, value in obj.items():
-            new_path = current_path + str(key)
+        # iterate over copy of items for safety if dict changes
+        for key, value in list(obj.items()):
+            # update key if it's lazy
+            if isinstance(key, LazyInterpolable):
+                key.root_obj = root_obj
+                # key's path needs care, it's relative to the parent dict path
+                key.current_path = current_path  # Assign parent path for context, actual resolution uses MAPPING_KEY logic
+
+            # update value
+            key_str = key.value if isinstance(key, LazyInterpolable) else str(key)
+            new_path = current_path + str(key_str)
             recursive_update_lazy_container(value, root_obj, new_path, seen)
 
     elif list_like(obj) and not isinstance(obj, (str, bytes)) and not num_array_like(obj):
-        for i, item in enumerate(obj):
+        # iterate over copy in case list is modified
+        for i, item in enumerate(list(obj)):
             new_path = current_path + str(i)
             recursive_update_lazy_container(item, root_obj, new_path, seen)
+
+    elif isinstance(obj, BaseModel):
+        # update base model attributes first
+        if hasattr(obj, '_dracon_root_obj'):
+            obj._dracon_root_obj = root_obj
+        if hasattr(obj, '_dracon_current_path'):
+            obj._dracon_current_path = current_path
+        # then recurse into fields
+        for field_name in obj.model_fields_set:  # Use model_fields_set
+            value = getattr(obj, field_name)
+            new_path = current_path + field_name
+            recursive_update_lazy_container(value, root_obj, new_path, seen)
+        # also check __dict__ for non-field lazy attributes
+        if hasattr(obj, '__dict__'):
+            for attr_name, value in obj.__dict__.items():
+                if attr_name.startswith('_') or attr_name in obj.model_fields:
+                    continue
+                new_path = current_path + attr_name
+                recursive_update_lazy_container(value, root_obj, new_path, seen)
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
@@ -577,12 +770,8 @@ class LazyDraconModel(BaseModel):
         attr = super().__getattribute__(name)
         if isinstance(attr, Lazy):
             attr.__set_name__(self, name)
-            return attr.__get__(self)
-        # if it's a list or tuple of Lazy, resolve them
-        if isinstance(attr, (list, tuple)):
-            for i, item in enumerate(attr):
-                if isinstance(item, Lazy):
-                    item.name = f'{name}.{i}'
-                    attr[i] = item.resolve()
-            setattr(self, name, attr)
+            if isinstance(attr, LazyInterpolable):
+                attr.root_obj = self._dracon_root_obj
+                attr.current_path = self._dracon_current_path + name
+            return attr.get(self)  # get() calls resolve() internally
         return attr

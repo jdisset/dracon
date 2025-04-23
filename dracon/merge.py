@@ -45,7 +45,6 @@ def process_merges(comp_res):
         any_merges = True
 
         for merge_path in comp_res.pop_all_special('merge'):
-            logger.debug(f'Processing merge node: {merge_path}')
             # Get value path (remove mapping key)
             merge_path = merge_path.removed_mapping_key()
             merge_node = merge_path.get_obj(comp_res.root)
