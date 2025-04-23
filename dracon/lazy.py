@@ -28,7 +28,7 @@ from dracon.interpolation_utils import (
     InterpolationMatch,
 )
 from dracon.interpolation import evaluate_expression, InterpolationError, DraconError
-from dracon.utils import list_like, dict_like
+from dracon.utils import list_like, dict_like, DEFAULT_EVAL_ENGINE
 
 import inspect
 from pydantic_core import core_schema  # Added core_schema
@@ -36,6 +36,7 @@ from pydantic_core import core_schema  # Added core_schema
 import logging
 
 logger = logging.getLogger(__name__)
+
 
 ## {{{                     --     LazyInterpolable     --
 
@@ -89,7 +90,7 @@ class LazyInterpolable(Lazy[T]):
         root_obj: Any = None,
         init_outermost_interpolations: Optional[List[InterpolationMatch]] = None,
         permissive: bool = False,
-        engine: str = 'asteval',
+        engine: str = DEFAULT_EVAL_ENGINE,
         context: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(value, validator, name)

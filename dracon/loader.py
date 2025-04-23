@@ -34,6 +34,7 @@ from dracon.utils import (
     deepcopy,
     make_hashable,
     ser_debug,
+    DEFAULT_EVAL_ENGINE,
 )
 
 from dracon.interpolation import InterpolableNode, preprocess_references
@@ -93,7 +94,7 @@ class DraconLoader:
         base_dict_type: Type[DictLike] = dracontainer.Mapping,
         base_list_type: Type[ListLike] = dracontainer.Sequence,
         enable_interpolation: bool = False,
-        interpolation_engine: Literal['asteval', 'eval'] = 'asteval',
+        interpolation_engine: Literal['asteval', 'eval'] = DEFAULT_EVAL_ENGINE,
         context: Optional[Dict[str, Any]] = None,
         deferred_paths: Optional[list[KeyPath | str]] = None,
         use_cache: bool = True,

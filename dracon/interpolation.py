@@ -15,7 +15,7 @@ from typing import (
     Protocol,
     runtime_checkable,
 )
-from dracon.utils import DictLike, ftrace, deepcopy, ser_debug
+from dracon.utils import DictLike, ftrace, deepcopy, ser_debug, DEFAULT_EVAL_ENGINE
 import dracon.utils as utils
 from dracon.nodes import DraconMappingNode, ContextNode
 
@@ -215,7 +215,7 @@ def evaluate_expression(
     root_obj: Any = None,
     allow_recurse: int = 5,
     init_outermost_interpolations: Optional[List[InterpolationMatch]] = None,
-    engine: str = 'asteval',
+    engine: str = DEFAULT_EVAL_ENGINE,
     context: Optional[Dict[str, Any]] = None,
 ) -> Any:
     from dracon.merge import merged, MergeKey
@@ -334,7 +334,7 @@ class InterpolableNode(ContextNode):
         self.init_outermost_interpolations = state['init_outermost_interpolations']
         self.referenced_nodes = state['referenced_nodes']
 
-    def evaluate(self, path='/', root_obj=None, engine='asteval', context=None):
+    def evaluate(self, path='/', root_obj=None, engine=DEFAULT_EVAL_ENGINE, context=None):
         context = context or {}
         context = {**self.context, **context}
         newval = evaluate_expression(

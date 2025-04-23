@@ -17,6 +17,7 @@ from typing import (
     Any,
     Protocol,
     Iterator,
+    Literal,
     runtime_checkable,
     get_args,
 )
@@ -613,7 +614,7 @@ def node_repr(
                 ntag = node.tag
             tag = SHORT_TAGS.get(ntag, ntag)
             node_type = type(node).__name__ if not is_deferred else type(node.value).__name__
-            tstring = f'{TYPE_COLOR}{NODE_TYPES.get(node_type,"")}{RESET}'
+            tstring = f'{TYPE_COLOR}{NODE_TYPES.get(node_type, "")}{RESET}'
             nctx = format_context(node)
 
             if isinstance(node, (MappingNode, SequenceNode)) or (
@@ -661,7 +662,7 @@ def node_repr(
 
                 if hasattr(key, 'value'):
                     key_repr = f'{TAG_COLOR}{SHORT_TAGS.get(key.tag, key.tag)}{RESET} {TREE_COLOR}󰌆{KEY_COLOR} {key.value} {RESET}'
-                    keytypestr = f'{TYPE_COLOR}{NODE_TYPES.get(type(key).__name__,"")}{RESET}'
+                    keytypestr = f'{TYPE_COLOR}{NODE_TYPES.get(type(key).__name__, "")}{RESET}'
                     key_repr += f'{keytypestr}'
                 else:
                     key_repr = f'noval(<{type(key)}>{key}) [KEY]'
@@ -719,3 +720,10 @@ def get_inner_type(resolvable_type: Type):
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
+
+
+DEFAULT_EVAL_ENGINE: Literal['asteval', 'eval'] = 'asteval'
+# or if DRACON_EVAL_ENGINE is set in env, use that
+if 'DRACON_EVAL_ENGINE' in os.environ:
+    DEFAULT_EVAL_ENGINE = os.environ['DRACON_EVAL_ENGINE']
+    logger.debug(f"Using eval engine from env: {DEFAULT_EVAL_ENGINE}")
