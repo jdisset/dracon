@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "dracon"
 authors = [{name = "Jean Disset", email = "jdisset@mit.edu"}]
-version = "0.1.0"
+version = "0.1.1"
 description = "A configuration library that extends yaml's alias, anchor and merge system, combined with Pydantic's type hints"
 readme = "README.md"
 requires-python = ">=3.10"
