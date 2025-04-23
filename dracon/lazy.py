@@ -436,8 +436,9 @@ def collect_lazy_by_depth(obj, path=ROOTPATH, seen=None):
                 _collect(field_value, item_path, seen_set)
 
             if hasattr(o, '__dict__'):
+                model_cls = type(o)
                 for attr_name, attr_value in o.__dict__.items():
-                    if attr_name.startswith('_') or attr_name in o.model_fields:
+                    if attr_name.startswith('_') or attr_name in model_cls.model_fields:
                         continue
                     attr_path = p.copy().down(attr_name)
                     _collect(attr_value, attr_path, seen_set)
@@ -699,8 +700,9 @@ def recursive_update_lazy_container(obj, root_obj, current_path, seen=None):
             recursive_update_lazy_container(value, root_obj, new_path, seen)
         # also check __dict__ for non-field lazy attributes
         if hasattr(obj, '__dict__'):
+            model_cls = type(obj)
             for attr_name, value in obj.__dict__.items():
-                if attr_name.startswith('_') or attr_name in obj.model_fields:
+                if attr_name.startswith('_') or attr_name in model_cls.model_fields:
                     continue
                 new_path = current_path + attr_name
                 recursive_update_lazy_container(value, root_obj, new_path, seen)
