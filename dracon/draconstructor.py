@@ -3,31 +3,21 @@ import sys
 import importlib
 from ruamel.yaml.nodes import MappingNode, SequenceNode
 from ruamel.yaml.constructor import ConstructorError
-from typing import Dict, Any, Mapping, List
 from dracon.merge import merged, MergeKey
-import pydantic
-import types
-import pickle
 from dracon.keypath import KeyPath, ROOTPATH
-
-from dracon.interpolation import InterpolationError
 from pydantic import (
     TypeAdapter,
     PydanticSchemaGenerationError,
 )
-
 import typing
 import inspect
 from dracon.utils import ShallowDict, ftrace, deepcopy
 from dracon import dracontainer
-from dracon.dracontainer import Dracontainer
 from dracon.interpolation import outermost_interpolation_exprs, InterpolableNode
 from dracon.lazy import LazyInterpolable, resolve_all_lazy, is_lazy_compatible
 from dracon.resolvable import Resolvable, get_inner_type
 from dracon.deferred import DeferredNode
 from dracon.nodes import reset_tag
-
-
 from typing import (
     Optional,
     Hashable,
@@ -71,7 +61,9 @@ def resolve_type(
         available_module_names = ["__main__"]
     localns = localns or {}
 
-    # Attempt regular import
+    if type_name := localns.get(type_str):
+        return type_name
+
     module_name, type_name = type_str.rsplit(".", 1) if "." in type_str else ("", type_str)
     if module_name:
         available_module_names = [module_name] + available_module_names
@@ -84,7 +76,6 @@ def resolve_type(
         except ImportError:
             continue
 
-    # Fall back to _eval_type
     if '.' in type_str:
         module_name, cname = type_str.rsplit('.', 1)
         try:
@@ -99,7 +90,7 @@ def resolve_type(
 
         return _eval_type(ForwardRef(type_str), globals(), localns)
     except NameError as e:
-        raise ValueError(f"Failed to resolve type {type_str}. {e}") from None
+        raise ValueError(f"failed to resolve type {type_str}. {e}") from None
     except Exception:
         return Resolvable if type_str.startswith('Resolvable[') else Any
 
@@ -132,7 +123,7 @@ def get_all_types_from_module(module):
         try:
             module = importlib.import_module(module)
         except ImportError:
-            print(f"WARNING: Could not import module {module}")
+            print(f"WARNING: could not import module {module}")
             return {}
     return get_all_types(module.__dict__)
 
@@ -231,7 +222,7 @@ class Draconstructor(Constructor):
         try:
             del self.recursive_objects[node]
         except KeyError as e:
-            msg = f"Failed to delete {node} from recursive objects: {e}"
+            msg = f"failed to delete {node} from recursive objects: {e}"
             msg += f"\navailable = \n{self.recursive_objects}"
             logger.error(msg)
 
@@ -256,28 +247,35 @@ class Draconstructor(Constructor):
         try:
             tag_type = resolve_type(tag, localns=self.localns)
 
-            if issubclass(get_origin_type(tag_type), Resolvable):
-                return self.construct_resolvable(node, tag_type)
+            if hasattr(tag_type, 'from_yaml') and callable(tag_type.from_yaml):
+                obj = tag_type.from_yaml(self, node)
+                self.constructed_objects[node] = obj
+                # validation after from_yaml might be needed depending on desired behavior
+                obj = pydantic_validate(tag, obj, self.localns, self._root_node, self._current_path)
+            else:
+                # proceed with default construction and validation logic
+                if issubclass(get_origin_type(tag_type), Resolvable):
+                    return self.construct_resolvable(node, tag_type)
 
-            if isinstance(node, DeferredNode):
-                return node
+                if isinstance(node, DeferredNode):
+                    return node
 
-            if isinstance(node, InterpolableNode):
-                return self.construct_interpolable(node)
+                if isinstance(node, InterpolableNode):
+                    return self.construct_interpolable(node)
 
-            if tag.startswith('!'):
-                reset_tag(node)
-            obj = self.base_construct_object(node, deep=True)
+                if tag.startswith('!'):
+                    reset_tag(node)
+                obj = self.base_construct_object(node, deep=True)
 
-            node.tag = tag  # we don't want to permanently change the tag of the node because it might be referenced elsewhere
+                node.tag = tag  # restore tag
 
-            obj = pydantic_validate(
-                tag,
-                obj,
-                self.localns,
-                root_obj=self._root_node,
-                current_path=self._current_path,
-            )
+                obj = pydantic_validate(
+                    tag,
+                    obj,
+                    self.localns,
+                    root_obj=self._root_node,
+                    current_path=self._current_path,
+                )
 
             if self.resolve_interpolations and is_root:
                 resolve_all_lazy(obj)
@@ -287,7 +285,6 @@ class Draconstructor(Constructor):
         finally:
             self._depth -= 1
 
-    # @ftrace(watch=[])
     def construct_resolvable(self, node, tag_type):
         newnode = deepcopy(node)
         inner_type = get_inner_type(tag_type)
@@ -304,7 +301,6 @@ class Draconstructor(Constructor):
         res = Resolvable(node=newnode, ctor=self, inner_type=inner_type)
         return res
 
-    # @ftrace(watch=[])
     def construct_interpolable(self, node):
         current_loader_context = self.dracon_loader.context if self.dracon_loader else {}
         node_value = node.value
@@ -327,6 +323,7 @@ class Draconstructor(Constructor):
         context['__DRACON_NODES'] = {
             i: Resolvable(node=n, ctor=self.copy()) for i, n in self.referenced_nodes.items()
         }
+        logger.debug(f"context for {node}: {context}")
 
         lzy = LazyInterpolable(
             value=node_value,
