@@ -52,6 +52,7 @@ class Arg:
     help: Optional[str] = None
     arg_type: Optional[Type[Any]] = None
     action: Optional[Callable[[ProgramType, Any], Any]] = None
+    default_str = None
     positional: bool = False
     resolvable: bool = False
     is_file: bool = False
@@ -168,6 +169,8 @@ def _append_arg_details(content: Text, arg: Arg, field: Optional[Any], is_positi
     help_text = arg.help or ""
     arg_type_str = _format_type_str(arg.arg_type, is_file=arg.is_file)
     default = _format_default_value(field.default) if field else None
+    if arg.default_str is not None:  # for custom default strings
+        default = arg.default_str
     required = not _is_optional_field(field) if field else False
     required_marker = (
         Text(" (required)", style="red")
@@ -207,7 +210,8 @@ def _append_arg_details(content: Text, arg: Arg, field: Optional[Any], is_positi
 def _gather_all_args(prg: "Program") -> Tuple[List[Arg], List[Arg]]:
     """gathers top-level and nested args for help display."""
     top_level_args = {a.real_name: a for a in prg._args}
-    options_flags = sorted(top_level_args.values(), key=lambda a: (a.long or a.real_name).lower())
+    # options_flags = sorted(top_level_args.values(), key=lambda a: (a.long or a.real_name).lower())
+    options_flags = top_level_args.values()
     nested_args = []
     processed_models = set()
     queue = [(prg.conf_type, "")]
@@ -248,7 +252,8 @@ def _gather_all_args(prg: "Program") -> Tuple[List[Arg], List[Arg]]:
                 )
             )
 
-    return options_flags, sorted(nested_args, key=lambda a: a.long.lower())
+    # return options_flags, sorted(nested_args, key=lambda a: a.long.lower())
+    return options_flags, nested_args
 
 
 def print_help(prg: "Program", _) -> None:
