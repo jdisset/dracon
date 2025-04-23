@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Jean Disset
+# MIT License - see LICENSE file for details.
+
 ## {{{                          --     imports     --
 from collections.abc import Mapping, Sequence, Set
 from ruamel.yaml.nodes import MappingNode, SequenceNode

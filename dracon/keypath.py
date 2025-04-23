@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Jean Disset
+# MIT License - see LICENSE file for details.
+
 from enum import Enum
 from functools import lru_cache
 from typing import List, Union, Hashable, Any, Optional, TypeVar, Type, Protocol, Tuple, Deque

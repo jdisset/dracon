@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Jean Disset
+# MIT License - see LICENSE file for details.
+
 from typing import Optional, Any
 import re
 from pydantic import BaseModel

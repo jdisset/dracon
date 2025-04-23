@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Jean Disset
+# MIT License - see LICENSE file for details.
+
 from ruamel.yaml.constructor import Constructor
 import sys
 import importlib

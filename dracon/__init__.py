@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Jean Disset
+# MIT License - see LICENSE file for details.
+
 from dracon.utils import node_repr
 
 from dracon.loader import (

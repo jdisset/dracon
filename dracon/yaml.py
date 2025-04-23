@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Jean Disset
+# MIT License - see LICENSE file for details.
+
 import re
 from ruamel.yaml import YAML
 from typing import Any, Optional, Union, Dict

@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Jean Disset
+# MIT License - see LICENSE file for details.
+
 from typing import Any, Dict, List, Union, TypeVar, Generic, Optional, Set
 from collections.abc import MutableMapping, MutableSequence
 from dracon.keypath import ROOTPATH, KeyPath
