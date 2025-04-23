@@ -137,8 +137,10 @@ def _format_type_str(arg_type, is_file: bool = False) -> str:
         return f"Dict[{key_type}, {val_type}]"
 
     type_name = getattr(arg_type, "__name__", str(arg_type))
-    if is_file and type_name == 'str':
-        return "FILE"
+    if is_file:
+        if type_name in ("str", "Path", "os.PathLike"):
+            return "file path"
+        return f"File path to {type_name}"
     if type_name in ('str', 'int', 'float', 'bool'):
         return type_name
     return type_name
@@ -158,8 +160,6 @@ def _format_default_value(value: Any) -> Optional[str]:
 
 def _is_optional_field(field) -> bool:
     """checks if a pydantic field is optional."""
-    # Simplified check: Pydantic considers fields with defaults as non-required,
-    # and handles Union[T, None] automatically.
     return field.default is not PydanticUndefined or field.default_factory is not None
 
 
@@ -201,7 +201,7 @@ def _append_arg_details(content: Text, arg: Arg, field: Optional[Any], is_positi
         content.append(f"    {help_text}\n")
     if default is not None:
         content.append(f"    [default: {default}]\n", style="dim")
-    content.append("\n")  # Add a blank line after each option/argument
+    content.append("\n")
 
 
 def _gather_all_args(prg: "Program") -> Tuple[List[Arg], List[Arg]]:
