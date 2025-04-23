@@ -25,26 +25,6 @@ def reset_tag(node):
         node.tag = DEFAULT_SCALAR_TAG
 
 
-def make_node(value: Any, tag=None, **kwargs):
-    if isinstance(value, Node):
-        if tag is not None:
-            value.tag = tag
-        return value
-
-    if dict_like(value):
-        return DraconMappingNode(
-            tag or DEFAULT_MAP_TAG,
-            value=[(make_node(k), make_node(v)) for k, v in value.items()],
-            **kwargs,
-        )
-    elif list_like(value):
-        return DraconSequenceNode(
-            tag or DEFAULT_SEQ_TAG, value=[make_node(v) for v in value], **kwargs
-        )
-    else:
-        return ScalarNode(tag or DEFAULT_SCALAR_TAG, value, **kwargs)
-
-
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
@@ -65,7 +45,9 @@ class DraconScalarNode(ScalarNode):
         comment=None,
         anchor=None,
     ):
-        ScalarNode.__init__(self, tag, value, start_mark, end_mark, comment=comment, anchor=anchor)
+        ScalarNode.__init__(
+            self, tag, value, start_mark, end_mark, style=style, comment=comment, anchor=anchor
+        )
 
     def __str__(self):
         return node_repr(self)
@@ -127,7 +109,6 @@ class ContextNode(DraconScalarNode):
     def __setstate__(self, state):
         DraconScalarNode.__setstate__(self, state)
         self.context = state['context']
-
 
     def copy(self):
         """Create a shallow copy with the context also shallow copied."""
@@ -468,9 +449,6 @@ class DraconSequenceNode(SequenceNode):
         n.ctag = self.ctag
         n.id = self.id
         return n
-
-    # def __hash__(self):
-    # return hash((tuple(self.value), base_node_hash(self)))
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
