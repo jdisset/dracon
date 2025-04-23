@@ -457,15 +457,33 @@ def load_file(config_path: str | Path, raw_dict=True, **kwargs):
 
 def loads(config_str: str, raw_dict=False, **kwargs):
     """Loads configuration from a YAML string."""
-    loader = DraconLoader(**kwargs)
+    loader_instance = kwargs.pop('loader', None)
+    if loader_instance:
+        loader = loader_instance
+    else:
+        loader = DraconLoader(**kwargs)
     if raw_dict:
         loader.yaml.constructor.yaml_base_dict_type = dict
+        loader.yaml.constructor.yaml_base_list_type = list
+
     return loader.loads(config_str)
 
 
 def dump(data, stream=None, **kwargs):
-    loader = DraconLoader(**kwargs)
-    return loader.dump(data, stream)
+    loader_instance = kwargs.pop('loader', None)
+    if loader_instance:
+        loader = loader_instance
+    else:
+        loader = DraconLoader(**kwargs)
+
+    if stream is None:
+        from io import StringIO
+
+        string_stream = StringIO()
+        loader.yaml.dump(data, string_stream)
+        return string_stream.getvalue()
+    else:
+        return loader.yaml.dump(data, stream)
 
 
 def load_config_to_dict(maybe_config: str | DictLike) -> DictLike:
