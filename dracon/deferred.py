@@ -1,4 +1,3 @@
-## {{{                          --     imports     --
 from typing import Optional, Any, List, Dict, TypeVar, Generic, Type, ForwardRef
 import dracon.utils as utils
 from dracon.utils import ftrace, deepcopy, ser_debug, node_repr
@@ -14,12 +13,10 @@ from dracon.nodes import (
     context_node_hash,
 )
 
-
 from dracon.keypath import KeyPath, ROOTPATH
 from dracon.merge import add_to_context, merged, MergeKey, reset_context
 
 from functools import partial
-from dracon.nodes import make_node
 import logging
 import re
 
@@ -31,14 +28,11 @@ logger = logging.getLogger(__name__)
 
 DraconLoader = ForwardRef('DraconLoader')
 
-##────────────────────────────────────────────────────────────────────────────}}}
-
-## {{{                         --     DeferredNode     --
-
 
 T = TypeVar('T')
 
 
+## {{{                       --     DeferredNode     --
 class DeferredNode(ContextNode, Generic[T]):
     """
     Allows to "pause" the composition of the contained node until construct is called
@@ -58,11 +52,24 @@ class DeferredNode(ContextNode, Generic[T]):
         **kwargs,
     ):
         from dracon.loader import DraconLoader as LoaderCls
+        from dracon.loader import dump_to_node
+
+        if loader is None:
+            self._loader: Optional[LoaderCls] = LoaderCls()
+        else:
+            self._loader = loader
 
         if not isinstance(value, Node):
-            value = make_node(value, **kwargs)
+            try:
+                yaml_string = self._loader.dump(value)
+                comp_res = self._loader.compose_config_from_str(yaml_string)
+                value = comp_res.root
+            except Exception as e:
+                logger.warning(f"Failed to dump value: {e}")
+                value = dump_to_node(value)
 
         self._clear_ctx = []
+        self._original_clear_ctx = clear_ctx
 
         if isinstance(clear_ctx, str):
             clear_ctx = [clear_ctx]
@@ -83,11 +90,6 @@ class DeferredNode(ContextNode, Generic[T]):
             if key in self.context:
                 del self.context[key]
 
-        if loader is None:
-            self._loader: Optional[LoaderCls] = LoaderCls()
-        else:
-            self._loader = loader
-
         self.path = path
         self._full_composition: Optional[CompositionResult] = comp
 
@@ -99,6 +101,7 @@ class DeferredNode(ContextNode, Generic[T]):
         state['_loader'] = self._loader
         state['_full_composition'] = self._full_composition
         state['_clear_ctx'] = self._clear_ctx
+        state['_original_clear_ctx'] = self._original_clear_ctx
         return state
 
     def __setstate__(self, state):
@@ -109,6 +112,7 @@ class DeferredNode(ContextNode, Generic[T]):
         self._loader = state['_loader']
         self._clear_ctx = state['_clear_ctx']
         self._full_composition = state['_full_composition']
+        self._original_clear_ctx = state.get('_original_clear_ctx')
 
     @ftrace(watch=[])
     def update_context(self, context):
@@ -124,7 +128,7 @@ class DeferredNode(ContextNode, Generic[T]):
         from dracon.loader import DraconLoader as LoaderCls
 
         if self._loader is None:
-            self._loader = LoaderCls()
+            self._loader = LoaderCls(context=self.context, deferred_paths=deferred_paths)
 
         assert self._loader is not None, "loader must be set before composing."
         assert self._full_composition is not None, "full composition must be set before composing."
@@ -146,6 +150,7 @@ class DeferredNode(ContextNode, Generic[T]):
         ser_debug(context, operation='deepcopy')
         ser_debug(self.context, operation='deepcopy')
 
+        logger.debug(f"composing deferred node at {self.path}. context={context}")
         merged_context = merged(self.context, context or {}, MergeKey(raw="{<~}[<~]"))
         merged_context = ShallowDict(merged_context)
 
@@ -155,11 +160,6 @@ class DeferredNode(ContextNode, Generic[T]):
             callback=partial(
                 add_to_context, self._loader.context, merge_key=MergeKey(raw='{>~}[>~]')
             )
-        )
-
-        walk_node(
-            node=self.path.get_obj(composition.root),
-            callback=partial(reset_context),
         )
 
         walk_node(
@@ -174,10 +174,6 @@ class DeferredNode(ContextNode, Generic[T]):
     @ftrace(watch=[])
     def construct(self, **kwargs) -> T:  # type: ignore
         composed_node = self.compose(**kwargs)
-        if self._loader is None:
-            from dracon.loader import DraconLoader as LoaderCls
-
-            self._loader = LoaderCls()
         return self._loader.load_node(composed_node)
 
     @property
@@ -208,6 +204,7 @@ class DeferredNode(ContextNode, Generic[T]):
             anchor=self.anchor,
             comment=self.comment,
             context=context,
+            clear_ctx=self._original_clear_ctx,  # use original value for copy
         )
         new_obj._loader = self._loader.copy() if self._loader else None
         if not reroot:
@@ -272,20 +269,18 @@ def make_deferred(
     path=ROOTPATH,
     clear_ctx=None,
     reroot=False,
-    **kwargs,
 ) -> DeferredNode:
     from dracon.utils import ShallowDict
     from dracon.composer import CompositionResult
+    from dracon.loader import dump_to_node
 
     if context is None or clear_ctx is True:
         context = ShallowDict()
     elif not isinstance(context, ShallowDict):
         context = ShallowDict(context)
 
-    node_value = make_node(value, **kwargs)
-
     n = DeferredNode(
-        value=node_value, context=context, path=path, clear_ctx=clear_ctx, loader=loader, comp=None
+        value=value, context=context, path=path, clear_ctx=clear_ctx, loader=loader, comp=None
     )
 
     final_comp = comp
@@ -461,6 +456,3 @@ def process_deferred(comp: CompositionResult, force_deferred_at: List[KeyPath | 
 
     comp.make_map()
     return comp
-
-
-##────────────────────────────────────────────────────────────────────────────}}}
