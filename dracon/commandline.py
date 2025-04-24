@@ -155,7 +155,7 @@ def _format_default_value(value: Any) -> Optional[str]:
         return None
     if isinstance(value, str):
         return f'"{value}"'
-    if isinstance(value, DeferredNode):  # Show inner value for deferred defaults
+    if isinstance(value, DeferredNode):  # show inner value for deferred defaults
         inner = getattr(value, 'value', None)
         return _format_default_value(inner)
     return str(value)
@@ -201,7 +201,7 @@ def _append_arg_details(content: Text, arg: Arg, field: Optional[Any], is_positi
             content.append(f"  {option_str}", style="yellow")  # flags can't be required
             content.append("\n")
 
-    # Indented details
+    # indented details
     if help_text:
         content.append(f"    {help_text}\n")
     if default is not None:
@@ -213,7 +213,7 @@ def _gather_all_args(prg: "Program") -> Tuple[List[Arg], List[Arg]]:
     """gathers top-level and nested args for help display."""
     top_level_args = {a.real_name: a for a in prg._args}
     # options_flags = sorted(top_level_args.values(), key=lambda a: (a.long or a.real_name).lower())
-    options_flags = top_level_args.values()
+    options_flags = list(top_level_args.values())
     nested_args = []
     processed_models = set()
     queue = [(prg.conf_type, "")]
@@ -232,6 +232,7 @@ def _gather_all_args(prg: "Program") -> Tuple[List[Arg], List[Arg]]:
             long_name = (
                 current_prefix.replace('_', '-') if prg.default_auto_dash_alias else current_prefix
             )
+            # check if this specific nested arg long name was already generated (e.g., from another branch)
             if any(a.long == long_name for a in options_flags + nested_args):
                 continue
 
@@ -254,7 +255,6 @@ def _gather_all_args(prg: "Program") -> Tuple[List[Arg], List[Arg]]:
                 )
             )
 
-    # return options_flags, sorted(nested_args, key=lambda a: a.long.lower())
     return options_flags, nested_args
 
 
@@ -262,9 +262,10 @@ def print_help(prg: "Program", _) -> None:
     """prints the help message and exits."""
     positionals = [a for a in prg._args if a.positional]
     options_flags, nested_args = _gather_all_args(prg)
-    all_options_flags = [
-        a for a in options_flags if not a.positional and a.real_name != 'help'
-    ] + nested_args
+    all_options_flags = sorted(
+        [a for a in options_flags if not a.positional and a.real_name != 'help'] + nested_args,
+        key=lambda a: (a.long or a.real_name).lower(),
+    )
     help_arg = next((a for a in options_flags if a.real_name == 'help'), None)
 
     content = Text()
@@ -376,7 +377,7 @@ class Program(BaseModel, Generic[T]):
                 if action_result is not None:
                     conf = action_result
         except ValidationError as e:
-            logger.debug(f"Validation error: {e}")
+            logger.debug(f"validation error: {e}")
             print(file=sys.stderr)  # newline before errors
             for error in e.errors():
                 loc = '.'.join(map(str, error['loc'])) or 'root'
@@ -385,7 +386,7 @@ class Program(BaseModel, Generic[T]):
             print(file=sys.stderr)  # newline after errors
             print_help(self, None)  # exits
         except Exception as e:  # catch other config generation errors
-            print(f"\nError generating configuration: {e}", file=sys.stderr)
+            print(f"\nerror generating configuration: {e}", file=sys.stderr)
             traceback.print_exc()
             sys.exit(1)
 
@@ -416,14 +417,14 @@ class Program(BaseModel, Generic[T]):
         if argstr.startswith('--define.'):
             var_name = argstr[9:]
             if not var_name:
-                raise ArgParseError("Empty variable name after --define.")
+                raise ArgParseError("empty variable name after --define.")
             var_value, i = self._read_value(argv, i)
             defined_vars[var_name] = var_value
         elif argstr.startswith('+'):
             confs_to_merge.append(argstr[1:])
         elif not argstr.startswith('-'):
             if not self._positionals:
-                raise ArgParseError(f"Unexpected positional argument {argstr}")
+                raise ArgParseError(f"unexpected positional argument {argstr}")
             arg_obj = self._positionals.pop()
             raw_args[arg_obj.real_name] = argstr  # positional args always go to raw_args
         else:  # handle options (-s, --long, --nested.key)
@@ -434,7 +435,7 @@ class Program(BaseModel, Generic[T]):
                 real_name = argstr[2:]  # use full dotted name as key for nested_args
                 target_dict = nested_args
             else:
-                raise ArgParseError(f"Unknown argument {argstr}")
+                raise ArgParseError(f"unknown argument {argstr}")
 
             if arg_obj and arg_obj.action:
                 actions.append(arg_obj.action)
@@ -442,11 +443,14 @@ class Program(BaseModel, Generic[T]):
                 target_dict[real_name] = True
             else:  # option requires a value
                 v, i = self._read_value(argv, i)
-                # apply file modifier hint if present
-                modifier = (
-                    (lambda x: f"file:{x}") if (arg_obj and arg_obj.is_file) else (lambda x: x)
-                )
-                target_dict[real_name] = modifier(v)
+                # if is_file=true, prepend '+' to trigger loading, ensure 'file:' scheme
+                if arg_obj and arg_obj.is_file and not v.startswith('+'):
+                    if ':' not in v:
+                        v = f"+file:{v}"
+                    else:
+                        v = f"+{v}"  # allow pkg:path etc. with is_file
+
+                target_dict[real_name] = v
                 logger.debug(f"setting {real_name} to {target_dict[real_name]}")
         return i + 1
 
@@ -455,7 +459,7 @@ class Program(BaseModel, Generic[T]):
         original_arg = argv[i]
         i += 1
         if i >= len(argv) or argv[i].startswith('-'):
-            raise ArgParseError(f"Expected value for argument {original_arg}")
+            raise ArgParseError(f"expected value for argument {original_arg}")
         return argv[i], i
 
     def _load_value_if_ref(self, value: str, loader: DraconLoader) -> Any:
@@ -554,13 +558,17 @@ class Program(BaseModel, Generic[T]):
                 and not isinstance(as_dict[field_name], DeferredNode)
             ):
                 logger.debug(f"wrapping field {field_name} in DeferredNode")
-                as_dict[field_name] = make_deferred(as_dict[field_name], loader=loader)
+                obj_type = get_inner_type(field.annotation)
+                logger.debug(f"deferred field {field_name} obj_type: {obj_type}")
+                as_dict[field_name] = make_deferred(
+                    as_dict[field_name], loader=loader, obj_type=obj_type
+                )
 
         res = self.conf_type.model_validate(as_dict)
 
         resolve_all_lazy(res)  # final resolution pass, mainly for deferred nodes
         if not isinstance(res, self.conf_type):
-            raise ArgParseError(f"Internal error: expected {self.conf_type} but got {type(res)}")
+            raise ArgParseError(f"internal error: expected {self.conf_type} but got {type(res)}")
         return res
 
 
