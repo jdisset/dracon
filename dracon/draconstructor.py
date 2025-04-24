@@ -38,15 +38,16 @@ logger = logging.getLogger("dracon")
 ## {{{                        --     type utils     --
 
 
-def pydantic_validate(tag, value, localns=None, root_obj=None, current_path=None):
-    tag_type = resolve_type(tag, localns=localns or {})
+def pydantic_validate(target_type, value, localns=None, root_obj=None, current_path=None):
+    if isinstance(target_type, str):  # if it's a string, we need to resolve it
+        target_type = resolve_type(target_type, localns=localns)
 
-    if not is_lazy_compatible(tag_type) and tag_type is not Any:
+    if not is_lazy_compatible(target_type) and target_type is not Any:
         resolve_all_lazy(value)
     try:
-        return TypeAdapter(tag_type).validate_python(value)
+        return TypeAdapter(target_type).validate_python(value)
     except PydanticSchemaGenerationError as e:
-        instance = tag_type(value)  # we try a simple construction
+        instance = target_type(value)  # we try a simple construction
         return instance
 
 
@@ -233,7 +234,7 @@ class Draconstructor(Constructor):
             self.deep_construct = old_deep
         return data
 
-    def construct_object(self, node, deep=True):
+    def construct_object(self, node, deep=True, target_type=None):
         current_loader_context = self.dracon_loader.context if self.dracon_loader else {}
 
         self.localns.update(DEFAULT_TYPES)
@@ -248,13 +249,21 @@ class Draconstructor(Constructor):
         tag = node.tag
 
         try:
-            tag_type = resolve_type(tag, localns=self.localns)
+            if target_type is None:
+                tag_type = resolve_type(tag, localns=self.localns)
+            else:
+                tag_type = target_type
 
-            if hasattr(tag_type, 'from_yaml') and callable(tag_type.from_yaml):
+            if (
+                hasattr(tag_type, 'from_yaml')
+                and callable(tag_type.from_yaml)
+                and target_type is None
+            ):
                 obj = tag_type.from_yaml(self, node)
                 self.constructed_objects[node] = obj
-                # validation after from_yaml might be needed depending on desired behavior
-                obj = pydantic_validate(tag, obj, self.localns, self._root_node, self._current_path)
+                obj = pydantic_validate(
+                    tag_type, obj, self.localns, self._root_node, self._current_path
+                )
             else:
                 # proceed with default construction and validation logic
                 if issubclass(get_origin_type(tag_type), Resolvable):
@@ -273,7 +282,7 @@ class Draconstructor(Constructor):
                 node.tag = tag  # restore tag
 
                 obj = pydantic_validate(
-                    tag,
+                    tag_type,
                     obj,
                     self.localns,
                     root_obj=self._root_node,

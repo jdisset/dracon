@@ -18,8 +18,10 @@ from typing import (
     Protocol,
     Iterator,
     Literal,
+    Annotated,
     runtime_checkable,
     get_args,
+    get_origin,
 )
 
 import pickle
@@ -715,8 +717,22 @@ def node_repr(
 def get_inner_type(resolvable_type: Type):
     args = get_args(resolvable_type)
     if args:
+        origin = get_origin(resolvable_type)
+        if origin is Annotated:
+            return get_inner_type(args[0])  # recurse for annotated
         return args[0]
     return Any
+
+
+# def get_inner_type(resolvable_type: Type):
+#     args = get_args(resolvable_type)
+#     if args:
+#         origin = get_origin(resolvable_type)
+#         if origin is Annotated:
+#             return get_inner_type(args[0])  # recurse for annotated
+#         return args[0]
+#     # if no args, it's a base type
+#     return resolvable_type
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}

@@ -177,7 +177,7 @@ class DeferredNode(ContextNode, Generic[T]):
     @ftrace(watch=[])
     def construct(self, **kwargs) -> T:  # type: ignore
         composed_node = self.compose(**kwargs)
-        return self._loader.load_node(composed_node)
+        return self._loader.load_node(composed_node, target_type=self.obj_type)
 
     @property
     def keypath_passthrough(self):
@@ -272,6 +272,7 @@ def make_deferred(
     path=ROOTPATH,
     clear_ctx=None,
     reroot=False,
+    obj_type: Optional[Type] = None,
 ) -> DeferredNode:
     from dracon.utils import ShallowDict
     from dracon.composer import CompositionResult
@@ -283,7 +284,13 @@ def make_deferred(
         context = ShallowDict(context)
 
     n = DeferredNode(
-        value=value, context=context, path=path, clear_ctx=clear_ctx, loader=loader, comp=None
+        value=value,
+        context=context,
+        path=path,
+        clear_ctx=clear_ctx,
+        loader=loader,
+        comp=None,
+        obj_type=obj_type,
     )
 
     final_comp = comp
@@ -303,7 +310,6 @@ def make_deferred(
                     f"could not reroot deferred node at {original_path}: {e}. keeping original composition."
                 )
                 n.path = original_path
-        # else: comp was None, already ROOTPATH
 
     n._loader = loader
 

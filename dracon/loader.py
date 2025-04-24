@@ -79,9 +79,7 @@ def construct(node_or_val, resolve=True, **kwargs):
         n = node_or_val
 
     if resolve:
-        logger.debug(f"Resolving node: {n}")
         n = resolve_all_lazy(n)
-        logger.debug(f"Resolved node: {n}")
 
     return n
 
@@ -194,11 +192,11 @@ class DraconLoader:
             composed_content = compose_config_from_str(self.yaml, content)
         return self.post_process_composed(composed_content)
 
-    def load_node(self, node):
+    def load_node(self, node, target_type: Optional[Type] = None):  # add target_type
         try:
             self.yaml.constructor.referenced_nodes = self.referenced_nodes
             self.yaml.constructor.dracon_loader = self
-            return self.yaml.constructor.construct_document(node)
+            return self.yaml.constructor.construct_object(node, target_type=target_type)
         except Exception as e:
             raise DraconError(f"Error loading config node {str(node)[:200]}...") from e
 
