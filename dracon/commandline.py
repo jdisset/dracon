@@ -58,7 +58,8 @@ class Arg:
     positional: bool = False
     resolvable: bool = False
     is_file: bool = False
-    auto_dash_alias: Optional[bool] = None
+    is_flag: Optional[bool] = None  # none means auto-detect
+    auto_dash_alias: Optional[bool] = None  # none means overridden by the program
 
 
 def _get_arg_resolvable_status(arg_type: Optional[Type[Any]]) -> bool:
@@ -84,6 +85,9 @@ def getArg(program: "Program", name: str, pydantic_field) -> Arg:
         else {}
     )
     final_settings = {**vars(base_arg), **user_arg_settings}
+
+    if final_settings.get('is_flag') is None:
+        final_settings['is_flag'] = final_settings.get('arg_type') is bool
 
     auto_dash = final_settings.get('auto_dash_alias')
     final_settings['long'] = final_settings.get('long') or (
@@ -352,6 +356,7 @@ class Program(BaseModel, Generic[T]):
         raw_args, defined_vars, actions, confs_to_merge = {}, {}, [], []
         nested_args = {}
 
+        # we parse each argument in argv, updating the raw_args and nested_args dicts
         try:
             i = 0
             while i < len(argv):
@@ -404,7 +409,7 @@ class Program(BaseModel, Generic[T]):
         self,
         argv: List[str],
         i: int,
-        raw_args: Dict,
+        raw_args: Dict,  # raw args are
         nested_args: Dict,
         defined_vars: Dict,
         actions: List,
@@ -414,24 +419,28 @@ class Program(BaseModel, Generic[T]):
         argstr = argv[i]
         target_dict, real_name, arg_obj = raw_args, None, None  # default target is raw_args
 
-        if argstr.startswith('--define.'):
+        if argstr.startswith('--define.'):  # it's a variable definition
             var_name = argstr[9:]
             if not var_name:
                 raise ArgParseError("empty variable name after --define.")
             var_value, i = self._read_value(argv, i)
             defined_vars[var_name] = var_value
-        elif argstr.startswith('+'):
+
+        elif argstr.startswith('+'):  # it's an include
             confs_to_merge.append(argstr[1:])
-        elif not argstr.startswith('-'):
+
+        elif not argstr.startswith('-'):  # it's a positional argument
             if not self._positionals:
                 raise ArgParseError(f"unexpected positional argument {argstr}")
             arg_obj = self._positionals.pop()
             raw_args[arg_obj.real_name] = argstr  # positional args always go to raw_args
+
         else:  # handle options (-s, --long, --nested.key)
             arg_obj = self._arg_map.get(argstr)
             if arg_obj:  # known top-level option
+                logger.debug(f"arg_obj: {arg_obj}")
                 real_name = arg_obj.real_name
-            elif argstr.startswith('--') and '.' in argstr:  # nested option
+            elif argstr.startswith('--') and '.' in argstr:
                 real_name = argstr[2:]  # use full dotted name as key for nested_args
                 target_dict = nested_args
             else:
@@ -439,16 +448,15 @@ class Program(BaseModel, Generic[T]):
 
             if arg_obj and arg_obj.action:
                 actions.append(arg_obj.action)
-            elif arg_obj and get_inner_type(arg_obj.arg_type) is bool:
+
+            elif arg_obj and arg_obj.is_flag:  # flag option, no need for value
                 target_dict[real_name] = True
+
             else:  # option requires a value
                 v, i = self._read_value(argv, i)
                 # if is_file=true, prepend '+' to trigger loading, ensure 'file:' scheme
                 if arg_obj and arg_obj.is_file and not v.startswith('+'):
-                    if ':' not in v:
-                        v = f"+file:{v}"
-                    else:
-                        v = f"+{v}"  # allow pkg:path etc. with is_file
+                    v = f"+{v}"  # allow pkg:path etc. with is_file
 
                 target_dict[real_name] = v
                 logger.debug(f"setting {real_name} to {target_dict[real_name]}")
@@ -463,11 +471,10 @@ class Program(BaseModel, Generic[T]):
         return argv[i], i
 
     def _load_value_if_ref(self, value: str, loader: DraconLoader) -> Any:
-        """loads value from file/key reference if value starts with '+'."""
+        """loads value from file/key reference if value starts with +"""
         if isinstance(value, str) and value.startswith('+'):
             try:
-                temp_loader = DraconLoader(context=loader.context.copy())
-                loaded_val = temp_loader.load(value[1:])
+                loaded_val = loader.load(value[1:])
                 logger.debug(f"loaded override value '{value[1:]}' as: {type(loaded_val)}")
                 return loaded_val
             except Exception as e:

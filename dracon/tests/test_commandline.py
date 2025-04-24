@@ -775,8 +775,6 @@ def file_deferred_complex_program():
         context={
             'InnerModelForFileTest': InnerModelForFileTest,
             'OuterModelDeferredFileTest': OuterModelDeferredFileTest,
-            # Ensure construct is available if used within the deferred node itself
-            'construct': construct,
         },
     )
     print("program instance created.")
@@ -789,11 +787,17 @@ def complex_config_files(tmp_path_factory):
     tmp_path = tmp_path_factory.mktemp("complex_cmd_configs")
     print(f"creating complex config files in: {tmp_path}")
 
+    included_name = """
+name: "with ${extra_context} and ${computed_context}"
+"""
+
     inner_content = """
 value: 123
 name: "Loaded from file"
+<<{<+}: !include file:$DIR/included_name
 """
     (tmp_path / "inner_data.yaml").write_text(inner_content)
+    (tmp_path / "included_name.yaml").write_text(included_name)
     print("created inner_data.yaml")
     yield tmp_path
 
@@ -805,16 +809,19 @@ def test_is_file_deferred_with_complex_type(file_deferred_complex_program, compl
     The error should occur during the construct() call if the bug exists.
     """
     print("\n--- test_is_file_deferred_with_complex_type ---")
-    inner_file = complex_config_files / "inner_data.yaml"
+    inner_file = complex_config_files / "inner_data"
     args = [
         "--inner-field",
         str(inner_file),
         "--required-str",
         "some_value",
+        "--define.extra_context",
+        "extra_value",  # define context var
+        "--inner-field.value",  # override inner field value
+        "456",  # override value
     ]
     print(f"parsing args: {args}")
 
-    # Parsing should succeed as the field is a DeferredNode
     config, raw_args = file_deferred_complex_program.parse_args(args)
     print(f"parsed config (pre-construct): {config}")
 
@@ -822,17 +829,15 @@ def test_is_file_deferred_with_complex_type(file_deferred_complex_program, compl
     assert isinstance(config.inner_field, DeferredNode)
     assert config.required_str == "some_value"
 
-    # Construction is where the error is expected if the bug exists
     print("calling construct() on config.inner_field...")
-    # If the bug exists, this construct call will fail internally when
-    # load_node tries to validate the string "+file:..." against InnerModelForFileTest
-    constructed_inner = construct(config.inner_field)
+    constructed_inner = construct(
+        config.inner_field, context={'computed_context': "computed_value"}
+    )
     print(f"constructed inner field: {constructed_inner}")
 
-    # Assertions after successful construction
     assert isinstance(constructed_inner, InnerModelForFileTest)
-    assert constructed_inner.value == 123
-    assert constructed_inner.name == "Loaded from file"
+    assert constructed_inner.value == 456
+    assert constructed_inner.name == "with extra_value and computed_value"
     print("test_is_file_deferred_with_complex_type PASSED")
 
 
@@ -856,50 +861,25 @@ source_name: "Manually Loaded"
     yield tmp_path
 
 
-# def test_positional_args_with_options_and_file(complex_program, config_files):
-#     """test positional arguments mixed with options and loading a file."""
-#     print("\n--- test_positional_args_with_options_and_file ---")
-#     complex_conf = config_files / "complex_cli.yaml"
-#     args = [
-#         f"+{complex_conf}",  # load file first
-#         "-v",  # set verbose flag (overrides file)
-#         "my_input.dat",  # first positional
-#         "/path/to/output",  # second positional
-#         "optional_value",  # third (optional) positional
-#     ]
-#     print(f"parsing args: {args}")
-#     config, raw_args = complex_program.parse_args(args)
-#     print(f"parsed config: {config}")
-#     print(f"raw args dict: {raw_args}")
-#
-#     assert isinstance(config, ComplexCliConfig)
-#     assert config.input_file == "my_input.dat"
-#     assert config.output_dir == "/path/to/output"
-#     assert config.optional_pos == "optional_value"
-#     assert config.verbose is True  # from cli flag -v
-#     assert config.nested_list.items == ["item_file_A", "item_file_B"]  # from file
-#
-#
-# def test_list_arguments(complex_program, config_files):
-#     """test providing list arguments via cli and merging."""
-#     print("\n--- test_list_arguments ---")
-#     complex_conf = config_files / "complex_cli.yaml"
-#     args = [
-#         f"+{complex_conf}",  # load file with tags and nested list
-#         "--tags",
-#         "cli_tag1",  # replace tags list
-#         "--tags",
-#         "cli_tag2",
-#         "--nested-list.items",
-#         "itemC",  # replace nested list items
-#         "--nested-list.items",
-#         "itemD",
-#         "input.txt",  # positional
-#         "output_dir",  # positional
-#     ]
-#     print(f"parsing args: {args}")
-#     config, _ = complex_program.parse_args(args)
-#     print(f"parsed config: {config}")
-#
-#     assert config.tags == ["cli_tag1", "cli_tag2"]  # cli overrides file
-#     assert config.nested_list.items == ["itemC", "itemD"]  # cli overrides file
+def test_positional_args_with_options_and_file(complex_program, config_files):
+    """test positional arguments mixed with options and loading a file."""
+    print("\n--- test_positional_args_with_options_and_file ---")
+    complex_conf = config_files / "complex_cli.yaml"
+    args = [
+        f"+{complex_conf}",  # load file first
+        "-v",  # set verbose flag (overrides file)
+        "my_input.dat",  # first positional
+        "/path/to/output",  # second positional
+        "optional_value",  # third (optional) positional
+    ]
+    print(f"parsing args: {args}")
+    config, raw_args = complex_program.parse_args(args)
+    print(f"parsed config: {config}")
+    print(f"raw args dict: {raw_args}")
+
+    assert isinstance(config, ComplexCliConfig)
+    assert config.input_file == "my_input.dat"
+    assert config.output_dir == "/path/to/output"
+    assert config.optional_pos == "optional_value"
+    assert config.verbose is True  # from cli flag -v
+    assert config.nested_list.items == ["item_file_A", "item_file_B"]  # from file
