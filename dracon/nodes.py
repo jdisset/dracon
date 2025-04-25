@@ -339,6 +339,18 @@ class DraconMappingNode(MappingNode):
         self.anchor = state['anchor']
         self.map = state['map']
 
+    @classmethod
+    def make_empty(cls, tag: Any = DEFAULT_MAP_TAG, start_mark: Any = None, end_mark: Any = None):
+        return cls(
+            tag=tag,
+            value=[],
+            start_mark=start_mark,
+            end_mark=end_mark,
+            flow_style=None,
+            comment=None,
+            anchor=None,
+        )
+
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
