@@ -40,6 +40,5 @@ This is where Dracon's CLI integrates seamlessly with its configuration loading 
 - **Field Names:** `my_field_name` becomes `--my-field-name` by default (can be customized with `Arg(long=...)`).
 - **Types:** Pydantic types determine expected input (str, int, float, bool). `bool` fields typically become flags (`--verbose`).
 - **Nested Models:** Fields that are Pydantic models allow nested overrides using dot notation (`--database.port 5433`). Dracon handles constructing the nested dictionary. If the nested argument itself is marked with `Arg(is_file=True)`, passing a file path will load that file's content _into_ that nested structure.
-- **Lists:** Arguments typed as `List[T]` can often accept multiple values on the CLI (behavior might depend on the underlying argparse/equivalent implementation details, but typically `--tags tag1 --tags tag2` or `--tags tag1 tag2`). Merging lists from files follows Dracon's merge rules.
 
 This integration means your CLI automatically respects your defined configuration structure, types, defaults, and validation rules, while also benefiting from Dracon's powerful file loading, merging, and interpolation features.

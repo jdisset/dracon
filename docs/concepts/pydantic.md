@@ -1,6 +1,4 @@
-# Concepts: Pydantic Integration
-
-Dracon's integration with Pydantic is a cornerstone feature, enabling type-safe, validated, and structured configuration management.
+# Concepts: Pydantic Integration & Custom Types
 
 ## The Role of Pydantic
 
@@ -26,6 +24,13 @@ Pydantic provides data validation and settings management using Python type anno
     - If validation succeeds, Pydantic creates an instance of `YourModel`.
     - If validation fails, a `ValidationError` is raised, typically surfaced by Dracon.
 6.  **Result:** The constructed and validated Pydantic model instance becomes the value associated with the key in the final configuration object returned by Dracon.
+
+!!! tip
+    The type tag `!YourModelName` will check for this class in the context dictionary. You can also use a full path to the type (e.g., `!mypackage.models.Server`) if you prefer, which lifts the type-in-context requirement. 
+    
+
+!!! note
+    You don't _have_ to use pydantic models with Dracon. They just work out-of-the box. However, you can also use your custom types. By default Dracon will try to feed the dictionnary of the YAML node to the constructor of your custom type. If you want to use a different approach, you can define your own representer and constructor for your custom type. See ruamel.yaml's doc for more information on that.
 
 ```python
 # models.py

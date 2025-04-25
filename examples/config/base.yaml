@@ -1,5 +1,3 @@
-# examples/config/base.yaml
-
 # Optional: You can tag the root with the Pydantic model,
 # although it's often done in the loading script or CLI definition.
 # !AppConfig

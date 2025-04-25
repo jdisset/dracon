@@ -49,11 +49,11 @@ markdown_extensions:
   # Extensions for better navigation and structure
   - toc:
       permalink: true
-  - mkdocs-section-index # Allows clicking on sections in nav
 
 plugins:
   - search
-  - section-index # Ensure plugin is listed
+  - section-index
+  - include-markdown
 
 nav:
   - "Introduction": "index.md"

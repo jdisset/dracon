@@ -23,14 +23,17 @@ Dracon offers two engines for evaluating the Python expressions within `${...}` 
 
 1.  **`asteval` (Default & Recommended):**
 
-    - **Mechanism:** Uses the [asteval library](https://asteval.readthedocs.io/en/latest/). `asteval` parses the expression into an Abstract Syntax Tree (AST) and evaluates it in a _sandboxed_ environment.
+    - **Mechanism:** Uses the [asteval library](https://lmfit.github.io/asteval/). `asteval` parses the expression into an Abstract Syntax Tree (AST) and evaluates it in a _sandboxed_ environment.
     - **Safety:** Significantly safer than `eval()`. It prevents the execution of arbitrary code that could perform dangerous operations like filesystem access (`import os; os.remove(...)`), network calls, or accessing sensitive system information. It provides a controlled environment with access only to specified symbols (context variables, safe built-ins).
-    - **Limitations:** Might not support every single Python syntax feature or complex metaclasses, but covers the vast majority of use cases needed for configuration.
+    - **Limitations:** Might not support every single Python syntax feature or complex metaclasses, but covers the vast majority of use cases needed for configuration. Also I (Jean) couldn't get it to output a clean traceback that shows where in your code an error occured if an expression fails. (If you know how to do this, please let us know)
 
 2.  **`eval` (Use with Extreme Caution):**
     - **Mechanism:** Uses Python's built-in `eval()` function.
-    - **Safety:** **Potentially dangerous.** `eval()` can execute _any_ arbitrary Python code provided in the expression string. If your YAML files come from untrusted sources or could be manipulated, using `eval()` opens a significant security vulnerability. Malicious code could be injected and executed with the permissions of your application.
-    - **Use Case:** Only suitable if you have _absolute_ trust in the source and integrity of your configuration files and require features not supported by `asteval`.
+    - **Safety:** Well, `eval()` can execute _any_ arbitrary Python code provided in the expression string. If your YAML files come from untrusted sources or could be manipulated, using `eval()` opens a significant security vulnerability. Malicious code could be injected and executed with the permissions of your application.
+    - **Use Case:** Only suitable if you have _absolute_ trust in the source and integrity of your configuration files and require features not supported by `asteval`. Can give nice tracebacks if an expression fails.
+
+    !!! warning
+        **Security Risk:** Choosing `eval` as the interpolation engine can lead to severe security vulnerabilities if the configuration files are not fully trusted. Avoid using `eval()` unless you are certain of the source and content of the configuration files. Use `eval` at your own risk.
 
 **Choosing the Engine:**
 
@@ -38,14 +41,16 @@ Dracon offers two engines for evaluating the Python expressions within `${...}` 
 from dracon import DraconLoader
 
 # Default, safe engine
-loader_safe = DraconLoader(enable_interpolation=True) # interpolation_engine='asteval'
+loader_safe = DraconLoader() # interpolation_engine='asteval'
 
-# Use Python's raw eval (DANGEROUS if config is untrusted)
-loader_raw = DraconLoader(enable_interpolation=True, interpolation_engine='eval')
+# Use Python's raw eval (DANGEROUS if config is untrusted, or if you're not careful)
+loader_raw = DraconLoader(interpolation_engine='eval')
 
 # Disable interpolation entirely
 loader_no_interp = DraconLoader(enable_interpolation=False)
 ```
+
+There's also a `DRACON_EVAL_ENGINE` environment variable that can be set to `asteval` or `eval` to control the default engine.
 
 **Recommendation:** Stick with the default `asteval` engine unless you have a very specific, well-understood need for `eval` and fully control the configuration sources.
 
