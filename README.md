@@ -19,10 +19,9 @@ Dracon will automatically handle argument parsing, config file loading and layer
 You can extend, override, or merge any part - even deeply nested - of your app's configuration at runtime, either from inline command-line arguments (`-k value`, `--nested.arg 42`) or from sources like files (`+localfile.yaml`, `--nested.object +from/file`, `--arg +from/file@specific.key`,...).
 A detailed help and usage message is automatically generated. You can distribute your app with some default configuration values and files, and the user can override any part with their own.
 
-<figure markdown>
-  ![CLI Help Screenshot](https://raw.githubusercontent.com/jdisset/dracon/dev/docs/assets/cli_help.png)
-  <figcaption>Auto-generated CLI Help</figcaption>
-</figure>
+##### Auto-generated CLI Help:
+
+<img src="https://raw.githubusercontent.com/jdisset/dracon/dev/docs/assets/cli_help.png" alt="CLI help screenshot" width="350"/>
 
 #### Add (Lazy-Evaluated) Expressions
 
