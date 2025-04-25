@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Annotated
+from typing import Annotated, Literal, Optional
 from dracon import Arg, DeferredNode, construct
 
 
@@ -15,10 +15,18 @@ class DatabaseConfig(BaseModel):
 class AppConfig(BaseModel):
     """Main application configuration model."""
 
+    input_path: Annotated[
+        str,
+        Arg(help="Example of positional argument.", positional=True),
+    ] = './'
+
     environment: Annotated[
-        str, Arg(short='e', required=True, help="Deployment environment (dev, staging, prod).")
+        Literal['dev', 'prod', 'test'],
+        Arg(short='e', help="Deployment environment."),
     ]
-    log_level: Annotated[str, Arg(help="Logging level (e.g., INFO, DEBUG).")] = "INFO"
+    log_level: Annotated[
+        Literal["DEBUG", "INFO", "WARNING", "ERROR"], Arg(help="Logging level")
+    ] = "INFO"
     workers: Annotated[int, Arg(help="Number of worker processes.")] = 1
     # Nested model, can be populated from YAML/CLI. Uses default_factory for Pydantic v2 best practice.
     database: Annotated[DatabaseConfig, Arg(help="Database configuration.")] = Field(

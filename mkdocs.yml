@@ -54,6 +54,7 @@ plugins:
   - search
   - section-index
   - include-markdown
+  - print-site
 
 nav:
   - "Introduction": "index.md"
