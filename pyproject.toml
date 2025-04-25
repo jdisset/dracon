@@ -28,7 +28,8 @@ docs = [
     "mkdocs-macros-plugin",
     "mkdocs-literate-nav",
     "mkdocs-section-index",
-	"mkdocs-include-markdown-plugin"
+	"mkdocs-include-markdown-plugin",
+	"mkdocs-print-site-plugin"
 ]
 
 

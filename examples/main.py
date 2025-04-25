@@ -28,31 +28,24 @@ if __name__ == "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)  # Change CWD to script dir for relative paths
 
-    print(f"Running Dracon example from: {script_dir}")
-    print(f"Arguments received: {sys.argv[1:]}")
+    print()
+    print()
+    print()
+    # program.parse_args handles:
+    # 1. Parsing known arguments based on AppConfig and Arg annotations.
+    # 2. Identifying config files specified with '+' (e.g., +config/prod.yaml).
+    # 3. Loading and merging these config files sequentially.
+    # 4. Applying direct CLI overrides (e.g., --workers 8).
+    # 5. Handling --define.VAR=value for context variables.
+    # 6. Validating the final merged configuration against AppConfig.
+    # 7. Returning the validated AppConfig instance and a dict of raw args.
+    cli_config, raw_args = program.parse_args(sys.argv[1:])
 
-    try:
-        # program.parse_args handles:
-        # 1. Parsing known arguments based on AppConfig and Arg annotations.
-        # 2. Identifying config files specified with '+' (e.g., +config/prod.yaml).
-        # 3. Loading and merging these config files sequentially.
-        # 4. Applying direct CLI overrides (e.g., --workers 8).
-        # 5. Handling --define.VAR=value for context variables.
-        # 6. Validating the final merged configuration against AppConfig.
-        # 7. Returning the validated AppConfig instance and a dict of raw args.
-        cli_config, raw_args = program.parse_args(sys.argv[1:])
+    print("\n--- Successfully Parsed Config ---")
+    # cli_config is now a fully populated and validated AppConfig instance
+    # ready to be used by the application.
+    cli_config.process_data()
 
-        print("\n--- Successfully Parsed Config ---")
-        # cli_config is now a fully populated and validated AppConfig instance
-        # ready to be used by the application.
-        cli_config.process_data()
+    print("\n--- Raw Arguments Provided ---")
+    print(raw_args)  # Shows the arguments as parsed by the CLI layer
 
-        print("\n--- Raw Arguments Provided ---")
-        print(raw_args)  # Shows the arguments as parsed by the CLI layer
-
-    except Exception as e:
-        print(f"\nError during execution: {e}", file=sys.stderr)
-        # Consider uncommenting to print help on error:
-        # print("\n")
-        # program.print_help(None)
-        sys.exit(1)

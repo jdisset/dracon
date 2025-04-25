@@ -8,10 +8,29 @@ Dracon is a modular configuration system and command-line interface (CLI) genera
 
 Need to juggle static config files, environment variables, complex overrides, and boilerplate CLI argument parsing? Dracon provides a unified approach:
 
-- **Compose Your Configurations:** Load, merge, reuse and include configurations from whole YAML files or parts of them, from packages, environment variables or custom sources, using a powerful merge and include syntax (`!include`, `<<{dict_opts}[list_opts]@path.to.subey`). Manipulate the configuration graph with instructions like `!each(...)` and `!if`.
-- **Add (Lazy-Evaluated) Expressions:** Embed Python expressions (`${...}`) for lazy evaluation, reference other keys (`@path`), or use immediate evaluation (`$(...)`) for values computed at runtime based on context or other configuration parts. Define scoped and global variables with `!define` and `!set_default`.
-- **Define Configuration Once:** Use Pydantic models for type-safe configuration structures (`!MyModel`). Dracon will handle the conversion between YAML and Pydantic seamlessly.
-- **Generate CLIs Automatically:** Create elegant, robust, type-safe CLIs that leverage all of dracon's features, and is generated directly from your app class. Dracon will automatically handle argument parsing, config file loading and layering, positional arguments, flags and overrides. You can extend, override, or merge any part - even deeply nested - of your app's configuration at runtime, either from inline command-line arguments (`-k value`, `--nested.arg 42`) or from sources like files (`+localfile.yaml`, `--nested.object +from/file`, `--arg +from/file@specific.key`,...). A detailed help and usage message is automatically generated. You can distribute your app with some default configuration values and files, and the user can override any part with their own.
+#### Compose Your Configurations
+
+Load, merge, reuse and include configurations from whole YAML files or parts of them, from packages, environment variables or custom sources, using a powerful merge and include syntax (`!include`, `<<{dict_opts}[list_opts]@path.to.subey`). Manipulate the configuration graph with instructions like `!each(...)` and `!if`.
+
+#### Generate CLIs Automatically
+
+Create elegant, robust, type-safe CLIs that leverage all of dracon's features, and is generated directly from your app class.
+Dracon will automatically handle argument parsing, config file loading and layering, positional arguments, flags and overrides.
+You can extend, override, or merge any part - even deeply nested - of your app's configuration at runtime, either from inline command-line arguments (`-k value`, `--nested.arg 42`) or from sources like files (`+localfile.yaml`, `--nested.object +from/file`, `--arg +from/file@specific.key`,...).
+A detailed help and usage message is automatically generated. You can distribute your app with some default configuration values and files, and the user can override any part with their own.
+
+<figure markdown>
+  ![CLI Help Screenshot](assets/cli_help.png)
+  <figcaption>Auto-generated CLI Help</figcaption>
+</figure>
+
+#### Add (Lazy-Evaluated) Expressions
+
+Embed Python expressions (`${...}`) for lazy evaluation, reference other keys (`@path`), or use immediate evaluation (`$(...)`) for values computed at runtime based on context or other configuration parts. Define scoped and global variables with `!define` and `!set_default`.
+
+#### Define Configuration Once
+
+Use Pydantic models for type-safe configuration structures (`!MyModel`). Dracon will handle the conversion between YAML and Pydantic seamlessly.
 
 ## Quick Start: CLI
 
@@ -20,9 +39,8 @@ Let's build a simple application configured via YAML and CLI arguments.
 **1. Define Models (`models.py`):**
 
 ```python
-# models.py
 from pydantic import BaseModel, Field
-from typing import Annotated
+from typing import Annotated, Literal
 from dracon import Arg, DeferredNode, construct
 
 class DatabaseConfig(BaseModel):
@@ -32,13 +50,13 @@ class DatabaseConfig(BaseModel):
     password: str
 
 class AppConfig(BaseModel):
-    environment: Annotated[str, Arg(short='e', required=True, help="Deployment env.")]
-    log_level: Annotated[str, Arg(help="Logging level.")] = "INFO"
-    workers: Annotated[int, Arg(help="Number of worker processes.")] = 1
-    # Nested model, can be populated from YAML/CLI
+
+    input_path: Annotated[Optionalpstr, Arg(help="Example of positional argument.", positional=True), ]
     database: Annotated[DatabaseConfig, Arg(help="Database conf.")] = Field(default_factory=DatabaseConfig) # Use default_factory for nested models
-    # Output path depends on runtime context (e.g., based on other config)
-    output_path: Annotated[DeferredNode[str], Arg(help="Path for output files.")]
+    environment: Annotated[Literal['dev','prod','test'], Arg(short='e', help="Deployment env.")] # required arg since no default
+    log_level: Annotated[Literal["DEBUG", "INFO", "WARNING", "ERROR"], Arg(help="Logging level")] = "INFO"
+    workers: Annotated[int, Arg(help="Number of worker processes.")] = 1
+    output_path: Annotated[DeferredNode[str], Arg(help="Path for output files.")] # Output path depends on runtime context (e.g., based on other config)
 
     def process_data(self):
         # Example method using the config
@@ -71,8 +89,7 @@ database:
   username: !include file:$DIR/db_user.secret # $DIR contains the path to the current file's directory
   password: !include env:DB_PASS # Load from environment variable DB_PASS
 
-# Output path uses interpolation needing runtime context
-output_path: "/data/${computed_runtime_value}/output"
+output_path: "/data/${computed_runtime_value}/output" # Output path uses interpolation needing runtime context
 ```
 
 **3. Production Overrides (`config/prod.yaml`):**
@@ -82,15 +99,11 @@ environment: production # Set environment directly
 log_level: WARNING
 workers: 4
 
-database:
-  # Only override specific DB fields for prod
+database: # Only override specific DB fields for prod
   host: "db.prod.svc.cluster.local"
   username: prod_db_user
 
-# Include and merge base config after defining overrides.
-# <<{<+}: means: merge recursively ({+}), new values (from base.yaml here) win (<).
-# If we wanted prod.yaml values to win, we'd use {>+}.
-<<{<+}: !include file:base.yaml
+<<: !include file:base.yaml # merge base
 ```
 
 **4. Secret File (`config/db_user.secret`):**
@@ -104,44 +117,20 @@ base_user
 ```python title="main.py"
 import sys
 from dracon import make_program
-from models import AppConfig, DatabaseConfig # Make sure models are importable
 
-# Create the CLI program from the Pydantic model
-# Dracon automatically generates args for 'environment', 'log_level', 'workers', etc.
-# and handles nested fields like 'database.host'
-program = make_program(
-    AppConfig,
-    name="my-cool-app",
-    description="My cool application using Dracon.",
-    # Provide models to Dracon's context so it can construct them from YAML tags
-    context={'AppConfig': AppConfig, 'DatabaseConfig': DatabaseConfig}
-)
+program = make_program(AppConfig, name="my-cool-app", description="My cool application using Dracon.")
 
 if __name__ == "__main__":
-    try:
-        # Parse args, load files starting with '+', apply overrides
-        cli_config, raw_args = program.parse_args(sys.argv[1:])
-        # cli_config is now a fully populated and validated AppConfig instance
-        cli_config.process_data() # Use the final config object
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        # program.print_help() # Optionally print help on error
-        sys.exit(1)
+    cli_config, raw_args = program.parse_args(sys.argv[1:])
+    # cli_config is now a fully populated and validated AppConfig instance
+    cli_config.process_data() # Use the final config object
 ```
 
 **6. Running the CLI:**
 
 ```bash
-# Show help message (includes descriptions from Arg and Pydantic)
-$ python main.py --help
-```
+$ python main.py --help # Show help
 
-<figure markdown>
-  ![CLI Help Screenshot](assets/cli_help.png)
-  <figcaption>Auto-generated CLI Help</figcaption>
-</figure>
-
-```bash
 # Run with development environment (required arg). Needs DB_PASS env var.
 $ export DB_PASS="dev_secret"
 $ python main.py -e dev
