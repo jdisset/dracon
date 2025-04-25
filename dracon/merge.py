@@ -219,7 +219,14 @@ DEFAULT_ADD_TO_CONTEXT_MERGE_KEY = MergeKey(raw='<<{~<}[~<]')
 
 
 def merged(existing: Any, new: Any, k: MergeKey = DEFAULT_ADD_TO_CONTEXT_MERGE_KEY) -> DictLike:
+    from dracon.deferred import DeferredNode
+
     def merge_value(v1: Any, v2: Any, depth: int = 0) -> Any:
+        if type(v1) is DeferredNode:
+            return merge_value(v1.value, v2, depth)
+        if type(v2) is DeferredNode:
+            return merge_value(v1, v2.value, depth)
+
         if type(v1) is type(v2) and hasattr(v1, 'merged_with') and hasattr(v2, 'merged_with'):
             return v1.merged_with(v2, depth + 1)
         elif dict_like(v1) and dict_like(v2):
@@ -265,13 +272,16 @@ def merged(existing: Any, new: Any, k: MergeKey = DEFAULT_ADD_TO_CONTEXT_MERGE_K
     return merge_value(existing, new)
 
 
-def add_to_context(context, item, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
-    if hasattr(item, 'context'):
-        item.context = context_add(item.context, context, merge_key)
-    if hasattr(item, '_clear_ctx') and item._clear_ctx:
-        for k in item._clear_ctx:
-            if k in item.context:
-                del item.context[k]
+def add_to_context(new_context, existing_item, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
+    """
+    Add context to the item context, if it exists.
+    """
+    if hasattr(existing_item, 'context'):
+        existing_item.context = context_add(existing_item.context, new_context, merge_key)
+    if hasattr(existing_item, '_clear_ctx') and existing_item._clear_ctx:
+        for k in existing_item._clear_ctx:
+            if k in existing_item.context:
+                del existing_item.context[k]
 
 
 @ftrace(inputs=False, output=False, watch=[])
@@ -284,8 +294,8 @@ def reset_context(item, ignore_dracon_namespace=True):
         item.context = newctx
 
 
-def context_add(base, newcontext, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
-    m = merged(base, newcontext, merge_key)
+def context_add(existing, new, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
+    m = merged(existing, new, merge_key)
     return m
 
 
