@@ -78,7 +78,6 @@ class DraconRepresenter(RoundTripRepresenter):
     def represent_str(self, data: str) -> Node:
         # explicitly handle strings to control style
         style = '|' if '\n' in data else None
-        logger.debug(f"representing string, style={style}")
         return self.represent_scalar('tag:yaml.org,2002:str', data, style=style)
 
     def represent_dracon_mapping(self, data: DraconMapping) -> Node:
@@ -107,14 +106,10 @@ class DraconRepresenter(RoundTripRepresenter):
         return self.represent_data(data.node)
 
     def represent_deferred_node(self, data: DeferredNode) -> Node:
-        logger.debug(f"represent_deferred_node called for: {type(data.value)}")
         # represent the inner value node first
         node = self.represent_data(data.value)
         # calculate and set the specific deferred tag
         node.tag = self._get_deferred_tag(data, node.tag)
-        logger.debug(
-            f"represent_deferred_node returning node type: {type(node)} with final tag: {node.tag}"
-        )
         return node
 
     # --- representers for multi types (protocols/subclasses) ---
@@ -123,12 +118,10 @@ class DraconRepresenter(RoundTripRepresenter):
         return data.dracon_dump_to_node(self)
 
     def represent_pydantic_model(self, data: BaseModel) -> Node:
-        logger.debug(f"representing pydantic model: {type(data)}")
         tag = self._get_pydantic_tag(data)
 
         # get serialized values to respect serializers and exclusion rules
         dump_dict = data.model_dump(mode='python', exclude_unset=self.exclude_defaults)
-        logger.debug(f"fields to include (from model_dump keys): {dump_dict.keys()}")
 
         mapping_value_pairs = []
         for field_name, serialized_value in dump_dict.items():
@@ -140,13 +133,11 @@ class DraconRepresenter(RoundTripRepresenter):
             value_to_represent = (
                 original_value if isinstance(original_value, BaseModel) else serialized_value
             )
-            logger.debug(f"field '{field_name}': representing type {type(value_to_represent)}")
             node_value = self.represent_data(value_to_represent)
             mapping_value_pairs.append((node_key, node_value))
 
         flow_style = self.default_flow_style  # can be None
         node = self.represent_mapping(tag, mapping_value_pairs, flow_style=flow_style)
-        logger.debug(f"represented pydantic model {type(data)} as node with tag: {node.tag}")
         return node
 
     # --- override base representers to return dracon nodes ---
@@ -157,7 +148,6 @@ class DraconRepresenter(RoundTripRepresenter):
         final_style = style if style is not None else self.default_style
         tag_str = str(tag) if isinstance(tag, Tag) else tag
         node = DraconScalarNode(tag_str, value, style=final_style, anchor=anchor)
-        logger.debug(f"represent_scalar creating node with style: {final_style}, tag: {tag_str}")
         if self.alias_key is not None:
             self.represented_objects[make_hashable(self.alias_key)] = node
         return node
@@ -228,7 +218,6 @@ class DraconRepresenter(RoundTripRepresenter):
         if is_aliasable and not self.ignore_aliases(data):
             alias_key = id(data)
             if alias_key in self.represented_objects:
-                logger.debug(f"found alias for {type(data)} (id: {alias_key})")
                 return self.represented_objects[alias_key]
             self.object_keeper.append(data)
             self.alias_key = alias_key
@@ -261,7 +250,6 @@ class DraconRepresenter(RoundTripRepresenter):
                                 break
 
                 if representer_func:
-                    logger.debug(f"using representer: {representer_func.__name__} for {data_type}")
                     node = representer_func(self, data)
                 else:
                     # fallback to ruamel's default dispatch
@@ -317,10 +305,6 @@ class DraconRepresenter(RoundTripRepresenter):
 
         if not isinstance(node, (DraconScalarNode, DraconMappingNode, DraconSequenceNode)):
             raise RepresenterError(f"Final node is not a DraconNode subtype: {type(node)}")
-
-        logger.debug(
-            f"represent_data returning node type: {type(node)} with tag: {getattr(node, 'tag', 'N/A')} style: {getattr(node, 'style', 'N/A')}"
-        )
 
         return node
 
