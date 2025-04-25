@@ -21,7 +21,7 @@ A detailed help and usage message is automatically generated. You can distribute
 
 ##### Auto-generated CLI Help:
 
-<img src="https://raw.githubusercontent.com/jdisset/dracon/dev/docs/assets/cli_help.png" alt="CLI help screenshot" width="350"/>
+<img src="https://raw.githubusercontent.com/jdisset/dracon/dev/docs/assets/cli_help.png" alt="CLI help screenshot" width="500"/>
 
 #### Add (Lazy-Evaluated) Expressions
 
