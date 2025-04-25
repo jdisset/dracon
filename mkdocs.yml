@@ -5,6 +5,8 @@ repo_name: jdisset/dracon
 
 theme:
   name: material
+  logo: docs/dracon_logo.svg
+  favicon: docs/dracon_logo.svg
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -23,6 +25,7 @@ theme:
   features:
     - navigation.sections
     - navigation.top
+    - navigation.indexes # Enable section index pages
     - search.highlight
     - search.share
     - search.suggest
@@ -37,25 +40,58 @@ markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
-  - pymdownx.snippets
+  - pymdownx.snippets:
+      base_path: "." # Allow including files like examples
   - pymdownx.tabbed:
       alternate_style: true
   - attr_list
   - md_in_html
+  # Extensions for better navigation and structure
+  - toc:
+      permalink: true
+  - mkdocs-section-index # Allows clicking on sections in nav
+
+plugins:
+  - search
+  - section-index # Ensure plugin is listed
 
 nav:
   - "Introduction": "index.md"
-  - "Core Concepts":
-      - "Loading Configuration": "loading.md"
-      - "Includes (Modularity)": "includes.md"
-      - "Interpolation (Dynamic Values)": "interpolation.md"
-      - "Merging Configurations": "merging.md"
-      - "Instructions (Composition Logic)": "instructions.md"
-      - "Working with Types": "types.md"
-  - "Advanced Features":
-      - "Deferred Nodes": "deferred.md"
-      - "Resolvable Values": "resolvable.md"
-      - "KeyPaths": "keypaths.md"
-  - "Command-Line Interfaces": "cli.md"
-  # - 'API Reference': 'api.md'
-  # - 'Recipes': 'recipes.md'
+  - "Getting Started":
+      - "Tutorial: Building a CLI App": "tutorials/cli_app.md"
+  - "How-To Guides":
+      - guides/index.md # Section index page
+      - "Load Configuration Files": "guides/load-config.md"
+      - "Use Interpolation": "guides/use-interpolation.md"
+      - "Merge Configurations": "guides/merge-configs.md"
+      - "Include Files and Variables": "guides/use-includes.md"
+      - "Use Pydantic Models": "guides/use-pydantic.md"
+      - "Customize CLI Arguments": "guides/customize-cli.md"
+      - "Handle Secrets": "guides/handle-secrets.md"
+      - "Use Deferred Execution": "guides/use-deferred.md"
+  - "Conceptual Guides":
+      - concepts/index.md # Section index page
+      # - "Core Principles": "concepts/principles.md" # Maybe combine into others
+      - "Loading and Context": "concepts/loading.md"
+      - "Composition: Includes & Merges": "concepts/composition.md"
+      - "Interpolation Engine": "concepts/interpolation.md"
+      - "Composition Instructions": "concepts/instructions.md"
+      - "Pydantic Integration": "concepts/pydantic.md"
+      - "Deferred vs Resolvable": "concepts/deferred-resolvable.md"
+      - "CLI Generation": "concepts/cli.md"
+  - "Reference":
+      - reference/index.md # Section index page
+      - "DraconLoader API": "reference/loader_api.md"
+      - "Include Syntax": "reference/include_syntax.md"
+      - "Merge Key Syntax": "reference/merge_syntax.md"
+      - "Interpolation Syntax": "reference/interpolation_syntax.md"
+      - "Instruction Tags": "reference/instruction_tags.md"
+      - "CLI (`Arg`) Parameters": "reference/cli_arg.md"
+      - "KeyPaths": "reference/keypaths.md"
+# Add static assets if needed (e.g., logo)
+# extra:
+#   generator: false # Disable MkDocs generator tag in footer
+# extra_css:
+#   - stylesheets/extra.css
+# extra_javascript:
+#   - javascripts/extra.js

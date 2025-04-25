@@ -1,0 +1,23 @@
+# Define overrides specific to the production environment
+environment: production # Explicitly set environment for this config layer
+log_level: WARNING # Override log level for prod
+workers: 4 # Increase workers for prod
+
+database:
+  # Only override specific DB fields needed for production
+  host: "db.prod.svc.cluster.local" # Production database host
+  username: prod_db_user # Production database user
+  # 'port' and 'password' will be inherited from base.yaml merge below
+
+# Override output path format for production
+output_path: "/data/prod/${computed_runtime_value}/output"
+
+# Include and merge base.yaml *after* defining overrides.
+# Merge strategy <<{<+}:
+# {<+}: Dictionary merge: recursive ({+}), new values (from base.yaml here) win (<).
+# This means if a key exists in both prod.yaml and base.yaml, the one from base.yaml
+# will be kept during the merge, *unless* it's a nested dictionary, in which case
+# the dictionaries are merged recursively following the same rule.
+# Lists are replaced by default (new wins). See Merging docs for details.
+
+<<{<+}: !include file:base.yaml # Note: The order doesn't really matter in this case
