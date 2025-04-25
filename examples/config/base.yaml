@@ -1,0 +1,26 @@
+# examples/config/base.yaml
+
+# Optional: You can tag the root with the Pydantic model,
+# although it's often done in the loading script or CLI definition.
+# !AppConfig
+
+log_level: ${getenv('LOG_LEVEL', 'INFO')} # Use env var LOG_LEVEL or default to INFO
+
+database:
+  # Dynamically set host based on the 'environment' key IN THE FINAL config object
+  # This uses lazy evaluation (${...}) and a reference (@/) to another key.
+  host: "db.${@/environment}.local"
+  port: 5432 # Default port
+  # Include sensitive data from another file relative to this one.
+  # $DIR is automatically provided by Dracon's file loader.
+  username: !include file:$DIR/db_user.secret
+  # Load password directly from an environment variable during composition.
+  password: !include env:DB_PASS
+
+# Default output path, potentially overridden by other configs or CLI.
+# Uses interpolation needing runtime context provided via construct().
+output_path: "/data/outputs/${computed_runtime_value}"
+
+# Default workers, can be overridden
+workers: 1
+
