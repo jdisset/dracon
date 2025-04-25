@@ -86,7 +86,7 @@ config:
 
 Both `${...}` and `$(...)` can access:
 
-1.  Variables passed via `DraconLoader(context=...)`.
+1.  Variables and functions passed via `context=...`.
 2.  Variables defined using `!define` or `!set_default` in the current or parent scope.
 3.  Built-in functions like `getenv`, `getcwd`, `max`, `str`, etc.
 4.  Automatic variables like `$DIR`, `$FILE` within included files (see [Includes Guide](use-includes.md)).

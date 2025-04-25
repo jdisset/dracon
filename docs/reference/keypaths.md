@@ -21,7 +21,7 @@ KeyPaths use **dot (`.`) notation** as the primary separator, with special chara
   - Partial segment matching with `*` is also supported within patterns (e.g., `a.b*.c` matches `a.b.c` and `a.bcd.c`).
 
 !!! warning "Separator is `.` not `/`"
-Remember that `/` is _only_ valid as the very first character to denote the absolute root. All subsequent levels in the path _must_ be separated by dots (`.`). `a/b/c` is **invalid** KeyPath syntax; use `a.b.c`.
+    Remember that `/` denotes the absolute root. All subsequent levels in the path _must_ be separated by dots (`.`). `a/b/c` will actually simplify to `/c` ; when what you probably meant was `a.b.c`.
 
 ## Usage in Dracon
 
@@ -54,4 +54,4 @@ KeyPaths are the standard way to target nodes in various Dracon features:
 
 ## Internal Representation & Simplification
 
-While you typically interact with KeyPaths as strings, Dracon internally parses them into a list of segments and special tokens (like `ROOT`, `UP`). It performs simplification _before_ using them for lookups or matching, resolving `.` and `..` segments where possible (e.g., `a.b..c` simplifies to `a.c`, `/a/b..` simplifies to `/a`). You generally don't need to worry about this unless debugging complex path issues.
+While you typically interact with KeyPaths as strings, Dracon internally parses them into a list of segments and special tokens (like `ROOT`, `UP`). It performs simplification _before_ using them for lookups or matching, resolving `.` and `..` segments where possible (e.g., `a.b..c` simplifies to `a.c`, `/a/b` simplifies to `/b`). You generally don't need to worry about this unless debugging complex path issues.

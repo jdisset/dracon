@@ -1,25 +1,11 @@
 # Tutorial: Building a Configuration-Driven CLI App
 
-This tutorial guides you through creating a simple Python application with a command-line interface (CLI) using Dracon. We'll leverage Pydantic for type-safe configuration and Dracon's features for loading settings from YAML files, handling environment variables, and generating the CLI automatically.
-
-**Goal:** Build an application that can be configured via layered YAML files and command-line arguments.
-
-**Concepts Covered:**
-
-- Defining configuration with Pydantic `BaseModel`.
-- Annotating fields for CLI arguments using `dracon.Arg`.
-- Creating a Dracon program instance with `dracon.make_program`.
-- Loading YAML configuration files using `+filename` syntax.
-- Including other files (`!include file:`).
-- Using environment variables (`!include env:` and `${getenv()}`).
-- Basic interpolation (`${...}`) and cross-references (`@/key`).
-- Handling deferred values (`DeferredNode`, `construct`).
-- Merging configurations (base + overrides).
-- Overriding configuration via CLI flags (`--key value`).
+!!! abstract
+    We will build a simple, type-safe, automatically generated command-line application that can be configured via layered YAML files and command-line arguments and has strong type-safety.
 
 ## Step 1: Project Setup
 
-Create a project directory. Inside it, create the following structure:
+Create a project directory with the following structure:
 
 ```
 dracon_tutorial/
@@ -80,7 +66,7 @@ This file overrides specific settings for the production environment and merges 
 A simple text file holding the base database username.
 
 ```text title="config/db_user.secret"
---8<-- "examples/config/db_user.secret"
+base_user
 ```
 
 ## Step 6: Create the CLI Script (`main.py`)
@@ -135,7 +121,8 @@ Now, let's run it with different configurations:
       Output Path: /data/outputs/dev-db.dev.local-1-xxxxxxxxx
     ```
 
-    _(Note: The host is `db.dev.local` because `environment` became 'dev'. The timestamp in the output path will vary.)_
+!!! note
+    The host is `db.dev.local` because `environment` became 'dev'. The timestamp in the output path will vary.)
 
 3.  **Run with Production Config & Overrides:** Load `prod.yaml` and override `workers`. Also set `LOG_LEVEL` via environment.
 
@@ -159,7 +146,8 @@ Now, let's run it with different configurations:
       Output Path: /data/prod/production-db.prod.svc.cluster.local-8-xxxxxxxxx
     ```
 
-    _(Note: `environment`, `host`, `user`, and initial `workers` came from `prod.yaml`. `log_level` came from the environment variable. `workers=8` came from the CLI override. The output path format is also from `prod.yaml`.)_
+!!! note
+    `environment`, `host`, `user`, and initial `workers` came from `prod.yaml`. `log_level` came from the environment variable. `workers=8` came from the CLI override. The output path format is also from `prod.yaml`.)
 
 4.  **Override Nested Value from File:**
     ```bash
@@ -167,7 +155,3 @@ Now, let's run it with different configurations:
     python main.py +config/prod.yaml --database.username +/tmp/override_user.secret
     ```
     _(Expected: The database username will be `cli_override_user`)_
-
-## Summary
-
-This tutorial demonstrated how Dracon integrates Pydantic models, YAML configuration files, includes, environment variables, interpolation, deferred execution, and CLI arguments into a cohesive system. By defining your configuration structure once with Pydantic, you get type safety, validation, and a powerful CLI with minimal boilerplate.
