@@ -4,7 +4,7 @@ import sys
 import typing
 import logging
 import traceback
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import (
     List,
     Dict,
@@ -31,12 +31,12 @@ from rich.panel import Panel
 from rich.text import Text
 
 from dracon import DraconLoader
-from dracon.deferred import DeferredNode, make_deferred
+from dracon.deferred import DeferredNode
 from dracon.keypath import KeyPath
-from dracon.lazy import resolve_all_lazy, LazyInterpolable
-from dracon.merge import MergeKey, merged
+from dracon.lazy import resolve_all_lazy
+from dracon.merge import MergeKey
 from dracon.resolvable import Resolvable, get_inner_type
-from dracon.utils import dict_like
+from dracon.utils import build_nested_dict
 
 logger = logging.getLogger(__name__)
 
@@ -541,7 +541,6 @@ class Program(BaseModel, Generic[T]):
         if confs_to_merge:
             for conf in confs_to_merge:
                 this_conf = loader.compose(conf)
-                logger.debug(f"this_conf: {this_conf}")
                 if not isinstance(this_conf, CompositionResult):
                     raise ArgParseError(f"invalid include file: {conf}")
                 current_composition = loader.merge(
@@ -566,7 +565,6 @@ class Program(BaseModel, Generic[T]):
             raw_args_node = loader.dump_to_node(raw_args_dict)
             raw_args_str = loader.dump(raw_args_node)
             raw_args_composition = loader.compose_config_from_str(raw_args_str)
-            logger.debug(f"raw_args_composition:\n{raw_args_composition}\n")
             current_composition = loader.merge(
                 current_composition, raw_args_composition, merge_key=MergeKey(raw="<<{<+}[<~]")
             )
@@ -582,11 +580,10 @@ class Program(BaseModel, Generic[T]):
             arg_dict_node = temp_loader.dump_to_node(nested_arg_dict)
             arg_dict_str = temp_loader.dump(arg_dict_node)
             dict_composition = temp_loader.compose_config_from_str(arg_dict_str)
-            logger.debug(f"nested_args_composition:\n{dict_composition}\n")
             current_composition = loader.merge(
                 current_composition, dict_composition, merge_key=MergeKey(raw="<<{<+}[<~]")
             )
-            logger.debug(f"current_composition after merging args:\n{current_composition}\n")
+            logger.debug(f"current_composition after merging nested args:\n{current_composition}\n")
 
         res = loader.load_node(current_composition.root)
         res = self.conf_type.model_validate(res)
@@ -596,46 +593,6 @@ class Program(BaseModel, Generic[T]):
         if not isinstance(res, self.conf_type):
             raise ArgParseError(f"internal error: expected {self.conf_type} but got {type(res)}")
         return res
-
-
-def build_nested_dict(flat_args: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    example:
-        in: {'a.b.c': 1, 'a.b.d': 2, 'x': 3}
-        out: {'a': {'b': {'c': 1, 'd': 2}}, 'x': 3}
-
-    """
-    nested_dict: Dict[str, Any] = {}
-    sorted_keys = sorted(flat_args.keys())
-
-    for key in sorted_keys:
-        value = flat_args[key]
-        key = key.replace('-', '_')
-        parts = key.split('.')
-        current_level = nested_dict
-        for i, part in enumerate(parts[:-1]):
-            if part not in current_level:
-                current_level[part] = {}
-                current_level = current_level[part]
-            elif isinstance(current_level[part], dict):
-                current_level = current_level[part]
-            else:
-                conflict_path = '.'.join(parts[: i + 1])
-                raise TypeError(
-                    f"Configuration conflict: trying to set nested key '{key}' "
-                    f"but '{conflict_path}' is already set to a non-dictionary value: "
-                    f"{current_level[part]!r}"
-                )
-
-        last_part = parts[-1]
-        if last_part in current_level and isinstance(current_level[last_part], dict):
-            logger.warning(
-                f"Overwriting existing dictionary at '{key}' with value: {value!r}. "
-                f"Existing dictionary: {current_level[last_part]}"
-            )
-        current_level[last_part] = value
-
-    return nested_dict
 
 
 def make_program(conf_type: type, **kwargs):
