@@ -1,7 +1,7 @@
 # Copyright (c) 2025 Jean Disset
 # MIT License - see LICENSE file for details.
 
-from typing import Optional, Any, List, Dict, TypeVar, Generic, Type, ForwardRef
+from typing import Optional, Any, List, Dict, TypeVar, Generic, Type, ForwardRef, Union
 import dracon.utils as utils
 from dracon.utils import ftrace, deepcopy, ser_debug, node_repr
 from dracon.utils import ShallowDict
@@ -161,10 +161,10 @@ class DeferredNode(ContextNode, Generic[T]):
 
         composition.walk_no_path(
             callback=partial(
-                add_to_context, self._loader.context, merge_key=MergeKey(raw='{>~}[>~]')
+                add_to_context, self._loader.context, merge_key=MergeKey(raw='{<~}[<~]')
             )
         )
-
+        # overwrite this node's existing context with the new merged context
         walk_node(
             node=self.path.get_obj(composition.root),
             callback=partial(add_to_context, merged_context, merge_key=MergeKey(raw='{<~}[<~]')),
@@ -383,12 +383,39 @@ def parse_query_params(query_string: str) -> Dict[str, Any]:
     return params
 
 
-@ftrace(watch=[])
-def process_deferred(comp: CompositionResult, force_deferred_at: List[KeyPath | str] | None = None):
+PathOrStr = Union[KeyPath, str]
+
+
+@ftrace(watch=[], inputs=True)
+def process_deferred(
+    comp: CompositionResult,
+    force_deferred_at: Optional[List[Union[PathOrStr, tuple[PathOrStr, Type]]]] = None,
+):
     from dracon.nodes import reset_tag
+    # force deferred_at is a list where each elt can be a path, or a tuple of (path, target_type)
 
     force_deferred_at = force_deferred_at or []
-    force_deferred_at = [KeyPath(p) if isinstance(p, str) else p for p in force_deferred_at]
+    deferred_paths = {}
+    for elt in force_deferred_at:
+        _path = None
+        _type = None
+        if isinstance(elt, tuple):
+            if len(elt) == 2:
+                _path, _type = elt
+            else:
+                raise ValueError(
+                    "force_deferred_at must be a list of paths or tuples of (path, type)"
+                )
+        elif isinstance(elt, str):
+            _path = KeyPath(elt)
+        elif isinstance(elt, KeyPath):
+            _path = elt
+
+        if not isinstance(_path, KeyPath):
+            raise ValueError("force_deferred_at must be a list of paths or tuples of (path, type)")
+
+        deferred_paths[_path] = _type
+
     deferred_nodes = []
 
     comp.make_map()
@@ -397,26 +424,37 @@ def process_deferred(comp: CompositionResult, force_deferred_at: List[KeyPath | 
         is_tag_deferred = (
             hasattr(node, 'tag') and isinstance(node.tag, str) and node.tag.startswith('!deferred')
         )
-        is_path_deferred = any(p.match(path) for p in force_deferred_at)
+        is_path_deferred = False
+        best_match = ROOTPATH
+        _type = None
+        for p, t in deferred_paths.items():
+            if p.match(path):
+                is_path_deferred = True
+                # take most specific type
+                if t is not None:
+                    if _type is None or len(p) > len(best_match):
+                        best_match = p
+                        _type = t
+                break
 
         if not isinstance(node, DeferredNode) and (is_tag_deferred or is_path_deferred):
             is_child_of_deferred = False
             current_parent_path = path.parent
             while current_parent_path != ROOTPATH and current_parent_path != path:
-                if any(p == current_parent_path for _, p in deferred_nodes):
+                if any(p == current_parent_path for _, p, _ in deferred_nodes):
                     is_child_of_deferred = True
                     break
                 current_parent_path = current_parent_path.parent
 
             if not is_child_of_deferred:
-                deferred_nodes.append((node, path))
+                deferred_nodes.append((node, path, _type))
 
     comp.walk(find_deferred_nodes)
     deferred_nodes = sorted(deferred_nodes, key=lambda x: len(x[1]), reverse=True)
 
     nodes_processed_paths = set()
 
-    for node, path in deferred_nodes:
+    for node, path, obj_type in deferred_nodes:
         if any(path.startswith(processed_path) for processed_path in nodes_processed_paths):
             continue
 
@@ -452,12 +490,15 @@ def process_deferred(comp: CompositionResult, force_deferred_at: List[KeyPath | 
 
         loader_instance = getattr(comp, '_loader_instance', None)
 
+        logger.debug(f"Creating deferred node at {path} with type {obj_type}")
+
         new_node = make_deferred(
             value=node,
             path=path,
             context=node_context,
             comp=comp,
             loader=loader_instance,
+            obj_type=obj_type,
             **qparams,
         )
         comp.set_at(path, new_node)
