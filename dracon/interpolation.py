@@ -140,12 +140,14 @@ def do_safe_eval(expr: str, engine: str, symbols: Optional[dict] = None) -> Any:
 
     if engine == 'asteval':
         safe_eval = Interpreter(user_symbols=symbols or {}, max_string_length=1000)
-        res = safe_eval.eval(expr, raise_errors=False)
-        errors = safe_eval.error
-        if errors:
-            errors = [': '.join(e.get_error()) for e in errors]
-            errormsg = '\n'.join(errors)
-            raise InterpolationError(f"Error evaluating expression {expr}:\n{errormsg}")
+        res = safe_eval.eval(expr, raise_errors=True)
+
+        # errors = safe_eval.error
+        # if errors:
+        #     errors = [': '.join(e.get_error()) for e in errors]
+        #     errormsg = '\n'.join(errors)
+        #     raise InterpolationError(f"Error evaluating expression {expr}:\n{errormsg}")
+
         return res
     elif engine == 'eval':
         import traceback
