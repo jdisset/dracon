@@ -44,6 +44,12 @@ B = TypeVar("B", bound=BaseModel)
 ProgramType = ForwardRef("Program")
 
 
+def get_root_exception(e):
+    while e.__cause__ is not None:
+        e = e.__cause__
+    return e
+
+
 @dataclass(frozen=True)
 class Arg:
     """maps a pydantic field to cli arguments."""
@@ -350,6 +356,7 @@ class Program(BaseModel, Generic[T]):
 
     def parse_args(self, argv: List[str], **kwargs) -> tuple[Optional[T], Dict[str, Any]]:
         """parses command line arguments and generates configuration."""
+
         self._positionals = [arg for arg in self._args if arg.positional][::-1]  # reverse for pop()
         logger.debug(f"positional args: {self._positionals}, arg map: {self._arg_map}")
 
@@ -382,16 +389,12 @@ class Program(BaseModel, Generic[T]):
                 if action_result is not None:
                     conf = action_result
         except ValidationError as e:
-            logger.debug(f"validation error: {e}")
-            print(file=sys.stderr)  # newline before errors
-            for error in e.errors():
-                loc = '.'.join(map(str, error['loc'])) or 'root'
-                inp = f" (input type: {type(error['input']).__name__})" if 'input' in error else ""
-                print(f"error: field '{loc}': {error['msg']}{inp}", file=sys.stderr)
-            print(file=sys.stderr)  # newline after errors
-            print_help(self, None)  # exits
+            self.print_validation_error(e)
         except Exception as e:  # catch other config generation errors
-            print(f"\nerror generating configuration: {e}", file=sys.stderr)
+            print(f"\nerror generating configuration: {e}. error type = {type(e)}", file=sys.stderr)
+            root_exception = get_root_exception(e)
+            if isinstance(root_exception, ValidationError):
+                self.print_validation_error(root_exception)
             traceback.print_exc()
             sys.exit(1)
 
@@ -405,6 +408,16 @@ class Program(BaseModel, Generic[T]):
         )
         return conf, final_raw_args
 
+    def print_validation_error(self, e):
+        logger.debug(f"validation error: {e}")
+        print(file=sys.stderr)  # newline before errors
+        for error in e.errors():
+            loc = '.'.join(map(str, error['loc'])) or 'root'
+            inp = f" (input type: {type(error['input']).__name__})" if 'input' in error else ""
+            print(f"error: field '{loc}': {error['msg']}{inp}", file=sys.stderr)
+        print(file=sys.stderr)  # newline after errors
+        print_help(self, None)  # exits
+
     def _parse_single_arg(
         self,
         argv: List[str],
@@ -416,6 +429,7 @@ class Program(BaseModel, Generic[T]):
         confs_to_merge: List,
     ) -> int:
         """parses one argument from argv at index i, returning the next index."""
+
         argstr = argv[i]
         target_dict, real_name, arg_obj = raw_args, None, None  # default target is raw_args
 
@@ -470,113 +484,158 @@ class Program(BaseModel, Generic[T]):
             raise ArgParseError(f"expected value for argument {original_arg}")
         return argv[i], i
 
-    def _load_value_if_ref(self, value: str, loader: DraconLoader) -> Any:
-        """loads value from file/key reference if value starts with +"""
+    def _compose_value(self, value: str, loader: DraconLoader) -> Any:
+        """start composition from file/key reference if value starts with +"""
         if isinstance(value, str) and value.startswith('+'):
+            include_str = value[1:]
+            print(f"loading value from file/key reference: {include_str}")
             try:
-                loaded_val = loader.load(value[1:])
-                logger.debug(f"loaded override value '{value[1:]}' as: {type(loaded_val)}")
-                return loaded_val
+                comp_val = loader.compose(include_str)
+                logger.debug(f"loaded override value '{include_str}' as: {type(comp_val)}")
+                return comp_val.root
             except Exception as e:
-                logger.warning(f"failed to load override value '{value}': {e}")
-        return value
-
-    def _build_nested_override(
-        self, nested_args: Dict[str, str], loader: DraconLoader
-    ) -> Dict[str, Any]:
-        """builds the nested dictionary for --a.b=c overrides."""
-        override_dict = {}
-        for key_path, value in nested_args.items():
-            resolved_value = self._load_value_if_ref(value, loader)
-            parts = key_path.replace('-', '_').split('.')
-            current_level = override_dict
-            for i, part in enumerate(parts):
-                if i == len(parts) - 1:
-                    current_level[part] = resolved_value
-                else:
-                    current_level = current_level.setdefault(part, {})
-        return override_dict
+                logger.error(f"failed to load override value '{value}': {e}")
+                raise ArgParseError(
+                    f"Failed to load override reference '{include_str}': {e}"
+                ) from e
+        # else we parse the value from scratch
+        return loader.compose_config_from_str(value)
 
     def _generate_config(
         self, raw_args: dict, nested_args: dict, defined_vars: dict, confs_to_merge: list, **kwargs
     ) -> Optional[T]:
         """generates the final configuration object by merging sources and validating."""
+
+        from dracon.composer import CompositionResult
+
         loader = DraconLoader(
             enable_interpolation=True, base_dict_type=dict, base_list_type=list, **kwargs
         )
         loader.update_context(defined_vars)
-        as_dict = self.conf_type.model_construct().model_dump(exclude_unset=False)
-        logger.debug(f"initial dict from model defaults: {as_dict}")
+        loader.yaml.representer.exclude_defaults = False
+        pdump_str = loader.dump(self.conf_type.model_construct())
 
-        if confs_to_merge:
-            merged_from_files = loader.load(confs_to_merge, merge_key="<<{<+}[<~]")
-            as_dict = merged(as_dict, merged_from_files, MergeKey(raw="{<+}[<~]"))
-            logger.debug(f"dict after merging base files: {as_dict}")
+        logger.debug(f"pdump_str: {pdump_str}")
 
-        # build combined CLI overrides dictionary
-        cli_overrides = {}
-        for k, v in raw_args.items():  # process raw args (--arg val)
-            resolved_value = self._load_value_if_ref(v, loader)
-            # special handling for file overrides of dicts: replace vs merge
-            if (
-                isinstance(v, str)
-                and v.startswith('+')
-                and dict_like(resolved_value)
-                and list(resolved_value.keys()) == [k]
-            ):
-                cli_overrides[k] = resolved_value[k]  # direct replacement using inner value
-                logger.debug(f"direct replacement for key {k} from CLI file")
-            else:
-                cli_overrides[k] = resolved_value  # normal override value
-        if nested_args:  # process nested args (--a.b val)
-            nested_override_dict = self._build_nested_override(nested_args, loader)
-            cli_overrides = merged(
-                cli_overrides, nested_override_dict, MergeKey(raw="{<+}[<~]")
-            )  # merge nested into raw
-
-        if cli_overrides:
-            as_dict = merged(as_dict, cli_overrides, MergeKey(raw="{<+}[<~]"))
-            logger.debug(f"dict after merging all CLI overrides: {as_dict}")
-
-        # pre-resolve top-level lazy values before validation
-        resolved_as_dict = {}
-        for k, v in as_dict.items():
-            if isinstance(v, LazyInterpolable):
-                try:
-                    v.root_obj, v.current_path = as_dict, KeyPath(f"/{k}")
-                    resolved_as_dict[k] = v.resolve(context_override=loader.context)
-                    logger.debug(f"pre-resolved lazy key '{k}': {resolved_as_dict[k]}")
-                except Exception as e:
-                    logger.warning(f"failed to pre-resolve lazy key '{k}': {e}. leaving lazy.")
-                    resolved_as_dict[k] = v  # keep lazy if pre-resolution fails
-            else:
-                resolved_as_dict[k] = v
-        as_dict = resolved_as_dict
-        logger.debug(f"dict after pre-resolving:\n{as_dict}\n")
-
-        # wrap resolvable fields
+        # mark fields for deferral
+        deferred_paths = []
         real_name_map = {arg.real_name: arg for arg in self._args}
         for field_name, field in self.conf_type.model_fields.items():
             arg = real_name_map.get(field_name)
-            if (
-                arg
-                and arg.resolvable
-                and field_name in as_dict
-                and not isinstance(as_dict[field_name], DeferredNode)
-            ):
-                logger.debug(f"wrapping field {field_name} in DeferredNode")
+            if arg and arg.resolvable:
+                arg_path = KeyPath(f"/{field_name}")
                 obj_type = get_inner_type(field.annotation)
-                logger.debug(f"deferred field {field_name} obj_type: {obj_type}")
-                as_dict[field_name] = make_deferred(
-                    as_dict[field_name], loader=loader, obj_type=obj_type
+                logger.debug(f"resolvable field: {field_name} -> {arg_path}. type={obj_type}")
+                if arg_path not in loader.deferred_paths:
+                    deferred_paths.append((arg_path, obj_type))
+        loader.deferred_paths.extend(deferred_paths)
+
+        # compose initial structure from defaults
+        current_composition = loader.compose_config_from_str(pdump_str)
+        logger.debug(
+            f"current_composition after adding resolvable fields:\n{current_composition}\n"
+        )
+        logger.debug(f"loader deferred paths: {loader.deferred_paths}")
+
+        # merge included config files
+        if confs_to_merge:
+            for conf in confs_to_merge:
+                this_conf = loader.compose(conf)
+                logger.debug(f"this_conf: {this_conf}")
+                if not isinstance(this_conf, CompositionResult):
+                    raise ArgParseError(f"invalid include file: {conf}")
+                current_composition = loader.merge(
+                    current_composition, this_conf, merge_key=MergeKey(raw="<<{<~}[<~]")
                 )
+                logger.debug(f"current_composition after merging {conf}:\n{current_composition}\n")
 
-        res = self.conf_type.model_validate(as_dict)
+        from dracon.nodes import Node
 
-        resolve_all_lazy(res)  # final resolution pass, mainly for deferred nodes
+        def compose_value(v):
+            if isinstance(v, Node):
+                val = v
+            else:
+                val = self._compose_value(str(v), loader)
+                if isinstance(val, CompositionResult):
+                    val = val.root
+            return val
+
+        processed_raw_args = {k: compose_value(v) for k, v in raw_args.items()}
+        raw_args_dict = build_nested_dict(processed_raw_args)
+        if raw_args_dict:
+            raw_args_node = loader.dump_to_node(raw_args_dict)
+            raw_args_str = loader.dump(raw_args_node)
+            raw_args_composition = loader.compose_config_from_str(raw_args_str)
+            logger.debug(f"raw_args_composition:\n{raw_args_composition}\n")
+            current_composition = loader.merge(
+                current_composition, raw_args_composition, merge_key=MergeKey(raw="<<{<+}[<~]")
+            )
+            logger.debug(f"current_composition after merging args:\n{current_composition}\n")
+
+        # merge nested args
+        processed_nested_args = {k: compose_value(v) for k, v in nested_args.items()}
+        nested_arg_dict = build_nested_dict(processed_nested_args)
+
+        temp_loader = DraconLoader()
+
+        if nested_arg_dict:
+            arg_dict_node = temp_loader.dump_to_node(nested_arg_dict)
+            arg_dict_str = temp_loader.dump(arg_dict_node)
+            dict_composition = temp_loader.compose_config_from_str(arg_dict_str)
+            logger.debug(f"nested_args_composition:\n{dict_composition}\n")
+            current_composition = loader.merge(
+                current_composition, dict_composition, merge_key=MergeKey(raw="<<{<+}[<~]")
+            )
+            logger.debug(f"current_composition after merging args:\n{current_composition}\n")
+
+        res = loader.load_node(current_composition.root)
+        res = self.conf_type.model_validate(res)
+
+        resolve_all_lazy(res, context_override=loader.context)
+
         if not isinstance(res, self.conf_type):
             raise ArgParseError(f"internal error: expected {self.conf_type} but got {type(res)}")
         return res
+
+
+def build_nested_dict(flat_args: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    example:
+        in: {'a.b.c': 1, 'a.b.d': 2, 'x': 3}
+        out: {'a': {'b': {'c': 1, 'd': 2}}, 'x': 3}
+
+    """
+    nested_dict: Dict[str, Any] = {}
+    sorted_keys = sorted(flat_args.keys())
+
+    for key in sorted_keys:
+        value = flat_args[key]
+        key = key.replace('-', '_')
+        parts = key.split('.')
+        current_level = nested_dict
+        for i, part in enumerate(parts[:-1]):
+            if part not in current_level:
+                current_level[part] = {}
+                current_level = current_level[part]
+            elif isinstance(current_level[part], dict):
+                current_level = current_level[part]
+            else:
+                conflict_path = '.'.join(parts[: i + 1])
+                raise TypeError(
+                    f"Configuration conflict: trying to set nested key '{key}' "
+                    f"but '{conflict_path}' is already set to a non-dictionary value: "
+                    f"{current_level[part]!r}"
+                )
+
+        last_part = parts[-1]
+        if last_part in current_level and isinstance(current_level[last_part], dict):
+            logger.warning(
+                f"Overwriting existing dictionary at '{key}' with value: {value!r}. "
+                f"Existing dictionary: {current_level[last_part]}"
+            )
+        current_level[last_part] = value
+
+    return nested_dict
 
 
 def make_program(conf_type: type, **kwargs):

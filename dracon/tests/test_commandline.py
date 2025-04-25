@@ -9,7 +9,7 @@ import os
 from dracon import Arg, DeferredNode, construct, DraconLoader, make_program, DraconError
 from dracon.commandline import ArgParseError
 from dracon.loader import dump_to_node
-from dracon import CompositionResult, DraconMappingNode
+from dracon import CompositionResult, DraconMappingNode, resolve_all_lazy
 
 
 class DatabaseConfig(BaseModel):
@@ -402,7 +402,7 @@ def test_sub_arg_override_file(program, config_files):
     args = [
         f"+{dev_conf}",
         f"--database",  # use the parent argument name
-        f"+{db_prod_conf}",  # override entire database section
+        f"+{db_prod_conf}@database",  # override entire database section
     ]
     print(f"parsing args: {args}")
     config, raw_args = program.parse_args(args)
@@ -817,7 +817,7 @@ def test_is_file_deferred_with_complex_type(file_deferred_complex_program, compl
         "some_value",
         "--define.extra_context",
         "extra_value",  # define context var
-        "--inner-field.value",  # override inner field value
+        "--inner-field.value",  # override inner field value (of a deferred node!)
         "456",  # override value
     ]
     print(f"parsing args: {args}")
@@ -876,10 +876,88 @@ def test_positional_args_with_options_and_file(complex_program, config_files):
     config, raw_args = complex_program.parse_args(args)
     print(f"parsed config: {config}")
     print(f"raw args dict: {raw_args}")
-
     assert isinstance(config, ComplexCliConfig)
     assert config.input_file == "my_input.dat"
     assert config.output_dir == "/path/to/output"
     assert config.optional_pos == "optional_value"
     assert config.verbose is True  # from cli flag -v
     assert config.nested_list.items == ["item_file_A", "item_file_B"]  # from file
+
+
+class InnerData(BaseModel):
+    raw_value: int
+    # This value depends on a context variable ($RUNTIME_VAR)
+    # that will only be provided when construct() is called.
+    computed_value: int = "${$RUNTIME_VAR * 10 }"
+    another_value: str = "Static"
+
+
+class OuterConfig(BaseModel):
+    deferred_inner: Annotated[
+        DeferredNode[InnerData],
+        Arg(is_file=True, help="Load inner data from file, construction deferred."),
+    ]
+    required_str: Annotated[str, Arg(help="A required string.")]
+
+
+@pytest.fixture(scope="module")
+def deferred_config_files(tmp_path_factory):
+    """Create the YAML file for the inner deferred data."""
+    tmp_path = tmp_path_factory.mktemp("deferred_cli_configs")
+    print(f"Creating config files in: {tmp_path}")
+
+    # inner_data.yaml - Contains the interpolation requiring runtime context
+    inner_content = """
+!InnerData
+raw_value: 5
+computed_value: "${$RUNTIME_VAR * 10 }" # Requires $RUNTIME_VAR
+another_value: "From File"
+"""
+    inner_file = tmp_path / "inner_data.yaml"
+    inner_file.write_text(inner_content)
+    print(f"Created {inner_file}")
+
+    yield {"inner": inner_file}
+    print(f"Cleaned up tmp path: {tmp_path}")
+
+
+@pytest.fixture
+def deferred_program():
+    """Create the dracon program instance for testing."""
+    print("Creating Program instance for OuterConfig...")
+    prog = make_program(
+        OuterConfig,
+        name="deferred-cli-app",
+        description="App for testing deferred loading with runtime context.",
+        context={
+            'InnerData': InnerData,
+            'OuterConfig': OuterConfig,
+        },
+    )
+    print("Program instance created.")
+    return prog
+
+
+def test_deferred_cli_context_resolution_failure(deferred_program, deferred_config_files):
+    """
+    is called after construct, but without the necessary context override.
+    """
+    inner_file = deferred_config_files["inner"]
+    args = [
+        "--deferred-inner",
+        str(inner_file),
+        "--required-str",
+        "test",
+    ]
+
+    config, raw_args = deferred_program.parse_args(args)
+
+    assert isinstance(config, OuterConfig)
+    assert isinstance(config.deferred_inner, DeferredNode)
+
+    runtime_context = {'$RUNTIME_VAR': 42}
+
+    constructed_inner = config.deferred_inner.construct(context=runtime_context)
+
+    cval = constructed_inner.computed_value
+    assert cval == 420  # 42 * 10 = 420
