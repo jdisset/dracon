@@ -10,6 +10,10 @@ from ruamel.yaml.nodes import Node
 from dracon.utils import node_repr, list_like, dict_like
 import re
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class KeyPathToken(Enum):
     ROOT = 0
@@ -455,6 +459,7 @@ def _get_obj_impl(
                 return obj[attr]
             except (TypeError, KeyError) as e:
                 if create_path_if_not_exists:
+                    logging.debug(f'Creating path {attr} in {obj} of type {type(obj)}')
                     assert default_mapping_constructor is not None
                     obj[attr] = default_mapping_constructor()
                     return obj[attr]
@@ -464,7 +469,7 @@ def _get_obj_impl(
                     tback = traceback.format_exc(limit=10)
 
                     raise AttributeError(
-                        f'Could not find attribute {attr} in node \n{node_repr(obj)} of type {type(obj)}. \nTraceback:\n{tback}'
+                        f'Could not find attribute {attr} in node \n{node_repr(obj)} of type {type(obj)}. {create_path_if_not_exists=}, {default_mapping_constructor=}. \nTraceback:\n{tback}'
                     ) from None
                 else:
                     raise AttributeError(f'Could not find attribute {attr} in {obj}') from None
