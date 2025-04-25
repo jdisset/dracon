@@ -162,6 +162,47 @@ def list_like(obj) -> bool:
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
+
+def build_nested_dict(flat_args: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    example:
+        in: {'a.b.c': 1, 'a.b.d': 2, 'x': 3}
+        out: {'a': {'b': {'c': 1, 'd': 2}}, 'x': 3}
+
+    """
+    nested_dict: Dict[str, Any] = {}
+    sorted_keys = sorted(flat_args.keys())
+
+    for key in sorted_keys:
+        value = flat_args[key]
+        key = key.replace('-', '_')
+        parts = key.split('.')
+        current_level = nested_dict
+        for i, part in enumerate(parts[:-1]):
+            if part not in current_level:
+                current_level[part] = {}
+                current_level = current_level[part]
+            elif isinstance(current_level[part], dict):
+                current_level = current_level[part]
+            else:
+                conflict_path = '.'.join(parts[: i + 1])
+                raise TypeError(
+                    f"Configuration conflict: trying to set nested key '{key}' "
+                    f"but '{conflict_path}' is already set to a non-dictionary value: "
+                    f"{current_level[part]!r}"
+                )
+
+        last_part = parts[-1]
+        if last_part in current_level and isinstance(current_level[last_part], dict):
+            logger.warning(
+                f"Overwriting existing dictionary at '{key}' with value: {value!r}. "
+                f"Existing dictionary: {current_level[last_part]}"
+            )
+        current_level[last_part] = value
+
+    return nested_dict
+
+
 ## {{{                         --     deepcopy     --
 
 
