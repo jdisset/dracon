@@ -79,7 +79,7 @@ def construct(node_or_val, resolve=True, **kwargs):
         n = node_or_val
 
     if resolve:
-        n = resolve_all_lazy(n)
+        n = resolve_all_lazy(n, context_override=kwargs.get('context', None))
 
     return n
 
@@ -91,7 +91,7 @@ class DraconLoader:
         capture_globals: bool = True,
         base_dict_type: Type[DictLike] = dracontainer.Mapping,
         base_list_type: Type[ListLike] = dracontainer.Sequence,
-        enable_interpolation: bool = False,
+        enable_interpolation: bool = True,
         interpolation_engine: Literal['asteval', 'eval'] = DEFAULT_EVAL_ENGINE,
         context: Optional[Dict[str, Any]] = None,
         deferred_paths: Optional[list[KeyPath | str]] = None,
@@ -205,14 +205,13 @@ class DraconLoader:
             compres = self.post_process_composed(compres)
         return self.load_node(compres.root)
 
-    @ftrace(watch=[])
-    def load(
+    def compose(
         self,
         config_paths: Union[str, Path, List[Union[str, Path]]],
         merge_key: str = "<<{<+}[<~]",
     ):
         """
-        Loads configuration from one or more paths.
+        Compose configuration from one or more paths.
 
         If multiple paths are provided, they are merged sequentially
         using the specified merge_key strategy.
@@ -225,6 +224,7 @@ class DraconLoader:
         Returns:
             The loaded and potentially merged configuration object.
         """
+
         self.reset_context()
 
         if not isinstance(config_paths, list):
@@ -258,22 +258,55 @@ class DraconLoader:
             next_comp_res = compose_from_include_str(
                 self, next_path, custom_loaders=self.custom_loaders
             )
-
-            if not isinstance(base_comp_res.root, DraconMappingNode):
-                logger.warning(
-                    f"Base configuration from {processed_paths[0]} is not a mapping. Replacing with content from {next_path}."
-                )
-                base_comp_res = next_comp_res
-                continue
-
-            new_root = merged(
-                base_comp_res.root,
-                next_comp_res.root,
-                mkey,
-            )
-            base_comp_res.root = new_root
+            base_comp_res = base_comp_res.merged(next_comp_res, mkey)
 
         final_comp_res = self.post_process_composed(base_comp_res)
+        return final_comp_res
+
+    def merge(
+        self,
+        comp_res_1: CompositionResult,
+        comp_res_2: CompositionResult | Node,
+        merge_key: MergeKey | str,
+    ):
+        """
+        Merges two CompositionResults using the specified merge_key strategy.
+
+        Args:
+            comp_res_1: The first CompositionResult.
+            comp_res_2: The second CompositionResult.
+            merge_key: The Dracon merge key string to use when merging.
+
+        Returns:
+            A new CompositionResult that is the result of merging the two inputs.
+        """
+        if isinstance(merge_key, str):
+            merge_key = MergeKey(raw=merge_key)
+
+        cres = comp_res_1.merged(comp_res_2, merge_key)
+        final_comp_res = self.post_process_composed(cres)
+        return final_comp_res
+
+    def load(
+        self,
+        config_paths: Union[str, Path, List[Union[str, Path]]],
+        merge_key: str = "<<{<+}[<~]",
+    ):
+        """
+        Loads configuration from one or more paths.
+
+        If multiple paths are provided, they are merged sequentially
+        using the specified merge_key strategy.
+
+        Args:
+            config_paths: A single path (str or Path) or a list of paths.
+            merge_key: The Dracon merge key string to use when merging multiple files.
+                       Defaults to "<<{<+}[<~]" (recursive append dicts, new wins; replace list, new wins).
+
+        Returns:
+            The loaded and potentially merged configuration object.
+        """
+        final_comp_res = self.compose(config_paths, merge_key=merge_key)
 
         return self.load_node(final_comp_res.root)
 
@@ -380,7 +413,7 @@ class DraconLoader:
                 custom_loaders=self.custom_loaders,
                 node=inode,
             )
-            comp_res.merge_composition_at(inode_path, include_composed)
+            comp_res.set_composition_at(inode_path, include_composed)
 
         # Recursive call to process any new includes that were brought in
         return self.process_includes(comp_res)
