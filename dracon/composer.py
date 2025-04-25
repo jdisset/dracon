@@ -24,8 +24,9 @@ from ruamel.yaml.events import (
 )
 
 from dracon.keypath import KeyPath, ROOTPATH, MAPPING_KEY
+from dracon.merge import MergeKey, merged
 from pydantic import BaseModel, ConfigDict
-from typing import Any, Hashable, Callable
+from typing import Any, Hashable, Callable, Union
 from typing import Optional, List, Literal, Final
 
 from dracon.interpolation import InterpolableNode
@@ -46,6 +47,8 @@ INTERPOLABLE: Final = 'interpolable'
 INSTRUCTION: Final = 'instruction'
 
 INCLUDE_TAG = '!include'
+
+DEFAULT_COMPOSITION_MERGE_HEY = MergeKey(raw="<<{<+}[<~]")
 
 
 class CompositionResult(BaseModel):
@@ -124,13 +127,23 @@ class CompositionResult(BaseModel):
 
         walk_node(node, _callback, start_path=at_path)
 
-    def merge_composition_at(self, at_path: KeyPath, new_comp: 'CompositionResult', reuse_map=True):
-        # new_comp.parent_path = self.parent_path + at_path[1:]
+    def set_composition_at(self, at_path: KeyPath, new_comp: 'CompositionResult'):
         new_node = new_comp.root
         self.set_at(at_path, new_node)
-        # if reuse_map:
-        # for path, node in new_comp.node_map.items():
-        # self.node_map[at_path + path] = node
+
+    def merged(self, other: Union['CompositionResult', Node], key: MergeKey):
+        other_node = other
+        if isinstance(other_node, CompositionResult):
+            other_node = other_node.root
+        assert isinstance(other_node, Node), (
+            f'Invalid node type: {type(other_node)} == {other_node}'
+        )
+        new_root = merged(self.root, other_node, key)
+        return CompositionResult(
+            root=new_root,
+            special_nodes=self.special_nodes,
+            anchor_paths=self.anchor_paths,
+        )
 
     def pop_all_special(self, category: SpecialNodeCategory, index=0):
         while self.special_nodes.get(category):
