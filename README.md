@@ -20,7 +20,7 @@ You can extend, override, or merge any part - even deeply nested - of your app's
 A detailed help and usage message is automatically generated. You can distribute your app with some default configuration values and files, and the user can override any part with their own.
 
 <figure markdown>
-  ![CLI Help Screenshot](assets/cli_help.png)
+  ![CLI Help Screenshot](https://raw.githubusercontent.com/jdisset/dracon/dev/docs/assets/cli_help.png)
   <figcaption>Auto-generated CLI Help</figcaption>
 </figure>
 
