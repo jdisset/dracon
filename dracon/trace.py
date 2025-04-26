@@ -151,18 +151,20 @@ class TracePrinter:
             if self.config.preface_filename
             else ""
         )
-        func_call_str = f"{self.func_color}┌ {func_name}{preface_str}{self.config.colors['reset']}("
+        func_call_str = f"{self.func_color}┌ {func_name}{preface_str}{self.config.colors['reset']}"
         # Remove extra padding: if outermost, remove only one character (the extra space)
         if isinstance(sys.stdout, PaddedStdout):
             sys.stdout.write('\b\b')
         print(func_call_str)
 
-    def print_arguments(self, bound_args: inspect.BoundArguments) -> Set[str]:
+    def print_arguments(self, bound_args: inspect.BoundArguments, inputs=None) -> Set[str]:
         """Print function arguments and return set of argument names."""
         arg_strings = []
         input_arg_names = set(bound_args.arguments.keys())
 
         for name, value in bound_args.arguments.items():
+            if inputs is not None and not isinstance(inputs, bool) and name not in inputs:
+                continue
             arg_str = (
                 f"{self.config.colors['input']}{self.truncate(value)}{self.config.colors['reset']}"
             )
@@ -178,7 +180,7 @@ class TracePrinter:
 
         for arg_str in arg_strings:
             print(arg_str)
-        print("):")
+        print(":")
         return input_arg_names
 
     def print_variable_update(self, line_info: str, var: str, value: Any, is_new: bool) -> None:
@@ -323,9 +325,7 @@ def ftrace(**kwargs):
                         sig = inspect.signature(func)
                         bound_args = sig.bind(*args, **kwargs)
                         bound_args.apply_defaults()
-                        input_arg_names = printer.print_arguments(bound_args)
-                    else:
-                        print(f"{func_name})")
+                        input_arg_names = printer.print_arguments(bound_args, inputs=config.inputs)
 
                     # Set up tracing.
                     trace_handler = TraceHandler(config, printer, input_arg_names)

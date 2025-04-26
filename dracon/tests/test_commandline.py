@@ -886,9 +886,9 @@ def test_positional_args_with_options_and_file(complex_program, config_files):
 
 class InnerData(BaseModel):
     raw_value: int
-    # This value depends on a context variable ($RUNTIME_VAR)
+    # This value depends on a context variable (RUNTIME_VAR)
     # that will only be provided when construct() is called.
-    computed_value: int = "${$RUNTIME_VAR * 10 }"
+    computed_value: int = "${RUNTIME_VAR * 10 }"
     another_value: str = "Static"
 
 
@@ -910,7 +910,7 @@ def deferred_config_files(tmp_path_factory):
     inner_content = """
 !InnerData
 raw_value: 5
-computed_value: "${$RUNTIME_VAR * 10 }" # Requires $RUNTIME_VAR
+computed_value: "${RUNTIME_VAR * 10 }" # Requires RUNTIME_VAR
 another_value: "From File"
 """
     inner_file = tmp_path / "inner_data.yaml"
@@ -955,7 +955,7 @@ def test_deferred_cli_context_resolution_failure(deferred_program, deferred_conf
     assert isinstance(config, OuterConfig)
     assert isinstance(config.deferred_inner, DeferredNode)
 
-    runtime_context = {'$RUNTIME_VAR': 42}
+    runtime_context = {'RUNTIME_VAR': 42}
 
     constructed_inner = config.deferred_inner.construct(context=runtime_context)
 

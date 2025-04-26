@@ -11,7 +11,7 @@ from dracon.composer import (
     IncludeNode,
     CompositionResult,
 )
-from dracon.interpolation_utils import resolve_interpolable_variables
+from dracon.interpolation_utils import resolve_interpolable_variables, transform_dollar_vars
 from dracon.interpolation import evaluate_expression
 from dracon.merge import merged, MergeKey
 from dracon.utils import deepcopy, ftrace
@@ -21,11 +21,14 @@ from dracon.merge import add_to_context
 from dracon.loaders.file import read_from_file
 from dracon.loaders.pkg import read_from_pkg
 from dracon.loaders.env import read_from_env
+from dracon.loaders.var import read_from_var
+
 
 DEFAULT_LOADERS: Dict[str, Callable] = {
     'file': read_from_file,
     'pkg': read_from_pkg,
     'env': read_from_env,
+    'var': read_from_var,
 }
 
 
@@ -105,22 +108,25 @@ def compose_from_include_str(
     custom_loaders: dict = DEFAULT_LOADERS,
     node: Optional[IncludeNode] = None,  #
 ) -> Any:
-    context = draconloader.context if not node else node.context
+    from dracon.nodes import Node
 
-    # there are 2 syntaxes for include string interpolations:
-    # first is any variable that starts with $, like $DIR (which is set by the file loader)
-    # second is the usual interpolation syntax, like ${some_expression}.
-    # we resolve both of them here.
-    include_str = evaluate_expression(
+    context = draconloader.context if not node else node.context
+    include_str = transform_dollar_vars(include_str)
+
+    evaluated_include_str = evaluate_expression(
         include_str,
         current_path=include_node_path,
         root_obj=composition_result.root if composition_result else None,
         engine=draconloader.interpolation_engine,
         context=context,
     )
-    include_str = resolve_interpolable_variables(include_str, context)  # type: ignore
 
-    components = parse_include_str(include_str)
+    if not isinstance(evaluated_include_str, str):
+        raise ValueError(
+            f'Invalid include string {include_str} evaluated into a {type(evaluated_include_str)}. Did you forget to use a loader (file:, var:, pkg:, ...)?'
+        )
+
+    components = parse_include_str(evaluated_include_str)
     result = None
     file_context = {}
 
@@ -128,13 +134,7 @@ def compose_from_include_str(
         if composition_result is not None:
             assert isinstance(composition_result.anchor_paths, dict)
 
-            if components.main_path.startswith('$'):
-                assert node is not None
-                result = handle_in_memory_include(
-                    components.main_path[1:], node, components.key_path, draconloader.dump_to_node
-                )
-
-            elif components.main_path.startswith('/'):
+            if components.main_path.startswith('/'):
                 assert not components.key_path, 'Invalid key path for relative path include'
                 result = handle_absolute_path(components.main_path, composition_result)
 
@@ -152,21 +152,24 @@ def compose_from_include_str(
                 result.root = deepcopy(result.root)
                 return result
 
-            assert (
-                ':' in components.main_path
-            ), f'Invalid include path: anchor {components.main_path} not found in document'
+            assert ':' in components.main_path, (
+                f'Invalid include path: anchor {components.main_path} not found in document'
+            )
 
-        assert (
-            ':' in components.main_path
-        ), f'Invalid include path: {components.main_path}. No loader specified.'
+        assert ':' in components.main_path, (
+            f'Invalid include path: {components.main_path}. No loader specified.'
+        )
 
         loader_name, path = components.main_path.split(':', 1)
         if loader_name not in custom_loaders:
             raise ValueError(f'Unknown loader: {loader_name}')
 
-        result, new_context = custom_loaders[loader_name](path)
+        result, new_context = custom_loaders[loader_name](path, node=node)
         file_context = new_context
         draconloader.update_context(new_context)
+
+        if isinstance(result, Node):
+            result = CompositionResult(root=result)
 
         if not isinstance(result, CompositionResult):
             if not isinstance(result, str):

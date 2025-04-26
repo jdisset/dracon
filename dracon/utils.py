@@ -163,6 +163,32 @@ def list_like(obj) -> bool:
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
+def clean_context_keys(context: DictLike) -> DictLike:
+    """returns a new dict with leading '$' removed from keys."""
+    if not context:
+        return context
+    cleaned = {}
+
+    for key, value in context.items():
+        if isinstance(key, str) and key.startswith('$'):
+            if key[1:] in context:
+                logger.debug(
+                    f"context cleaner: found key '{key[1:]}' already exists, ignoring dollar version '{key}'"
+                )
+                continue
+            else:
+                cleaned[key[1:]] = value
+        else:
+            cleaned[key] = value
+
+    if isinstance(context, MutableMapping):
+        try:
+            return type(context)(cleaned)
+        except TypeError:
+            pass
+    return dict(cleaned)
+
+
 def build_nested_dict(flat_args: Dict[str, Any]) -> Dict[str, Any]:
     """
     example:

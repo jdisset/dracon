@@ -23,7 +23,7 @@ from dracon.interpolation_utils import (
     outermost_interpolation_exprs,
     InterpolationMatch,
     find_field_references,
-    resolve_interpolable_variables,
+    transform_dollar_vars,
 )
 
 
@@ -119,9 +119,13 @@ def resolve_field_references(expr: str):
                 f".get_obj(__DRACON__CURRENT_ROOT_OBJ)"
             )
         elif match.symbol == '&':
-            raise ValueError(f"Ampersand references in {expr} should have been handled earlier")
+            # '&' should only appear in InterpolableNode preprocessing
+            # this function runs *during* eval, so '&' shouldn't be here
+            raise ValueError(
+                f"Unexpected ampersand reference '{match.expr}' during expression evaluation"
+            )
         else:
-            raise ValueError(f"Invalid symbol {match.symbol} in {expr}")
+            raise ValueError(f"invalid symbol {match.symbol} in {expr}")
 
         expr = expr[: match.start + offset] + newexpr + expr[match.end + offset :]
         original_len = match.end - match.start
@@ -129,15 +133,16 @@ def resolve_field_references(expr: str):
     return expr
 
 
-def preprocess_expr(expr: str, symbols: Optional[dict] = None):
+@ftrace(watch=[], inputs=['expr'])
+def preprocess_expr(expr: str):
     expr = resolve_field_references(expr)
-    expr = resolve_interpolable_variables(expr, symbols or {})
+    expr = expr.strip()
     return expr
 
 
+@ftrace(watch=[], inputs=['expr'])
 def do_safe_eval(expr: str, engine: str, symbols: Optional[dict] = None) -> Any:
-    expr = preprocess_expr(expr, symbols)
-
+    expr = preprocess_expr(expr)
     if engine == 'asteval':
         safe_eval = Interpreter(user_symbols=symbols or {}, max_string_length=1000)
         res = safe_eval.eval(expr, raise_errors=True)
@@ -221,6 +226,8 @@ def evaluate_expression(
     context: Optional[Dict[str, Any]] = None,
 ) -> Any:
     from dracon.merge import merged, MergeKey
+
+    expr = transform_dollar_vars(expr)
 
     # Initialize interpolations
     if init_outermost_interpolations is None:
@@ -313,6 +320,7 @@ class InterpolableNode(ContextNode):
         context=None,
     ):
         self.init_outermost_interpolations = init_outermost_interpolations
+
         ContextNode.__init__(
             self,
             value,
