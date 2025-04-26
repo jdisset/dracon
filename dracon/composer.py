@@ -386,10 +386,14 @@ class DraconComposer(Composer):
         return node
 
     def handle_interpolation(self, node) -> Node:
+        from dracon.interpolation_utils import transform_dollar_vars
+
         if self.interpolation_enabled:
-            tag_iexpr = outermost_interpolation_exprs(node.tag)
+            tag_iexpr = outermost_interpolation_exprs(transform_dollar_vars(node.tag))
             value_iexpr = (
-                outermost_interpolation_exprs(node.value) if isinstance(node.value, str) else None
+                outermost_interpolation_exprs(transform_dollar_vars(node.value))
+                if isinstance(node.value, str)
+                else None
             )
 
             if tag_iexpr or value_iexpr:

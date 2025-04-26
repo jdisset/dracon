@@ -131,6 +131,30 @@ def test_lazy():
     assert loaded.nested.inner.new == 'John greetings, dear John!'
 
 
+def test_shorthand_nested_interpolation():
+    yaml_content = """
+    v1: ${Var_Name}
+    v2: $Var_Name
+    v3: ${${Var_Name}}
+    v4: ${ $Var_Name }
+    v5: ${Var_Name + 1}
+    v6: ${Var_Name + ${Var_Name}}
+    v7: ${Var_Name + ${Var_Name + 1}}
+    v8: ${$Var_Name + ${Var_Name + ${$Var_Name}}}
+    """
+    loader = DraconLoader(enable_interpolation=True, context={'Var_Name': 1})
+    config = loader.loads(yaml_content)
+    config.resolve_all_lazy()
+    assert config.v1 == 1
+    assert config.v2 == 1
+    assert config.v3 == 1
+    assert config.v4 == 1
+    assert config.v5 == 2
+    assert config.v6 == 2
+    assert config.v7 == 3
+    assert config.v8 == 3
+
+
 def test_ampersand_interpolation_simple():
     yaml_content = """
     base: &base_anchor
@@ -511,7 +535,7 @@ def test_obj_references_instruct():
     assert config['obj4'].name == 'Name 4'
     assert config['prop4'] == '4: Name 4'
 
-    manual_list = [ClassA(index=i + 1, name=f"Name {i+1}") for i in range(5)]
+    manual_list = [ClassA(index=i + 1, name=f"Name {i + 1}") for i in range(5)]
     assert config['as_ampersand_anchor'] == manual_list
 
 
@@ -529,17 +553,17 @@ def test_instruct_on_nodes():
 
     list42:
         !each(elt) ${&alist}:
-            - <<: *$elt
+            - <<: *var:elt
               <<{+}: {name: "new_name ${@index}"}
               <<{<+}:
-                index: *$i42
+                index: *var:i42
 
     other_list:
         !each(elt) ${&alist}:
-            - <<: *$elt
+            - <<: *var:elt
               <<{+}: {name: "new_name ${@index}"}
               <<{<+}: 
-                index: !include $elt@index
+                index: !include var:elt@index
 
     """
 
@@ -603,11 +627,11 @@ def test_defines():
     !define i42 : !int 42
 
     expr42: !int ${i42}
-    inc42: *$i42
+    inc42: *var:i42
 
     !define compint: ${4 + 4}
     compint_expr: ${compint}
-    compint_inc: !include $compint
+    compint_inc: !include var:compint
 
     !define runtimeval : ${func(1,2)}
     runtimeval_expr: ${runtimeval}
@@ -701,5 +725,5 @@ def test_each_ctx_is_shallow():
     resolve_all_lazy(config)
 
     for i, c in enumerate(config['list_content']):
-        assert c['val'] == f"value{i+1}"
+        assert c['val'] == f"value{i + 1}"
         assert c['valist'] == ['value1', 'value2']

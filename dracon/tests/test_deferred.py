@@ -244,7 +244,7 @@ def test_deferred_each_ctx():
     assert config.list_content[0].context['varlist'] is config.list_content[1].context['varlist']
     for i, c in enumerate(config.list_content):
         c = c.construct()
-        assert c.val == f"value{i+1}"
+        assert c.val == f"value{i + 1}"
         assert c.valist == ['value1', 'value2']
 
 
@@ -264,7 +264,7 @@ def test_deferred_context_4():
     for i, c in enumerate(config.list_content):
         assert isinstance(c, DeferredNode)
         c = c.construct()
-        assert c.val == f"value{i+1}"
+        assert c.val == f"value{i + 1}"
         assert c.valist == ['value3']
 
 
@@ -323,7 +323,7 @@ def test_deferred_explicit():
             name: "new_name ${&bid}"
 
     nested:
-        !define aid: ${get_index(construct(&/a_obj)) + $CONSTANT}
+        !define aid: ${get_index(construct(&/a_obj)) + CONSTANT}
         a_index: ${aid}
         aname: ${&/a_obj.name}
         constructed_nameindex: ${construct(&/a_obj).name_index}
@@ -331,8 +331,8 @@ def test_deferred_explicit():
         !define bo: ${&/b_obj} # required to go through a reference when pointing to a deferred node
         obj2:
             <<: !include ao
-        obj3: !include $ao
-        obj4: !include $bo
+        obj3: !include var:ao
+        obj4: !include var:bo
 
 
     """
@@ -350,7 +350,7 @@ def test_deferred_explicit():
 
     assert type(config['nested']) is DeferredNode
 
-    config.nested.update_context({'get_index': get_index, '$CONSTANT': 10})
+    config.nested.update_context({'get_index': get_index, 'CONSTANT': 10})
     nested = config.nested.construct()
     resolve_all_lazy(nested)
 
@@ -540,15 +540,15 @@ def test_complex_deferred_node_pickling():
             name: "new_name ${&bid}"
 
     nested:
-        !define aid: ${get_index(construct(&/a_obj)) + $CONSTANT}
+        !define aid: ${get_index(construct(&/a_obj)) + CONSTANT}
         a_index: ${aid}
         aname: ${&/a_obj.name}
         constructed_nameindex: ${construct(&/a_obj).name_index}
         !define ao: ${&/a_obj}
         !define bo: ${&/b_obj}
         obj2: !include ao
-        obj3: !include $ao
-        obj4: !include $bo
+        obj3: !include var:ao
+        obj4: !include var:bo
     """
 
     loader = DraconLoader(
@@ -561,7 +561,7 @@ def test_complex_deferred_node_pickling():
     unpickled_config = pickle.loads(pickled_config)
 
     # Update context and resolve
-    unpickled_config.nested.update_context({'get_index': get_index, '$CONSTANT': 10})
+    unpickled_config.nested.update_context({'get_index': get_index, 'CONSTANT': 10})
 
     nested = unpickled_config.nested.construct()
     resolve_all_lazy(nested)

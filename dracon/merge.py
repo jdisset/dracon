@@ -5,7 +5,15 @@ from typing import Optional, Any
 import re
 from pydantic import BaseModel
 from enum import Enum
-from dracon.utils import dict_like, DictLike, ListLike, ftrace, deepcopy, list_like
+from dracon.utils import (
+    dict_like,
+    DictLike,
+    ListLike,
+    ftrace,
+    deepcopy,
+    list_like,
+    clean_context_keys,
+)
 from dracon.nodes import (
     MergeNode,
     DraconMappingNode,
@@ -276,6 +284,8 @@ def add_to_context(new_context, existing_item, merge_key=DEFAULT_ADD_TO_CONTEXT_
     """
     Add context to the item context, if it exists.
     """
+    new_context = clean_context_keys(new_context)
+
     if hasattr(existing_item, 'context'):
         existing_item.context = context_add(existing_item.context, new_context, merge_key)
     if hasattr(existing_item, '_clear_ctx') and existing_item._clear_ctx:

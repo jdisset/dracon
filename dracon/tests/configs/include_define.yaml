@@ -7,4 +7,4 @@
 
 !define var_b: ${undefined_var + 5}
 
-var_b_value: !include $var_b
+var_b_value: !include var:var_b

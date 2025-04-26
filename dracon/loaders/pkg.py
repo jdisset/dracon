@@ -14,7 +14,7 @@ def read_from_pkg_cached(*args, **kwargs):
     return read_from_pkg(*args, **kwargs)
 
 
-def read_from_pkg(path: str):
+def read_from_pkg(path: str, **_):
     pkg = None
 
     if ':' in path:
@@ -32,16 +32,16 @@ def read_from_pkg(path: str):
                 with open(p, 'r') as f:
                     pp = Path(p).resolve().absolute()
                     new_context = {
-                        '$DIR': pp.parent.as_posix(),
-                        '$FILE': pp.as_posix(),
-                        '$FILE_PATH': pp.as_posix(),
-                        '$FILE_STEM': pp.stem,
-                        '$FILE_EXT': pp.suffix,
-                        '$FILE_LOAD_TIME': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now)),
-                        '$FILE_LOAD_TIME_UNIX': int(now),
-                        '$FILE_LOAD_TIME_UNIX_MS': int(now * 1000),
-                        '$FILE_SIZE': pp.stat().st_size,
-                        '$PACKAGE_NAME': pkg,
+                        'DIR': pp.parent.as_posix(),
+                        'FILE': pp.as_posix(),
+                        'FILE_PATH': pp.as_posix(),
+                        'FILE_STEM': pp.stem,
+                        'FILE_EXT': pp.suffix,
+                        'FILE_LOAD_TIME': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now)),
+                        'FILE_LOAD_TIME_UNIX': int(now),
+                        'FILE_LOAD_TIME_UNIX_MS': int(now * 1000),
+                        'FILE_SIZE': pp.stat().st_size,
+                        'PACKAGE_NAME': pkg,
                     }
 
                     return f.read(), new_context

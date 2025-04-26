@@ -22,6 +22,22 @@ BASE_DRACON_SYMBOLS: Dict[str, Any] = {}
 
 ## {{{                    --     interpolation exprs     --
 
+NOT_ESCAPED_REGEX = r"(?<!\\)(?:\\\\)*"
+
+
+@lru_cache(maxsize=1024)
+def transform_dollar_vars(text: str) -> str:
+    """Replaces non-escaped $VAR patterns with ${VAR} for standard interpolation."""
+    # pattern: $ followed by a valid python identifier start, then identifier chars.
+    # ensures we don't match just '$' or '$123' etc.
+    pattern = rf"{NOT_ESCAPED_REGEX}\$([a-zA-Z_][a-zA-Z0-9_]*)"
+
+    def repl(match):
+        var_name = match.group(1)
+        return f"${{{var_name}}}"  # transform $VAR -> ${VAR}
+
+    return re.sub(pattern, repl, text)
+
 
 @dataclass
 class InterpolationMatch:
@@ -91,10 +107,8 @@ class ReferenceMatch:
     symbol: Literal['@', '&']
 
 
-NOT_ESCAPED_REGEX = r"(?<!\\)(?:\\\\)*"
-# INVALID_KEYPATH_CHARS = r'[]() ,:=+-*%<>!&|^~@#$?;{}"\'`'
 INVALID_KEYPATH_CHARS = r'[]() ,+-*%<>!&|^~@#$?;{}"\'`'
-SPECIAL_KEYPATH_CHARS = './\\'  # Added backslash to handle escaping of itself
+SPECIAL_KEYPATH_CHARS = './\\'
 
 
 def find_field_references(expr: str) -> list[ReferenceMatch]:
