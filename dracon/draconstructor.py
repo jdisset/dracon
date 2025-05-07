@@ -19,7 +19,7 @@ from dracon import dracontainer
 from dracon.interpolation import outermost_interpolation_exprs, InterpolableNode
 from dracon.lazy import LazyInterpolable, resolve_all_lazy, is_lazy_compatible
 from dracon.resolvable import Resolvable, get_inner_type
-from dracon.deferred import DeferredNode
+from dracon.deferred import DeferredNode, DraconLoader as DeferredDraconLoaderType  # For type hint
 from dracon.nodes import reset_tag
 from typing import (
     Optional,
@@ -31,6 +31,7 @@ from typing import (
     get_origin,
 )
 from functools import partial
+from dracon.nodes import DraconScalarNode  # Added for type checking
 import logging
 
 logger = logging.getLogger("dracon")
@@ -265,7 +266,6 @@ class Draconstructor(Constructor):
                     tag_type, obj, self.localns, self._root_node, self._current_path
                 )
             else:
-                # proceed with default construction and validation logic
                 if issubclass(get_origin_type(tag_type), Resolvable):
                     return self.construct_resolvable(node, tag_type)
 
@@ -279,7 +279,15 @@ class Draconstructor(Constructor):
                     reset_tag(node)
                 obj = self.base_construct_object(node, deep=True)
 
-                node.tag = tag  # restore tag
+                if (
+                    isinstance(node, DraconScalarNode)
+                    and isinstance(obj, str)
+                    and not isinstance(node, (InterpolableNode, DeferredNode))
+                ):
+                    from dracon.interpolation_utils import unescape_dracon_specials
+
+                    obj = unescape_dracon_specials(obj)
+                node.tag = tag
 
                 obj = pydantic_validate(
                     tag_type,
@@ -345,6 +353,9 @@ class Draconstructor(Constructor):
             root_obj=self._root_node,
             engine=self.interpolation_engine,
             context=context,
+            enable_shorthand_vars=self.dracon_loader.enable_shorthand_vars
+            if self.dracon_loader
+            else True,
         )
 
         return lzy

@@ -10,6 +10,7 @@ from dracon.interpolation_utils import find_field_references
 from dracon.include import compose_from_include_str
 import pytest
 from dracon.keypath import ROOTPATH
+import dracon as dr
 from dracon.dracontainer import resolve_all_lazy
 ##────────────────────────────────────────────────────────────────────────────}}}
 
@@ -341,6 +342,40 @@ def test_obj_references():
         ClassA(index=4, name='Name 4'),
         ClassA(index=5, name='Name 5'),
     ]
+
+
+def test_key_interpolation():
+    yaml_content = """
+
+    tv: &tvars
+        t1: ${key1}
+        t2: ${key2}
+
+    !define theme: ${construct(&tvars)}
+    ${theme.t1}_haha: value1concat
+    sub:
+        ${theme.t1}: value1
+        ${theme.t2}: value2
+
+    !each(i) ${list(range(2))}:
+        k_$i:
+            ${theme.t1}_hey: $i
+            nested:
+                ${theme.t1}nested_$i: ${theme.t2}nested
+
+    """
+
+    config = dr.loads(yaml_content, raw_dict=True, context={'key1': 'k1', 'key2': 'k2'})
+    resolve_all_lazy(config)
+    print(config)
+    assert config['sub']['k1'] == 'value1'
+    assert config['sub']['k2'] == 'value2'
+    assert config['k1_haha'] == 'value1concat'
+
+    assert config['k_0']['k1_hey'] == 0
+    assert config['k_1']['k1_hey'] == 1
+    assert config['k_0']['nested']['k1nested_0'] == 'k2nested'
+    assert config['k_1']['nested']['k1nested_1'] == 'k2nested'
 
 
 def test_instruction_define():
@@ -727,3 +762,36 @@ def test_each_ctx_is_shallow():
     for i, c in enumerate(config['list_content']):
         assert c['val'] == f"value{i + 1}"
         assert c['valist'] == ['value1', 'value2']
+
+
+def test_escaped_interpolations():
+    yaml_content_template = """
+    escaped_curly: '\${1+1}'
+    interpolated_curly: ${1+1}
+    escaped_paren: '\$(1+1)'
+    interpolated_paren: $(1+1)
+    escaped_var: '\$MY_VAR'
+    interpolated_var: $MY_VAR
+    string_with_escapes: 'Value is \${foo}, \$(bar), and \$VAR.'
+    dollar_string: "$"
+    dollar_prefix_string: "$foo"
+    dollar_curly_incomplete: "${foo"
+    dollar_with_space: "$ {"
+    """
+
+    loader = dr.DraconLoader(enable_interpolation=True, context={'MY_VAR': "var_value", 'foo': 1})
+    config = loader.loads(yaml_content_template)
+    resolve_all_lazy(config)
+    print(f"config: {config}")
+
+    assert config.escaped_curly == "${1+1}"
+    assert config.interpolated_curly == 2
+    assert config.escaped_paren == "$(1+1)"
+    assert config.interpolated_paren == 2
+    assert config.escaped_var == "$MY_VAR"
+    assert config.interpolated_var == "var_value"
+    assert config.string_with_escapes == "Value is ${foo}, $(bar), and $VAR."
+    assert config.dollar_string == "$"
+    assert config.dollar_prefix_string == 1
+    assert config.dollar_curly_incomplete == "${foo"
+    assert config.dollar_with_space == "$ {"

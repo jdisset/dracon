@@ -95,6 +95,7 @@ class DraconLoader:
         interpolation_engine: Literal['asteval', 'eval'] = DEFAULT_EVAL_ENGINE,
         context: Optional[Dict[str, Any]] = None,
         deferred_paths: Optional[list[KeyPath | str]] = None,
+        enable_shorthand_vars: bool = True,
         use_cache: bool = True,
     ):
         self.custom_loaders = DEFAULT_LOADERS.copy()
@@ -107,6 +108,7 @@ class DraconLoader:
         self.base_dict_type = base_dict_type
         self.base_list_type = base_list_type
         self.use_cache = use_cache
+        self.enable_shorthand_vars = enable_shorthand_vars
 
         if interpolation_engine not in ['asteval', 'eval', 'none']:
             raise ValueError(
@@ -130,6 +132,7 @@ class DraconLoader:
         self.yaml.Representer = DraconRepresenter
 
         self.yaml.composer.interpolation_enabled = self._enable_interpolation
+        self.yaml.composer.enable_shorthand_vars = self.enable_shorthand_vars
         self.yaml.constructor.dracon_loader = self
         self.yaml.constructor.yaml_base_dict_type = self.base_dict_type
         self.yaml.constructor.interpolation_engine = self.interpolation_engine
@@ -154,6 +157,7 @@ class DraconLoader:
                 make_hashable(self.context),
                 tuple(self.deferred_paths),
                 self._enable_interpolation,
+                self.enable_shorthand_vars,
             )
         )
 
@@ -167,6 +171,7 @@ class DraconLoader:
             base_dict_type=self.base_dict_type,
             base_list_type=self.base_list_type,
             enable_interpolation=self._enable_interpolation,
+            enable_shorthand_vars=self.enable_shorthand_vars,
             context=self.context.copy() if self.context else None,
         )
         new_loader.referenced_nodes = self.referenced_nodes.copy()

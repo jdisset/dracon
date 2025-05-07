@@ -266,6 +266,7 @@ class DraconComposer(Composer):
         self.interpolation_enabled = True
         self.merging_enabled = True
         self.root_node = None
+        self.enable_shorthand_vars = True
 
     def get_result(self) -> CompositionResult:
         if self.root_node is not None:
@@ -388,11 +389,19 @@ class DraconComposer(Composer):
     def handle_interpolation(self, node) -> Node:
         from dracon.interpolation_utils import transform_dollar_vars
 
+        value_for_scan = node.value
+        tag_for_scan = node.tag
+
+        if self.enable_shorthand_vars:
+            if isinstance(node.value, str):
+                value_for_scan = transform_dollar_vars(node.value)
+            tag_for_scan = transform_dollar_vars(node.tag)
+
         if self.interpolation_enabled:
-            tag_iexpr = outermost_interpolation_exprs(transform_dollar_vars(node.tag))
+            tag_iexpr = outermost_interpolation_exprs(tag_for_scan)
             value_iexpr = (
-                outermost_interpolation_exprs(transform_dollar_vars(node.value))
-                if isinstance(node.value, str)
+                outermost_interpolation_exprs(value_for_scan)
+                if isinstance(value_for_scan, str)
                 else None
             )
 
