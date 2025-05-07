@@ -76,9 +76,29 @@ def outermost_interpolation_exprs(
         ]
     )
     scanner = pp.Combine(interpolation_start_char + scanner)
-    for match, start, end in scanner.scanString(text):
-        matches.append(InterpolationMatch(start, end, match[0][2:-1]))
+
+    # handle escaped characters
+    for match_obj, start, end in scanner.scanString(text):
+        num_backslashes = 0
+        k = start - 1
+        while k >= 0 and text[k] == '\\':
+            num_backslashes += 1
+            k -= 1
+        if num_backslashes % 2 == 1:
+            continue
+        matches.append(InterpolationMatch(start, end, match_obj[0][2:-1]))
+
     return sorted(matches, key=lambda m: m.start)
+
+
+def unescape_dracon_specials(text: str) -> str:
+    if '\\$' not in text:
+        return text
+
+    text = re.sub(r'\\(\$\{)', r'\1', text)
+    text = re.sub(r'\\(\$\()', r'\1', text)
+    text = re.sub(r'\\(\$([a-zA-Z_][a-zA-Z0-9_]*))(?![a-zA-Z0-9_])', r'\1', text)
+    return text
 
 
 def outermost_comptime_interpolations(text: str) -> list[InterpolationMatch]:

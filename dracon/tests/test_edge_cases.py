@@ -3,7 +3,7 @@ from dracon import DraconLoader, resolve_all_lazy
 
 def test_edge_cases():
     loader = DraconLoader(enable_interpolation=True)
-    config = loader.load('dracon/tests/configs/edge_cases.yaml')
+    config = loader.load('pkg:dracon:tests/configs/edge_cases.yaml')
 
     print(f"Config: {config}")
     resolve_all_lazy(config)

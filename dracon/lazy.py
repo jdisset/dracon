@@ -92,6 +92,7 @@ class LazyInterpolable(Lazy[T]):
         permissive: bool = False,
         engine: str = DEFAULT_EVAL_ENGINE,
         context: Optional[Dict[str, Any]] = None,
+        enable_shorthand_vars=True,
     ):
         super().__init__(value, validator, name)
 
@@ -101,6 +102,7 @@ class LazyInterpolable(Lazy[T]):
         self.init_outermost_interpolations = init_outermost_interpolations
         self.permissive = permissive
         self.engine = engine
+        self.enable_shorthand_vars = enable_shorthand_vars
         if not self.permissive:
             assert isinstance(value, (str, tuple)), (
                 f"LazyInterpolable expected string, got {type(value)}. Did you mean to contruct with permissive=True?"
@@ -115,6 +117,7 @@ class LazyInterpolable(Lazy[T]):
             'permissive': self.permissive,
             'context': self.context,
             'engine': self.engine,
+            'enable_shorthand_vars': self.enable_shorthand_vars,
             'init_outermost_interpolations': self.init_outermost_interpolations
             if self.init_outermost_interpolations
             else None,
@@ -140,6 +143,7 @@ class LazyInterpolable(Lazy[T]):
             permissive=state['permissive'],
             engine=state['engine'],
             context=state['context'],
+            enable_shorthand_vars=state['enable_shorthand_vars'],
             validator=None,
         )
 
@@ -162,6 +166,7 @@ class LazyInterpolable(Lazy[T]):
                     init_outermost_interpolations=self.init_outermost_interpolations,
                     engine=self.engine,
                     context=ctx,
+                    enable_shorthand_vars=self.enable_shorthand_vars,
                 )
                 return self.validate(resolved_value)
             except Exception as e:
@@ -376,6 +381,8 @@ def set_val(parent: Any, key, value: Any) -> None:
 
 def collect_lazy_by_depth(obj, path=ROOTPATH, seen=None):
     """collect all lazy objects grouped by depth"""
+    from dracon.deferred import DeferredNode
+
     if seen is None:
         seen = set()
 
@@ -384,6 +391,8 @@ def collect_lazy_by_depth(obj, path=ROOTPATH, seen=None):
 
     def _collect(o, p, seen_set):
         # skip None values and class types
+        if isinstance(o, DeferredNode):
+            return
         if o is None or isinstance(o, type):
             return
 

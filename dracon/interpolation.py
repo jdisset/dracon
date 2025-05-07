@@ -224,10 +224,12 @@ def evaluate_expression(
     init_outermost_interpolations: Optional[List[InterpolationMatch]] = None,
     engine: str = DEFAULT_EVAL_ENGINE,
     context: Optional[Dict[str, Any]] = None,
+    enable_shorthand_vars: bool = True,
 ) -> Any:
     from dracon.merge import merged, MergeKey
 
-    expr = transform_dollar_vars(expr)
+    if enable_shorthand_vars:
+        expr = transform_dollar_vars(expr)
 
     # Initialize interpolations
     if init_outermost_interpolations is None:
@@ -269,6 +271,7 @@ def evaluate_expression(
             allow_recurse=allow_recurse,
             engine=engine,
             context=context,
+            enable_shorthand_vars=enable_shorthand_vars,
         )
         evaluated_expr = do_safe_eval(str(resolved_expr), engine, symbols)
         endexpr = recurse_lazy_resolve(evaluated_expr)
@@ -283,6 +286,7 @@ def evaluate_expression(
                 allow_recurse=allow_recurse,
                 engine=engine,
                 context=context,
+                enable_shorthand_vars=enable_shorthand_vars,
             )
             evaluated_expr = do_safe_eval(str(resolved_expr), engine, symbols)
             newexpr = str(recurse_lazy_resolve(evaluated_expr))
@@ -299,6 +303,7 @@ def evaluate_expression(
             allow_recurse=allow_recurse - 1,
             engine=engine,
             context=context,
+            enable_shorthand_vars=enable_shorthand_vars,
         )
     return endexpr
 
