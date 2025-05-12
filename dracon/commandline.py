@@ -409,7 +409,7 @@ class Program(BaseModel, Generic[T]):
         return conf, final_raw_args
 
     def print_validation_error(self, e):
-        logger.debug(f"validation error: {e}")
+        logger.error(f"error: {e}")
         print(file=sys.stderr)  # newline before errors
         for error in e.errors():
             loc = '.'.join(map(str, error['loc'])) or 'root'
@@ -513,7 +513,7 @@ class Program(BaseModel, Generic[T]):
         )
         loader.update_context(defined_vars)
         loader.yaml.representer.exclude_defaults = False
-        pdump_str = loader.dump(self.conf_type.model_construct())
+        pdump_str = loader.dump(self.conf_type.__new__(self.conf_type))
 
         logger.debug(f"pdump_str: {pdump_str}")
 
