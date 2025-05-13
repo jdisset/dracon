@@ -413,8 +413,9 @@ class Program(BaseModel, Generic[T]):
         print(file=sys.stderr)  # newline before errors
         for error in e.errors():
             loc = '.'.join(map(str, error['loc'])) or 'root'
-            inp = f" (input type: {type(error['input']).__name__})" if 'input' in error else ""
-            print(f"error: field '{loc}': {error['msg']}{inp}", file=sys.stderr)
+            inpt = f" (input type: {type(error['input']).__name__})" if 'input' in error else ""
+            inpval = f" (input value: {error['input']})" if 'input' in error else ""
+            print(f"error: field '{loc}': {error['msg']}{inpt}{inpval}", file=sys.stderr)
         print(file=sys.stderr)  # newline after errors
         print_help(self, None)  # exits
 
