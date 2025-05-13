@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Dracon is a modular configuration system and command-line interface (CLI) generator for Python, built upon YAML. It extends standard YAML with powerful features to help manage complex application configurations effectively, integrating seamlessly with Pydantic.
+Dracon is a modular configuration system and command-line interface (CLI) generator for Python, built on top of YAML. It extends standard YAML with powerful features to help manage complex application configurations effectively, integrating seamlessly with Pydantic.
 
 Need to juggle static config files, environment variables, complex overrides, and boilerplate CLI argument parsing? Dracon provides a unified approach:
 
