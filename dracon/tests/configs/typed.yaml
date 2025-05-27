@@ -1,0 +1,7 @@
+ned: !Person
+  name: Eddard
+  age: 40
+
+jon: !$(str('Person'))
+  name: Jon
+  age: 20

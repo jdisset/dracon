@@ -147,7 +147,7 @@ class DeferredNode(ContextNode, Generic[T]):
 
         self._loader.deferred_paths = deferred_paths
 
-        composition = deepcopy(self._full_composition)
+        composition = self._full_composition
         value = self.value
 
         ser_debug(context, operation='deepcopy')
@@ -182,14 +182,6 @@ class DeferredNode(ContextNode, Generic[T]):
     @property
     def keypath_passthrough(self):
         return self.value
-
-    def dracon_dump_to_node(self, representer) -> Node:
-        val = deepcopy(self.value)
-        if len(val.tag):
-            val.tag = '!deferred:' + val.tag
-        else:
-            val.tag = '!deferred'
-        return val
 
     def __hash__(self):
         return context_node_hash(self)

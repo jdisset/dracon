@@ -1,0 +1,16 @@
+# This is not yet implemented but reflects what I'd like to do with tags:
+# - unified syntax for tag combination using ':'
+# - clearly defined behavior for tag & type inheritance (most specific wins)
+# - unified syntax for tag parameters (url parameter style, e.g. ?type=overwrite&foo=bar)
+#
+# the eddard key doesn't have a type, so it will take ned's type (Person).
+eddard: !include $DIR/typed@ned
+
+# combine a type with an include.
+# Since Stark is a subclass of Person, Stark will win over jon's declared type (Person).
+jon: !Stark:include file:$DIR/typed@jon
+
+# adding parameters to the include tag
+jon_as_a_person: !Stark:include?tag=overwrite file:$DIR/typed@ned # overwrite Stark type with Person
+jon_as_a_dict: !include?tag=discard file:$DIR/typed@ned # ignore included Person type (discard it)
+jon_explicit_include: !include?source=file $DIR/typed@ned # equivalent to !include file:$DIR/typed@ned
