@@ -4,6 +4,7 @@ import sys
 import typing
 import logging
 import traceback
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import (
     List,
@@ -42,6 +43,9 @@ logger = logging.getLogger(__name__)
 
 B = TypeVar("B", bound=BaseModel)
 ProgramType = ForwardRef("Program")
+
+
+# TODO: use Field description instead of (or in addition to) Arg's help
 
 
 def get_root_exception(e):
@@ -391,12 +395,12 @@ class Program(BaseModel, Generic[T]):
         except ValidationError as e:
             self.print_validation_error(e)
         except Exception as e:  # catch other config generation errors
-            print(f"\nerror generating configuration: {e}. error type = {type(e)}", file=sys.stderr)
             root_exception = get_root_exception(e)
             if isinstance(root_exception, ValidationError):
                 self.print_validation_error(root_exception)
-            traceback.print_exc()
-            sys.exit(1)
+            else:
+                print(f"\nError when generating configuration: {root_exception}\n", file=sys.stderr)
+                sys.exit(1)
 
         # prepare final raw args dict for return
         final_raw_args = raw_args.copy()
@@ -408,16 +412,107 @@ class Program(BaseModel, Generic[T]):
         )
         return conf, final_raw_args
 
-    def print_validation_error(self, e):
-        logger.error(f"error: {e}")
-        print(file=sys.stderr)  # newline before errors
-        for error in e.errors():
-            loc = '.'.join(map(str, error['loc'])) or 'root'
-            inpt = f" (input type: {type(error['input']).__name__})" if 'input' in error else ""
-            inpval = f" (input value: {error['input']})" if 'input' in error else ""
-            print(f"error: field '{loc}': {error['msg']}{inpt}{inpval}", file=sys.stderr)
-        print(file=sys.stderr)  # newline after errors
-        print_help(self, None)  # exits
+    def _format_error_item_text(self, error: dict) -> Text:
+        from .loader import dump
+
+        loc_str = "[request root]" if not error['loc'] else ".".join(map(str, error['loc']))
+        msg = error['msg']
+        input_val = error.get('input')
+        error_type = error['type']
+
+        item_text = Text()
+        bullet_line = Text("  • ", style="default")
+        bullet_line.append("Arg ", style="white")
+        bullet_line.append(f"'{loc_str}'", style="cyan")
+
+        if error_type == 'missing':
+            bullet_line.append(" is missing.")
+        else:
+            bullet_line.append(f": {msg}", style="white")
+
+        item_text.append(bullet_line)
+
+        def truncate_repr(value: Any, max_len: int, ellipsis: str = "...") -> str:
+            s = repr(value)
+            return s if len(s) <= max_len else s[: max_len - len(ellipsis)] + ellipsis
+
+        if error_type != 'missing' and input_val is not None:
+            input_repr = '\n     '.join([''] + dump(input_val).splitlines())
+            details_line = Text(f"\n    Input: {input_repr}", style="dim")
+            details_line.append(f"\n    Type: {type(input_val).__name__}", style="dim")
+
+            if error.get('ctx'):
+                ctx_items = []
+                for k, v_ctx in error['ctx'].items():
+                    if k == 'error' and hasattr(v_ctx, 'message'):
+                        v_ctx = v_ctx.message
+                        continue
+                    if isinstance(v_ctx, (dict, list)) and len(str(v_ctx)) > 50:
+                        continue
+
+                    v_ctx_repr = truncate_repr(v_ctx, 20)
+                    ctx_items.append(f"{k}={v_ctx_repr}")
+                if ctx_items:
+                    ctx_display_str = ", ".join(ctx_items)
+                    details_line.append(f"\n    Context: {ctx_display_str}", style="dim")
+            item_text.append(details_line)
+        return item_text
+
+    def print_validation_error(self, e: 'ValidationError'):
+        error_types = defaultdict(list)
+        for error_detail in e.errors():
+            error_types[error_detail['type']].append(error_detail)
+
+        def format_error_type_title(type_key: str):
+            if type_key == "missing":
+                return "Missing Arguments"
+
+            type_display_name = ' '.join(
+                part.replace('_', ' ') for part in type_key.split('.')
+            ).title()
+
+            return (
+                type_display_name
+                if type_display_name.endswith(("Error", "Errors"))
+                else f"{type_display_name} Errors"
+            )
+
+        all_error_text_segments = []
+        is_first_group = True
+        for error_type_key, errors_in_group in sorted(error_types.items()):
+            if not is_first_group:
+                all_error_text_segments.append(Text("\n"))
+            is_first_group = False
+
+            title = format_error_type_title(error_type_key)
+            all_error_text_segments.append(Text(f"{title}:\n", style="bold red"))
+
+            for error_item_data in errors_in_group:
+                all_error_text_segments.append(self._format_error_item_text(error_item_data))
+                all_error_text_segments.append(Text("\n"))
+
+        if all_error_text_segments and all_error_text_segments[-1].plain == "\n":
+            all_error_text_segments.pop()
+
+        assembled_text = Text.assemble(*all_error_text_segments)
+
+        final_content = (
+            assembled_text
+            if assembled_text.plain.strip()
+            else Text("No specific error details to display.", style="dim")
+        )
+
+        error_panel = Panel(
+            final_content,
+            # title=Text("Errors", style="bold red"),
+            box=ROUNDED,
+            border_style="red",
+            expand=False,
+            padding=(1, 5),
+        )
+
+        console.print(error_panel)
+        print_help(self, None)
 
     def _parse_single_arg(
         self,

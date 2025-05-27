@@ -7,7 +7,6 @@ from dracon.resolvable import Resolvable
 from pydantic import BaseModel
 from dracon.include import compose_from_include_str
 from dracon.utils import deepcopy
-import tempfile
 
 # Set a dummy environment variable for testing purposes
 os.environ["TESTVAR1"] = "test_var_1"
@@ -22,6 +21,15 @@ base_config_path = 'dracon:tests/configs/base.yaml'
 interp_config_path = 'dracon:tests/configs/interpolation.yaml'
 resolvable_config_path = 'dracon:tests/configs/resolvable.yaml'
 override_config_path = 'dracon:tests/configs/override.yaml'
+
+
+class Person(BaseModel):
+    name: str
+    age: int
+
+
+class WithResolvable(BaseModel):
+    ned: Resolvable[Person]
 
 
 def main_config_ok(config):
@@ -198,15 +206,6 @@ def test_override():
         "item3",
         "item4",
     ]
-
-
-class Person(BaseModel):
-    name: str
-    age: int
-
-
-class WithResolvable(BaseModel):
-    ned: Resolvable[Person]
 
 
 def test_resolvable():

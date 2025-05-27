@@ -163,6 +163,14 @@ def list_like(obj) -> bool:
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
+def dracontainer_aware_json(obj):
+
+    if list_like(obj):
+        return [obj for obj in obj]
+    elif dict_like(obj):
+        return {k: v for k, v in obj.items()}
+
+
 def clean_context_keys(context: DictLike) -> DictLike:
     """returns a new dict with leading '$' removed from keys."""
     if not context:

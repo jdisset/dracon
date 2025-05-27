@@ -27,6 +27,10 @@ from dracon.interpolation_utils import (
 )
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
@@ -166,6 +170,8 @@ def do_safe_eval(expr: str, engine: str, symbols: Optional[dict] = None) -> Any:
             import traceback
 
             error_tb = '\n'.join(traceback.format_exception(type(e), e, e.__traceback__))
+            logger.error(f"Error evaluating expression {expr}:\n{error_tb}")
+            logger.exception(e)
             raise InterpolationError(f"Error evaluating expression {expr}:\n{error_tb}") from e
     else:
         raise ValueError(f"Unknown interpolation engine: {engine}")
@@ -231,23 +237,19 @@ def evaluate_expression(
     if enable_shorthand_vars:
         expr = transform_dollar_vars(expr)
 
-    # Initialize interpolations
     if init_outermost_interpolations is None:
         interpolations = outermost_interpolation_exprs(expr)
     else:
         interpolations = init_outermost_interpolations
 
-    # Return the expression if there are no interpolations
     if not interpolations:
         return expr
 
-    # Ensure current_path is a KeyPath instance
     if isinstance(current_path, str):
         current_path = KeyPath(current_path)
 
     symbols = prepare_symbols(current_path, root_obj, context)
 
-    # Helper function to resolve Lazy instances
     def recurse_lazy_resolve(expr):
         if isinstance(expr, LazyProtocol):
             expr.current_path = current_path
@@ -256,7 +258,7 @@ def evaluate_expression(
             expr = expr.resolve()
         return expr
 
-    # Check if the entire expression is a single interpolation
+    # check if the entire expression is a single interpolation
     if (
         len(interpolations) == 1
         and interpolations[0].start == 0
@@ -276,7 +278,7 @@ def evaluate_expression(
         evaluated_expr = do_safe_eval(str(resolved_expr), engine, symbols)
         endexpr = recurse_lazy_resolve(evaluated_expr)
     else:
-        # Process and replace each interpolation within the expression
+        # process and replace each interpolation within the expression
         offset = 0
         for match in interpolations:
             resolved_expr = evaluate_expression(
@@ -294,7 +296,6 @@ def evaluate_expression(
             offset += len(newexpr) - (match.end - match.start)
         endexpr = expr
 
-    # Recurse if allowed and necessary
     if allow_recurse != 0 and isinstance(endexpr, str):
         return evaluate_expression(
             endexpr,
@@ -443,13 +444,6 @@ class InterpolableNode(ContextNode):
     def flush_references(self):
         if '__DRACON_NODES' in self.context:
             del self.context['__DRACON_NODES']
-
-    # def __deepcopy__(self, memo):
-    #     # use ContextNode's deepcopy method
-    #     new_node = super().__deepcopy__(memo)
-    #     new_node.init_outermost_interpolations = self.init_outermost_interpolations
-    #     new_node.referenced_nodes = self.referenced_nodes
-    #     return new_node
 
     def copy(self):
         """Create a copy of the interpolable node with shallow copied context and referenced nodes."""

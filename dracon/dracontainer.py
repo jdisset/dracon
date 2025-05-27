@@ -249,10 +249,13 @@ class Sequence(Dracontainer, MutableSequence[V]):
         if index in self._per_item_metadata:
             del self._per_item_metadata[index]
 
-    def __getitem__(self, index):  # type: ignore
-        index = int(index)
-        element = self._data[index]
-        return self._handle_lazy(str(index), element)
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            return Sequence(self._data[index])
+        else:
+            index = int(index)
+            element = self._data[index]
+            return self._handle_lazy(str(index), element)
 
     def __len__(self):
         return len(self._data)
