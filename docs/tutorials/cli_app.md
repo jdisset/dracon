@@ -104,7 +104,7 @@ Now, let's run it with different configurations:
 
     ```bash
     export DB_PASS="dev_secret_shhh"
-    python main.py -e dev
+    python main.py +config/base.yaml -e dev
     ```
 
     _Expected Output Snippets:_

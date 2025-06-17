@@ -54,7 +54,7 @@ class DatabaseConfig(BaseModel):
 
 class AppConfig(BaseModel):
 
-    input_path: Annotated[Optionalpstr, Arg(help="Example of positional argument.", positional=True), ]
+    input_path: Annotated[str, Arg(help="Example of positional argument.", positional=True)] = './'
     database: Annotated[DatabaseConfig, Arg(help="Database conf.")] = Field(default_factory=DatabaseConfig) # Use default_factory for nested models
     environment: Annotated[Literal['dev','prod','test'], Arg(short='e', help="Deployment env.")] # required arg since no default
     log_level: Annotated[Literal["DEBUG", "INFO", "WARNING", "ERROR"], Arg(help="Logging level")] = "INFO"
@@ -98,7 +98,7 @@ output_path: "/data/${computed_runtime_value}/output" # Output path uses interpo
 **3. Production Overrides (`config/prod.yaml`):**
 
 ```yaml title="config/prod.yaml"
-environment: production # Set environment directly
+environment: prod # Set environment directly
 log_level: WARNING
 workers: 4
 
@@ -106,7 +106,7 @@ database: # Only override specific DB fields for prod
   host: "db.prod.svc.cluster.local"
   username: prod_db_user
 
-<<: !include file:base.yaml # merge base
+<<{>+}: !include file:base.yaml # merge base, existing values (from prod.yaml) win
 ```
 
 **4. Secret File (`config/db_user.secret`):**
@@ -136,7 +136,7 @@ $ python main.py --help # Show help
 
 # Run with development environment (required arg). Needs DB_PASS env var.
 $ export DB_PASS="dev_secret"
-$ python main.py -e dev
+$ python main.py +config/base.yaml -e dev
 # Output uses defaults from base.yaml and Pydantic, env var for password.
 # DB Host will be db.dev.local
 
