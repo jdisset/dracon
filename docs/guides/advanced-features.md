@@ -14,8 +14,8 @@ Control how deep recursive merging goes:
 
 # Different limits for different sources
 base_config:
-  <<{+1}: !include file:shallow.yaml  # Only merge top level
-  <<{+3}: !include file:deep.yaml     # Merge 3 levels deep
+  <<{+1}: !include file:shallow.yaml # Only merge top level
+  <<{+3}: !include file:deep.yaml # Merge 3 levels deep
 ```
 
 ### Keypath Redirection
@@ -37,7 +37,7 @@ Set different merge strategies for dictionaries and lists:
 # Append lists, replace dictionaries
 <<{~}[+]: !include file:source.yaml
 
-# Replace lists, merge dictionaries recursively  
+# Replace lists, merge dictionaries recursively
 <<{+}[~]: !include file:source.yaml
 
 # Custom depth for each
@@ -56,7 +56,7 @@ from dracon import Arg
 class Config(BaseModel):
     # Automatically prefixes with '+' to load file
     secrets: Annotated[dict, Arg(is_file=True, help="Secrets file")]
-    
+
     # Manual file loading syntax
     override: Annotated[dict, Arg(help="Config override")]
     # Usage: --override +config.yaml
@@ -102,16 +102,16 @@ environment: prod
 
 # Keypath references
 database:
-  host: "db.${@/environment}.local"    # References /environment
-  backup: "backup.${@host}.local"      # References database/host
-  
-# Anchor references  
+  host: "db.${@/environment}.local" # References /environment
+  backup: "backup.${@host}.local" # References database/host
+
+# Anchor references
 defaults: &defaults
   timeout: 30
   retries: 3
 
 service:
-  timeout: ${&defaults.timeout * 2}    # References anchor content
+  timeout: ${&defaults.timeout * 2} # References anchor content
 ```
 
 ### Key Interpolation
@@ -125,7 +125,7 @@ Generate dynamic keys using interpolation:
 
 # Generate keys dynamically
 styles:
-  ${theme.t1}_color: "#007bff" 
+  ${theme.t1}_color: "#007bff"
   ${theme.t2}_color: "#6c757d"
 ```
 
@@ -174,8 +174,7 @@ Pass parameters to deferred construction:
 
 ```yaml
 # With query-style parameters
-computed_path: !deferred::base_path=/data&suffix=.log
-  ${base_path}/app${suffix}
+computed_path: !deferred::base_path=/data&suffix=.log ${base_path}/app${suffix}
 ```
 
 ## Advanced Include Patterns
@@ -201,15 +200,6 @@ api_key: !include env:API_SECRET
 # From defined variables
 !define config_name: advanced
 current_config: !include var:config_name
-```
-
-### Conditional Includes
-
-```yaml
-# Environment-based includes
-database: !if ${getenv('ENVIRONMENT') == 'prod'}
-  then: !include file:config/prod-db.yaml
-  else: !include file:config/dev-db.yaml
 ```
 
 ## Instruction-Based Programming
@@ -251,13 +241,13 @@ service_mesh: !generate ${
 
 services:
   !define service_timeout: ${global_timeout * 2}
-  
+
   auth:
-    timeout: ${service_timeout}  # Uses local definition
-    
+    timeout: ${service_timeout} # Uses local definition
+
   api:
     !define service_timeout: ${global_timeout / 2}
-    timeout: ${service_timeout}  # Uses redefined local value
+    timeout: ${service_timeout} # Uses redefined local value
 ```
 
 ## Performance Optimizations
@@ -300,7 +290,7 @@ def worker(config_data):
 
 if __name__ == '__main__':
     config = load('config.yaml')
-    
+
     with mp.Pool() as pool:
         results = pool.map(worker, [config] * 4)
 ```
@@ -326,7 +316,7 @@ from pydantic import BaseModel, validator
 
 class Config(BaseModel):
     port: int
-    
+
     @validator('port')
     def validate_port(cls, v):
         if not (1024 <= v <= 65535):
@@ -334,17 +324,11 @@ class Config(BaseModel):
         return v
 ```
 
-### Graceful Fallbacks
-
-```yaml
-# Optional includes with fallbacks
-config: !if ${file_exists('local.yaml')}
-  then: !include file:local.yaml
-  else: !include file:default.yaml
-
 # Safe environment variable access
+
 api_url: ${getenv('API_URL') or 'http://localhost:8080'}
-```
+
+````
 
 ## Integration Patterns
 
@@ -366,7 +350,7 @@ loader.register_loader('db', DatabaseLoader())
 
 # Use in YAML
 config: !include db:config_table@prod_settings
-```
+````
 
 ### Pre-commit Hook Integration
 
@@ -404,7 +388,7 @@ jobs:
           python -c "
           from dracon import load
           from myapp.models import AppConfig
-          
+
           configs = ['config/base.yaml', 'config/prod.yaml']
           for config_file in configs:
               load(config_file, context={'AppConfig': AppConfig})
@@ -419,12 +403,12 @@ jobs:
 ```yaml
 # Layered configuration with clear precedence
 app_config:
-  # 1. Defaults (lowest priority)  
+  # 1. Defaults (lowest priority)
   <<{<+}: !include file:defaults.yaml
-  
+
   # 2. Environment-specific (medium priority)
   <<{<+}: !include file:environments/${ENVIRONMENT}.yaml
-  
+
   # 3. Local overrides (highest priority)
   <<{<+}: !include file:local.yaml
 ```
@@ -438,22 +422,4 @@ database:
   port: 5432
   username: !include file:$DIR/secrets/db-user.txt
   password: !include env:DB_PASSWORD
-
-# Conditional secret sources
-api_credentials: !if ${getenv('USE_VAULT', 'false') == 'true'}
-  then: !include vault:secret/api
-  else: !include file:secrets/api.yaml
-```
-
-### Dynamic Service Discovery
-
-```yaml
-# Service discovery integration
-services: !if ${getenv('SERVICE_DISCOVERY') == 'consul'}
-  then: !generate ${discover_services_from_consul()}
-  else: !include file:static-services.yaml
-
-# Health check endpoints
-!each(service, config) ${services}:
-  ${service}_health: http://${config.host}:${config.port}/health
 ```
