@@ -1,5 +1,5 @@
 # Define overrides specific to the production environment
-environment: production # Explicitly set environment for this config layer
+environment: prod # Explicitly set environment for this config layer
 log_level: WARNING # Override log level for prod
 workers: 4 # Increase workers for prod
 
@@ -20,4 +20,4 @@ output_path: "/data/prod/${computed_runtime_value}/output"
 # the dictionaries are merged recursively following the same rule.
 # Lists are replaced by default (new wins). See Merging docs for details.
 
-<<{<+}: !include file:base.yaml # Note: The order doesn't really matter in this case
+<<{>+}: !include file:$DIR/base.yaml # Note: EXISTING values (from prod.yaml) win over new values (from base.yaml)

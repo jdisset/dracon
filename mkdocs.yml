@@ -70,6 +70,7 @@ nav:
       - "Customize CLI Arguments": "guides/customize-cli.md"
       - "Handle Secrets": "guides/handle-secrets.md"
       - "Use Deferred Execution": "guides/use-deferred.md"
+      - "Advanced Features": "guides/advanced-features.md"
   - "Conceptual Guides":
       - concepts/index.md # Section index page
       # - "Core Principles": "concepts/principles.md" # Maybe combine into others
