@@ -45,7 +45,6 @@ B = TypeVar("B", bound=BaseModel)
 ProgramType = ForwardRef("Program")
 
 
-# TODO: use Field description instead of (or in addition to) Arg's help
 
 
 def get_root_exception(e):
@@ -95,6 +94,10 @@ def getArg(program: "Program", name: str, pydantic_field) -> Arg:
         else {}
     )
     final_settings = {**vars(base_arg), **user_arg_settings}
+
+    # use field description as fallback help text
+    if final_settings.get('help') is None and pydantic_field.description:
+        final_settings['help'] = pydantic_field.description
 
     if final_settings.get('is_flag') is None:
         final_settings['is_flag'] = final_settings.get('arg_type') is bool
