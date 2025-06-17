@@ -628,10 +628,10 @@ class Program(BaseModel, Generic[T]):
 
         # compose initial structure from defaults
         current_composition = loader.compose_config_from_str(pdump_str)
-        logger.debug(
-            f"current_composition after adding resolvable fields:\n{current_composition}\n"
-        )
-        logger.debug(f"loader deferred paths: {loader.deferred_paths}")
+        # logger.debug(
+        #     f"current_composition after adding resolvable fields:\n{current_composition}\n"
+        # )
+        # logger.debug(f"loader deferred paths: {loader.deferred_paths}")
 
         # merge included config files
         if confs_to_merge:
@@ -642,7 +642,7 @@ class Program(BaseModel, Generic[T]):
                 current_composition = loader.merge(
                     current_composition, this_conf, merge_key=MergeKey(raw="<<{<~}[<~]")
                 )
-                logger.debug(f"current_composition after merging {conf}:\n{current_composition}\n")
+                # logger.debug(f"current_composition after merging {conf}:\n{current_composition}\n")
 
         from dracon.nodes import Node
 
@@ -664,7 +664,7 @@ class Program(BaseModel, Generic[T]):
             current_composition = loader.merge(
                 current_composition, raw_args_composition, merge_key=MergeKey(raw="<<{<+}[<~]")
             )
-            logger.debug(f"current_composition after merging args:\n{current_composition}\n")
+            # logger.debug(f"current_composition after merging args:\n{current_composition}\n")
 
         # merge nested args
         processed_nested_args = {k: compose_value(v) for k, v in nested_args.items()}
@@ -679,7 +679,7 @@ class Program(BaseModel, Generic[T]):
             current_composition = loader.merge(
                 current_composition, dict_composition, merge_key=MergeKey(raw="<<{<+}[<~]")
             )
-            logger.debug(f"current_composition after merging nested args:\n{current_composition}\n")
+            # logger.debug(f"current_composition after merging nested args:\n{current_composition}\n")
 
         res = loader.load_node(current_composition.root)
         res = self.conf_type.model_validate(res)
