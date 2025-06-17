@@ -328,11 +328,20 @@ def as_bool(value: str | int | bool) -> bool:
 
 class If(Instruction):
     """
-    `!if expr : value`
+    `!if expr : value`  (shorthand for then-only)
+    `!if expr :
+      then: value_if_true
+      else: value_if_false`
 
     Evaluate the truthiness of expr (if it's an interpolation, it evaluates it).
-    If truthy, then value replaces this entire node.
-    If falsy, then the entire node is removed.
+    
+    If then/else keys are present:
+    - If truthy, use the 'then' branch value
+    - If falsy, use the 'else' branch value (or remove if no else)
+    
+    If no then/else keys (shorthand):
+    - If truthy, include the content
+    - If falsy, remove the entire node
     """
 
     @staticmethod
@@ -342,6 +351,34 @@ class If(Instruction):
         if value == '!if':
             return If()
         return None
+
+    def _get_then_else_nodes(self, value_node):
+        """Extract then/else nodes, returns (then_node, else_node, is_then_else_style)"""
+        if not isinstance(value_node, DraconMappingNode):
+            return None, None, False
+            
+        keys = [k.value for k, _ in value_node.items()]
+        if 'then' in keys or 'else' in keys:
+            then_node = else_node = None
+            for k, v in value_node.items():
+                if k.value == 'then':
+                    then_node = v
+                elif k.value == 'else':
+                    else_node = v
+            return then_node, else_node, True
+        return None, None, False
+
+    def _add_content_to_parent(self, parent_node, content_node, comp_res, parent_path):
+        """Add content node to parent, handling different node types"""
+        if isinstance(content_node, DraconMappingNode):
+            for key, node in content_node.items():
+                parent_node.append((key, node))
+        elif isinstance(content_node, DraconSequenceNode):
+            raise NotImplementedError("if statement containing a sequence is not yet implemented")
+        else:
+            # scalar node - replace parent entirely
+            assert isinstance(parent_node, DraconMappingNode), 'if statement with scalar-like must appear in a mapping'
+            comp_res.set_at(parent_path, content_node)
 
     @ftrace(watch=[])
     def process(self, comp_res: CompositionResult, path: KeyPath, loader):
@@ -357,37 +394,29 @@ class If(Instruction):
 
         assert key_node.tag == '!if', f"Expected tag '!if', but got {key_node.tag}"
 
-        expr = key_node.value
-
+        # evaluate condition
         if isinstance(key_node, InterpolableNode):
-            evaluated_expr = bool(
-                evaluate_expression(
-                    expr,
-                    current_path=path,
-                    root_obj=comp_res.root,
-                    engine=loader.interpolation_engine,
-                    context=key_node.context,
-                )
+            from dracon.merge import merged, MergeKey
+            eval_context = merged(key_node.context or {}, loader.context or {}, MergeKey(raw='{<+}'))
+            result = evaluate_expression(
+                key_node.value, path, comp_res.root, engine=loader.interpolation_engine, context=eval_context
             )
+            condition = bool(result)
         else:
-            evaluated_expr = as_bool(expr)
+            condition = as_bool(key_node.value)
 
-        if evaluated_expr:
-            if isinstance(value_node, DraconMappingNode):
-                assert isinstance(
-                    parent_node, DraconMappingNode
-                ), 'if statement with mapping must appear in a mapping'
-                for key, node in value_node.items():
-                    parent_node.append((key, node))
-            elif isinstance(value_node, DraconSequenceNode):
-                raise NotImplementedError(
-                    "if statement containing a sequence is not yet implemented"
-                )
-            else:
-                assert isinstance(
-                    parent_node, DraconMappingNode
-                ), 'if statement with scalar-like must appear in a mapping'
-                comp_res.set_at(parent_path, value_node)
+        # check for then/else pattern
+        then_node, else_node, is_then_else = self._get_then_else_nodes(value_node)
+        
+        if is_then_else:
+            # then/else format
+            selected_node = then_node if condition else else_node
+            if selected_node is not None:
+                self._add_content_to_parent(parent_node, selected_node, comp_res, parent_path)
+        else:
+            # shorthand format - include content if condition is true
+            if condition:
+                self._add_content_to_parent(parent_node, value_node, comp_res, parent_path)
 
         del parent_node[key_node.value]
         return comp_res
