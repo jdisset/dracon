@@ -62,6 +62,8 @@ nav:
       - "Tutorial: Building a CLI App": "tutorials/cli_app.md"
   - "How-To Guides":
       - guides/index.md # Section index page
+      - "Basic Features": "guides/basic-features.md"
+      - "Advanced Features": "guides/advanced-features.md"
       - "Load Configuration Files": "guides/load-config.md"
       - "Use Interpolation": "guides/use-interpolation.md"
       - "Merge Configurations": "guides/merge-configs.md"
@@ -70,7 +72,6 @@ nav:
       - "Customize CLI Arguments": "guides/customize-cli.md"
       - "Handle Secrets": "guides/handle-secrets.md"
       - "Use Deferred Execution": "guides/use-deferred.md"
-      - "Advanced Features": "guides/advanced-features.md"
   - "Conceptual Guides":
       - concepts/index.md # Section index page
       # - "Core Principles": "concepts/principles.md" # Maybe combine into others
