@@ -1080,141 +1080,143 @@ def validate_timestamp(v, handler):
     return datetime.fromisoformat(v) if isinstance(v, str) else handler(v)
 
 
-class TestAnnotatedValidatorsWithCLI:
-    """Test Pydantic v2 Annotated validators work with CLI Args."""
+def test_after_validator():
+    """after validator transforms cli input"""
+    IntPlusOne = Annotated[int, AfterValidator(add_one)]
 
-    def test_after_validator(self):
-        """after validator transforms cli input"""
-        IntPlusOne = Annotated[int, AfterValidator(add_one)]
+    class Config(BaseModel):
+        count: Annotated[IntPlusOne, Arg(help="Counter value")] = Field(
+            default=0, description="A counter that adds one"
+        )
 
-        class Config(BaseModel):
-            count: Annotated[IntPlusOne, Arg(help="Counter value")] = Field(
-                default=0, description="A counter that adds one"
-            )
+    program = make_program(Config, name="test", context={'Config': Config})
 
-        program = make_program(Config, name="test", context={'Config': Config})
+    config, _ = program.parse_args(["--count", "5"])
+    assert config.count == 6
 
-        config, _ = program.parse_args(["--count", "5"])
-        assert config.count == 6
+    config, _ = program.parse_args([])
+    assert config.count == 0  # default value unchanged
 
-        config, _ = program.parse_args([])
-        assert config.count == 0  # default value unchanged
 
-    def test_before_validator(self, capfd):
-        """before validator validates before type conversion"""
-        PositiveInt = Annotated[int, BeforeValidator(validate_positive)]
+def test_before_validator(capfd):
+    """before validator validates before type conversion"""
+    PositiveInt = Annotated[int, BeforeValidator(validate_positive)]
 
-        class Config(BaseModel):
-            port: Annotated[PositiveInt, Arg()] = Field(
-                default=8080, description="Server port (must be positive)"
-            )
+    class Config(BaseModel):
+        port: Annotated[PositiveInt, Arg()] = Field(
+            default=8080, description="Server port (must be positive)"
+        )
 
-        program = make_program(Config, name="test", context={'Config': Config})
+    program = make_program(Config, name="test", context={'Config': Config})
 
-        config, _ = program.parse_args(["--port", "3000"])
-        assert config.port == 3000
+    config, _ = program.parse_args(["--port", "3000"])
+    assert config.port == 3000
 
-        with pytest.raises(SystemExit):
-            program.parse_args(["--port", "0"])
+    with pytest.raises(SystemExit):
+        program.parse_args(["--port", "0"])
 
-        captured = capfd.readouterr()
-        assert "must be positive" in captured.out
+    captured = capfd.readouterr()
+    assert "must be positive" in captured.out
 
-    def test_plain_validator(self):
-        """plain validator with custom parsing"""
-        IntPlusOne = Annotated[int, PlainValidator(parse_and_add_one)]
 
-        class Config(BaseModel):
-            value: Annotated[IntPlusOne, Arg()] = Field(
-                default=0, description="Value that gets incremented"
-            )
+def test_plain_validator():
+    """plain validator with custom parsing"""
+    IntPlusOne = Annotated[int, PlainValidator(parse_and_add_one)]
 
-        program = make_program(Config, name="test", context={'Config': Config})
+    class Config(BaseModel):
+        value: Annotated[IntPlusOne, Arg()] = Field(
+            default=0, description="Value that gets incremented"
+        )
 
-        config, _ = program.parse_args(["--value", "10"])
-        assert config.value == 11
+    program = make_program(Config, name="test", context={'Config': Config})
 
-    def test_wrap_validator(self):
-        """wrap validator for custom type handling"""
-        MyTimestamp = Annotated[datetime, WrapValidator(validate_timestamp)]
+    config, _ = program.parse_args(["--value", "10"])
+    assert config.value == 11
 
-        class Config(BaseModel):
-            timestamp: Annotated[MyTimestamp, Arg()] = Field(
-                default_factory=datetime.now, description="Timestamp value"
-            )
 
-        program = make_program(Config, name="test", context={'Config': Config})
+def test_wrap_validator():
+    """wrap validator for custom type handling"""
+    MyTimestamp = Annotated[datetime, WrapValidator(validate_timestamp)]
 
-        config, _ = program.parse_args(["--timestamp", "2024-01-01T12:00:00"])
-        assert config.timestamp == datetime(2024, 1, 1, 12, 0, 0)
+    class Config(BaseModel):
+        timestamp: Annotated[MyTimestamp, Arg()] = Field(
+            default_factory=datetime.now, description="Timestamp value"
+        )
 
-    def test_chained_validators(self, capfd):
-        """multiple validators in sequence"""
-        ProcessedInt = Annotated[int, BeforeValidator(validate_positive), AfterValidator(add_one)]
+    program = make_program(Config, name="test", context={'Config': Config})
 
-        class Config(BaseModel):
-            number: Annotated[ProcessedInt, Arg()] = Field(
-                default=1, description="Positive number that gets incremented"
-            )
+    config, _ = program.parse_args(["--timestamp", "2024-01-01T12:00:00"])
+    assert config.timestamp == datetime(2024, 1, 1, 12, 0, 0)
 
-        program = make_program(Config, name="test", context={'Config': Config})
 
-        config, _ = program.parse_args(["--number", "5"])
-        assert config.number == 6
+def test_chained_validators(capfd):
+    """multiple validators in sequence"""
+    ProcessedInt = Annotated[int, BeforeValidator(validate_positive), AfterValidator(add_one)]
 
-        with pytest.raises(SystemExit):
-            program.parse_args(["--number", "0"])  # 0 not positive
+    class Config(BaseModel):
+        number: Annotated[ProcessedInt, Arg()] = Field(
+            default=1, description="Positive number that gets incremented"
+        )
 
-    def test_validator_with_literal(self):
-        """validators work with literal types"""
-        LogLevel = Literal["debug", "info", "warning", "error"]
-        UppercaseLevel = Annotated[LogLevel, AfterValidator(uppercase)]
+    program = make_program(Config, name="test", context={'Config': Config})
 
-        class Config(BaseModel):
-            level: UppercaseLevel = Field(
-                default="info", description="Log level (will be uppercased)"
-            )
+    config, _ = program.parse_args(["--number", "5"])
+    assert config.number == 6
 
-        program = make_program(Config, name="test", context={'Config': Config})
+    with pytest.raises(SystemExit):
+        program.parse_args(["--number", "0"])  # 0 not positive
 
-        config, _ = program.parse_args(["--level", "debug"])
-        assert config.level == "DEBUG"
 
-    def test_validator_field_combo(self, capfd):
-        """validators work with field description and arg"""
-        Email = Annotated[
-            str,
-            AfterValidator(
-                lambda v: v if "@" in v else (_ for _ in ()).throw(ValueError("invalid email"))
-            ),
-        ]
+def test_validator_with_literal():
+    """validators work with literal types"""
+    LogLevel = Literal["debug", "info", "warning", "error"]
+    UppercaseLevel = Annotated[LogLevel, AfterValidator(uppercase)]
 
-        class Config(BaseModel):
-            email: Annotated[Email, Arg()] = Field(description="User email address")
+    class Config(BaseModel):
+        level: UppercaseLevel = Field(default="info", description="Log level (will be uppercased)")
 
-        program = make_program(Config, name="test", context={'Config': Config})
+    program = make_program(Config, name="test", context={'Config': Config})
 
-        config, _ = program.parse_args(["--email", "user@example.com"])
-        assert config.email == "user@example.com"
+    config, _ = program.parse_args(["--level", "debug"])
+    assert config.level == "DEBUG"
 
-        with pytest.raises(SystemExit):
-            program.parse_args(["--email", "not-an-email"])
 
-        captured = capfd.readouterr()
-        assert "invalid email" in captured.out
+def test_validator_field_combo(capfd):
+    """validators work with field description and arg"""
+    Email = Annotated[
+        str,
+        AfterValidator(
+            lambda v: v if "@" in v else (_ for _ in ()).throw(ValueError("invalid email"))
+        ),
+    ]
 
-    def test_validator_with_file_loading(self, tmp_path):
-        """validators work with file loading syntax"""
-        ProcessedInt = Annotated[int, AfterValidator(lambda v: v * 2)]
+    class Config(BaseModel):
+        email: Annotated[Email, Arg()] = Field(description="User email address")
 
-        class Config(BaseModel):
-            multiplied: ProcessedInt = Field(default=10)
+    program = make_program(Config, name="test", context={'Config': Config})
 
-        # create test file
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text("multiplied: 5")
+    config, _ = program.parse_args(["--email", "user@example.com"])
+    assert config.email == "user@example.com"
 
-        program = make_program(Config, name="test", context={'Config': Config})
+    with pytest.raises(SystemExit):
+        program.parse_args(["--email", "not-an-email"])
 
-        config, _ = program.parse_args([f"+{config_file}"])
-        assert config.multiplied == 10  # 5 * 2
+    captured = capfd.readouterr()
+    assert "invalid email" in captured.out
+
+
+def test_validator_with_file_loading(tmp_path):
+    """validators work with file loading syntax"""
+    ProcessedInt = Annotated[int, AfterValidator(lambda v: v * 2)]
+
+    class Config(BaseModel):
+        multiplied: ProcessedInt = Field(default=10)
+
+    # create test file
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("multiplied: 5")
+
+    program = make_program(Config, name="test", context={'Config': Config})
+
+    config, _ = program.parse_args([f"+{config_file}"])
+    assert config.multiplied == 10  # 5 * 2
