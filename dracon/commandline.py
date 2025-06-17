@@ -44,8 +44,6 @@ B = TypeVar("B", bound=BaseModel)
 ProgramType = ForwardRef("Program")
 
 
-
-
 def get_root_exception(e):
     while e.__cause__ is not None:
         e = e.__cause__
