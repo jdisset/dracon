@@ -234,9 +234,12 @@ class DraconRepresenter(RoundTripRepresenter):
                 data_type = type(data)
                 representer_func = self.yaml_representers.get(data_type)
                 if not representer_func:
-                    # check multi representers (mro first, then protocols)
+                    # check representers in MRO (both regular and multi representers)
                     for cls in data_type.__mro__:
-                        if cls in self.yaml_multi_representers:
+                        if cls in self.yaml_representers:
+                            representer_func = self.yaml_representers[cls]
+                            break
+                        elif cls in self.yaml_multi_representers:
                             representer_func = self.yaml_multi_representers[cls]
                             break
                     if not representer_func:
