@@ -399,7 +399,8 @@ class Program(BaseModel, Generic[T]):
             if isinstance(root_exception, ValidationError):
                 self.print_validation_error(root_exception)
             else:
-                print(f"\nError when generating configuration: {root_exception}\n", file=sys.stderr)
+                logger.error(f"Error when generating configuration: {root_exception}")
+                logger.exception(e)
                 sys.exit(1)
 
         # prepare final raw args dict for return
