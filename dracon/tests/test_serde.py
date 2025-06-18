@@ -1,9 +1,10 @@
 from dracon import dump, loads
 from dracon.loader import DraconLoader
-from pydantic import BaseModel, PlainSerializer
-from typing import Annotated, List, get_type_hints
+from pydantic import BaseModel, PlainSerializer, GetCoreSchemaHandler
+from typing import Annotated, List, get_type_hints, Any
 import pytest
 from dracon.nodes import ContextNode
+from pydantic_core import core_schema
 import gc
 import sys
 
@@ -112,3 +113,69 @@ def test_empty():
     obj = loader.loads(conf)
     assert isinstance(obj.emptyd, ClassEx)
     assert obj.emptyd.attr == 0
+
+
+class Regex(str):
+    """A string that should be treated as a regex pattern."""
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, _source_type: Any, _handler: GetCoreSchemaHandler
+    ) -> core_schema.CoreSchema:
+        return core_schema.union_schema(
+            [
+                core_schema.is_instance_schema(cls),
+                core_schema.chain_schema(
+                    [
+                        core_schema.str_schema(),
+                        core_schema.no_info_plain_validator_function(cls),
+                    ]
+                ),
+            ]
+        )
+
+    def __new__(cls, string):
+        return super().__new__(cls, string)
+
+
+class RegexModel(BaseModel):
+    pattern: Regex
+
+
+def test_regex_dracon_representation():
+    """Test that Regex class can be represented by dracon and dumped as strings."""
+    model = RegexModel(pattern=Regex(r"\d+"))
+    
+    assert isinstance(model.pattern, Regex)
+    assert str(model.pattern) == r"\d+"
+    
+    loader = DraconLoader()
+    loader.yaml.representer.full_module_path = False
+    
+    yaml_output = loader.dump(model)
+    assert r"\d+" in yaml_output
+    assert "!RegexModel" in yaml_output
+    
+    loader.context.update({"RegexModel": RegexModel, "Regex": Regex})
+    loaded_model = loader.loads(yaml_output)
+    
+    assert isinstance(loaded_model, RegexModel)
+    assert isinstance(loaded_model.pattern, Regex)
+    assert str(loaded_model.pattern) == r"\d+"
+
+
+def test_regex_yaml_roundtrip():
+    """Test that Regex instances can be dumped as strings and loaded back."""
+    loader = DraconLoader()
+    loader.yaml.representer.full_module_path = False
+    loader.context.update({"RegexModel": RegexModel, "Regex": Regex})
+    
+    original_model = RegexModel(pattern=Regex(r"[a-zA-Z]+"))
+    yaml_str = loader.dump(original_model)
+    
+    assert "[a-zA-Z]+" in yaml_str
+    assert "pattern: !Regex" not in yaml_str  # pattern should not have Regex constructor tag
+    
+    loaded_model = loader.loads(yaml_str)
+    assert isinstance(loaded_model.pattern, Regex)
+    assert str(loaded_model.pattern) == r"[a-zA-Z]+"
