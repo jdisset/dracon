@@ -1220,3 +1220,37 @@ def test_validator_with_file_loading(tmp_path):
 
     config, _ = program.parse_args([f"+{config_file}"])
     assert config.multiplied == 10  # 5 * 2
+
+
+def test_dir_context_cli_vs_direct_loading(tmp_path):
+    from dracon import load
+    from pydantic import BaseModel
+    from dracon import make_program
+
+    base = tmp_path / "base"
+    sub = base / "sub"
+    base.mkdir()
+    sub.mkdir()
+
+    target_file = sub / "target.yaml"
+    target_file.write_text("result: success")
+
+    # Nested file using $(DIR) to reference target
+    nested_file = sub / "nested.yaml"
+    nested_file.write_text("data: !include file:$DIR/target.yaml")
+
+    main_file = base / "main.yaml"
+    main_file.write_text("""!define nested_path: sub/nested.yaml
+config: !include file:$DIR/${nested_path}""")
+
+    # Direct loading
+    direct_config = load(str(main_file))
+    assert direct_config['config']['data']['result'] == "success"
+
+    class Config(BaseModel):
+        config: dict = {}
+
+    program = make_program(Config)
+    cli_config, _ = program.parse_args([f'+{main_file}'])
+
+    assert cli_config.config['data']['result'] == "success"
