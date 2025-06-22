@@ -285,5 +285,149 @@ each:
     assert direct_config['each'] == [str(sub), str(sub)]
 
 
+def test_nested_dir_context_preservation(tmp_path):
+    from dracon import load
+
+    train_dir = tmp_path / "train"
+    matrices_dir = train_dir / "matrices"
+    composite_dir = matrices_dir / "composite_sets"
+    basic_sets_dir = matrices_dir / "basic_sets"
+
+    train_dir.mkdir()
+    matrices_dir.mkdir()
+    composite_dir.mkdir()
+    basic_sets_dir.mkdir()
+
+    basic_set_content = """
+name: basic_set
+data:
+  - item1
+  - item2
+"""
+    basic_set_file = basic_sets_dir / "basic.yaml"
+    basic_set_file.write_text(basic_set_content)
+
+    composite_set_content = """
+name: composite_set
+includes:
+  - !include file:$DIR/../basic_sets/basic.yaml
+"""
+    composite_set_file = composite_dir / "composite.yaml"
+    composite_set_file.write_text(composite_set_content)
+
+    main_config_content = """
+training_set: !include file:$DIR/matrices/composite_sets/composite.yaml
+"""
+    main_config_file = train_dir / "main.yaml"
+    main_config_file.write_text(main_config_content)
+
+    config = load(str(main_config_file))
+
+    assert config["training_set"]["name"] == "composite_set"
+    assert config["training_set"]["includes"][0]["name"] == "basic_set"
+    assert config["training_set"]["includes"][0]["data"] == ["item1", "item2"]
+
+
+def test_deeply_nested_dir_context(tmp_path):
+    from dracon import load
+
+    # create deeper directory structure
+    level1_dir = tmp_path / "level1"
+    level2_dir = level1_dir / "level2"
+    level3_dir = level2_dir / "level3"
+    sibling_dir = level2_dir / "sibling"
+
+    level1_dir.mkdir()
+    level2_dir.mkdir()
+    level3_dir.mkdir()
+    sibling_dir.mkdir()
+
+    sibling_content = """
+name: sibling_data
+value: 42
+"""
+    sibling_file = sibling_dir / "data.yaml"
+    sibling_file.write_text(sibling_content)
+
+    level3_content = """
+name: level3_config
+sibling_ref: !include file:$DIR/../sibling/data.yaml
+"""
+    level3_file = level3_dir / "config.yaml"
+    level3_file.write_text(level3_content)
+
+    level2_content = """
+name: level2_config
+nested: !include file:$DIR/level3/config.yaml
+"""
+    level2_file = level2_dir / "config.yaml"
+    level2_file.write_text(level2_content)
+
+    level1_content = """
+name: level1_config
+deep: !include file:$DIR/level2/config.yaml
+"""
+    level1_file = level1_dir / "config.yaml"
+    level1_file.write_text(level1_content)
+
+    config = load(str(level1_file))
+
+    assert config["name"] == "level1_config"
+    assert config["deep"]["name"] == "level2_config"
+    assert config["deep"]["nested"]["name"] == "level3_config"
+    assert config["deep"]["nested"]["sibling_ref"]["name"] == "sibling_data"
+    assert config["deep"]["nested"]["sibling_ref"]["value"] == 42
+
+
+def test_dir_context_with_merge_operations(tmp_path):
+    from dracon import load
+
+    base_dir = tmp_path / "base"
+    includes_dir = base_dir / "includes"
+
+    base_dir.mkdir()
+    includes_dir.mkdir()
+
+    included_content = """
+included_key: included_value
+nested:
+  key1: value1
+"""
+    included_file = includes_dir / "included.yaml"
+    included_file.write_text(included_content)
+
+    another_content = """
+another_key: another_value
+"""
+    another_file = includes_dir / "another.yaml"
+    another_file.write_text(another_content)
+
+    composite_content = """
+name: composite
+nested:
+  key2: value2
+  <<: !include file:$DIR/another.yaml
+<<: !include file:$DIR/../includes/included.yaml
+"""
+    composite_file = includes_dir / "composite.yaml"
+    composite_file.write_text(composite_content)
+
+    main_content = """
+main_key: main_value
+composite_ref: !include file:$DIR/includes/composite.yaml
+"""
+    main_file = base_dir / "main.yaml"
+    main_file.write_text(main_content)
+
+    config = load(str(main_file))
+
+    assert config["main_key"] == "main_value"
+    assert config["composite_ref"]["name"] == "composite"
+    assert config["composite_ref"]["included_key"] == "included_value"
+    assert config["composite_ref"]["nested"]["key1"] == "value1"
+    assert config["composite_ref"]["nested"]["key2"] == "value2"
+    assert config["composite_ref"]["nested"]["another_key"] == "another_value"
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
