@@ -230,5 +230,60 @@ def test_include_interpolation():
     assert config.just_simple.setting_list == ["item_lol", 3, "item_lol"]
 
 
+def test_construct_copy_vs_ref(tmp_path):
+    from dracon import load
+    from pydantic import BaseModel
+    from dracon import make_program
+
+    base = tmp_path / "base"
+    sub = base / "sub"
+    base.mkdir()
+    sub.mkdir()
+
+    # Nested file using $(DIR) to reference target
+    nested_file = sub / "nested.yaml"
+    nested_file.write_text("""
+- $(DIR)
+- $DIR
+""")
+
+    main_file = base / "main.yaml"
+    main_file.write_text("""
+here: $DIR
+incl: !include file:$DIR/sub/nested.yaml
+val_incl: !include file:$DIR/sub/nested@0
+!noconstruct nct: !include file:$DIR/sub/nested.yaml
+constructed_ref: ${construct(@/val_incl)}
+constructed_cpy: ${construct(&/val_incl)}
+constructed_full_ref: ${@/incl}
+constructed_full_cpy: ${&/incl}
+constructed_full_cpy_nct: $(construct(&/nct))
+
+
+each:
+    !each(dname) "${construct(@/incl)}":
+    - $(dname)
+
+""")
+
+    direct_config = load(str(main_file))
+    from dracon import resolve_all_lazy
+
+    resolve_all_lazy(direct_config)
+    assert direct_config['here'] == str(base)
+    assert direct_config['incl'][0] == str(sub)
+    assert direct_config['incl'][1] == str(sub)
+    assert direct_config['val_incl'] == str(sub)
+    assert direct_config['constructed_ref'] == str(sub)
+    assert direct_config['constructed_cpy'] == str(
+        sub
+    )  # the node itself is copied, even before evaluation
+    assert direct_config['constructed_full_ref'] == [str(sub), str(sub)]
+    assert direct_config['constructed_full_cpy'] == [str(sub), str(sub)]
+    assert direct_config['constructed_full_cpy_nct'] == [str(sub), str(sub)]
+
+    assert direct_config['each'] == [str(sub), str(sub)]
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

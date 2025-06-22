@@ -79,7 +79,7 @@ def construct(node_or_val, resolve=True, **kwargs):
         n = node_or_val
 
     if resolve:
-        n = resolve_all_lazy(n, context_override=kwargs.get('context', None))
+        n = resolve_all_lazy(n)
 
     return n
 
