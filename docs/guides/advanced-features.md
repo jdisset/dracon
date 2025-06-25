@@ -221,18 +221,7 @@ current_config: !include var:config_name
         memory: ${512 if env == 'dev' else 1024}MB
 ```
 
-### Generated Content
 
-```yaml
-# Generate configuration programmatically
-service_mesh: !generate ${
-  {f"service_{i:02d}": {
-    "name": f"service-{i}",
-    "port": 8000 + i,
-    "upstream": f"upstream-{i % 3}"
-  } for i in range(int(getenv('SERVICE_COUNT', '5')))}
-}
-```
 
 ### Variable Scoping
 

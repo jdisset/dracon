@@ -160,27 +160,7 @@ Iterate over sequences and mappings:
         replicas: ${1 if env == 'dev' else 3}
 ```
 
-## Dynamic Content Generation
 
-### `!generate` - Generated Content
-
-Generate content using Python expressions:
-
-```yaml
-# Generate configuration from template
-service_configs: !generate ${
-  {f"service_{i}": {
-    "name": f"service-{i}",
-    "port": 8000 + i,
-    "replicas": min(i + 1, 5)
-  } for i in range(int(getenv('SERVICE_COUNT', '3')))}
-}
-
-# Generate from external data
-database_shards: !generate ${
-  [f"shard_{i:02d}" for i in range(1, int(getenv('SHARD_COUNT', '4')) + 1)]
-}
-```
 
 ## Construction Control
 
@@ -285,7 +265,7 @@ app_config: !if ${deployment_type == 'microservices'}
 
 - Instructions are processed during composition, not at runtime
 - Complex loops and conditionals can slow loading
-- Use `!generate` for complex data transformations
+
 - Variables are resolved once and cached
 - Deferred instructions delay computation until needed
 
@@ -316,7 +296,7 @@ features: !if ${environment in ['staging', 'prod']}
 !define service_discovery: ${getenv('SERVICE_DISCOVERY', 'static')}
 
 services: !if ${service_discovery == 'consul'}
-  then: !generate ${discover_services_from_consul()}
+  then: ${discover_services_from_consul()}
   else:
     !each(service, port) ${static_services}:
       ${service}: http://localhost:${port}
