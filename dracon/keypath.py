@@ -470,7 +470,7 @@ def _get_obj_impl(
 
                     raise AttributeError(
                         f'Could not find attribute {attr} in node \n{node_repr(obj)} of type {type(obj)}. {create_path_if_not_exists=}, {default_mapping_constructor=}. \nTraceback:\n{tback}'
-                    ) from None
+                    )
                 else:
                     raise AttributeError(f'Could not find attribute {attr} in {obj}') from None
 
