@@ -5,8 +5,8 @@ repo_name: jdisset/dracon
 
 theme:
   name: material
-  logo: docs/dracon_logo.svg
-  favicon: docs/dracon_logo.svg
+  logo: dracon_logo.svg
+  favicon: dracon_logo.svg
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
