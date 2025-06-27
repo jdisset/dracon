@@ -4,18 +4,17 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Dracon is a modular configuration system and CLI generator for Python, built on top of YAML.
-It’s designed for research and production projects that need flexible, explicit, and easily composable configs—without magic or friction.
+Dracon is a configuration system and CLI generator for Python, built on YAML. It's for projects that need flexible, explicit, and composable configs, without magic or friction.
 
-#### Why Dracon?
+### Why Dracon?
 
 Most config systems I've had the pleasure to deal with were either:
 
-- Too simple ("just a dict, argparse, and pain")
-- Too magical (opaque, sometimes bespoke frameworks that obscure what’s actually in use), or
-- Too rigid (I have a lot of respect for Hydra, but often found myself fighting the "Proper Way" instead of getting work done).
+- **Too simple** ("just a dict, argparse, and pain")
+- **Too magical** (opaque, sometimes bespoke frameworks that obscure what's actually in use), or
+- **Too rigid** (I have a lot of respect for Hydra, but often found myself fighting the "Proper Way" instead of getting work done).
 
-I built Dracon to hit the “powerful but transparent” sweet spot, especially for
+I built Dracon to hit the "powerful but transparent" sweet spot, especially for
 modern ML and research codebases, where you need to juggle random YAML files
 coming from your packages, your local machine, and your users. Adding to that
 are environment variables, N layers of overrides, and boilerplate CLI argument
@@ -25,22 +24,18 @@ Minimal ceremony, maximum efficiency.
 
 ### Key Features
 
-- Layered, explicit config: YAML-based, supports environment and CLI overrides, modular includes, variables and inline expressions, which are simply python code (with guardrails).
-- Pydantic integration: Native support for schema validation and type checking
-- Automatic CLI generation: Turn a Pydantic Model into a CLI app that can use any combination of config files, CLI args, and default values. Every config parameter becomes overrideable with a CLI flag, automatically, including nested structures
-- Composability: Easily mix and match config files for experiments, model variants, etc.
+- **Layered config**: YAML with environment/CLI overrides, includes, variables, and Python expressions
+- **Pydantic integration**: Type safety and validation out of the box
+- **Auto CLI generation**: Every field in your app's main class becomes a CLI flag, including nested ones, and can be overlayed with entire files or environment variables
+- **Composability**: Mix and match configs for experiments, environments, model variants
 
 #### Compose Your Configurations
 
-Load, merge, reuse and include configurations from whole YAML files or parts of them, from packages, environment variables or custom sources, using a powerful merge and include syntax (`!include`, `<<{dict_opts}[list_opts]@path.to.subkey`). Manipulate the configuration graph with instructions like `!each(...)` and `!if`.
+Merge configs from files, packages, or environment variables using `!include` and `<<{...}@path`. Manipulate configs with `!each` and `!if`.
 
 #### Generate CLIs Automatically
 
-Create elegant, robust, type-safe CLIs that leverage all of dracon's features, and is generated directly from your app class.
-Dracon will automatically handle argument parsing, config file loading and layering, positional arguments, flags and overrides.
-You can extend, override, or merge any part - even deeply nested - of your app's configuration at runtime, either from inline command-line arguments (`-k value`, `--nested.arg 42`) or from sources like files (`+localfile.yaml`, `--nested.object +from/file`, `--arg +from/file@specific.key`,...).
-You can distribute your app with some default configuration values and files, and the user can override any part with their own.
-A detailed help and usage message is automatically generated:
+Generate type-safe CLIs directly from Pydantic models. Override any field-even nested ones-via command line (`--nested.arg 42`) or files (`+config.yaml`, `--arg +file@key`). Help is auto-generated:
 
 <img
   src="https://raw.githubusercontent.com/jdisset/dracon/dev/docs/assets/cli_help.png"
@@ -49,13 +44,13 @@ A detailed help and usage message is automatically generated:
     height="auto"
     />
 
-#### Add (Lazy-Evaluated) Expressions
+#### Add Expressions
 
-Embed Python expressions (`${...}`) for lazy evaluation, reference other keys (`@path`), or use immediate evaluation (`$(...)`) for values computed at runtime based on context or other configuration parts. Define scoped and global variables with `!define` and `!set_default`.
+Embed Python expressions (`${...}`), reference other keys (`@path`), or compute values at runtime (`$(...)`). Define variables with `!define` and `!set_default`.
 
 #### Define Configuration Once
 
-Use Pydantic models for type-safe configuration structures (`!MyModel`). Dracon will handle the conversion between YAML and Pydantic seamlessly.
+Use Pydantic models for type-safe configs (`!MyModel`). Dracon handles YAML <-> Pydantic conversion seamlessly.
 
 ## Quick Start: CLI
 
@@ -242,14 +237,14 @@ print(yaml_str)
 
 ## Where to Go Next?
 
-- **[Tutorial: Building a CLI App](tutorials/cli_app.md):** A step-by-step guide to build the example above from scratch.
-- **[How-To Guides](guides/index.md):** Find recipes for common configuration and CLI tasks.
-- **[Conceptual Guides](concepts/index.md):** Understand the principles behind Dracon's features.
-- **[Reference](reference/index.md):** Look up detailed syntax and API information.
+- **[Tutorial: Building a CLI App](https://jdisset.github.io/dracon/tutorials/cli_app/)**: Step-by-step guide to build the example above
+- **[How-To Guides](https://jdisset.github.io/dracon/guides/)**: Recipes for common tasks
+- **[Conceptual Guides](https://jdisset.github.io/dracon/concepts/)**: Understand Dracon's design
+- **[Reference](https://jdisset.github.io/dracon/reference/)**: Syntax and API details
 
 ## Acknowledgements
 
-- [Pydantic](https://docs.pydantic.dev/) for its powerful data validation and settings management.
-- [ruamel.yaml](https://yaml.readthedocs.io/en/latest/) for the core YAML parsing and serialization.
-- [asteval](https://lmfit.github.io/asteval/) for the safe expression evaluation engine.
-- [Diátaxis Framework](https://diataxis.fr/) which heavily inspired the documentation structure.
+- [Pydantic](https://docs.pydantic.dev/) for data validation and settings management
+- [ruamel.yaml](https://yaml.dev/doc/ruamel.yaml/) for YAML parsing and serialization
+- [asteval](https://lmfit.github.io/asteval/) for safe expression evaluation
+- [Diataxis Framework](https://diataxis.fr/) for documentation structure inspiration
