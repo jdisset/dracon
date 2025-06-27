@@ -4,9 +4,29 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Dracon is a modular configuration system and command-line interface (CLI) generator for Python, built on top of YAML. It extends standard YAML with powerful features to help manage complex application configurations effectively, integrating seamlessly with Pydantic.
+Dracon is a modular configuration system and CLI generator for Python, built on top of YAML.
+It’s designed for research and production projects that need flexible, explicit, and easily composable configs—without the magic or friction of other frameworks.
 
-Need to juggle static config files, environment variables, complex overrides, and boilerplate CLI argument parsing? Dracon provides a unified approach:
+#### Why Dracon?
+
+Most config systems I've had the pleasure to deal with were either:
+
+- Too simple (“just a dict, some manual args, and pain”)
+- Too magical (opaque, sometimes bespoke frameworks that obscure what’s actually in use), or
+- Too rigid (I have a lot of respect for Hydra, but often found myself fighting their "Proper Way" instead of getting work done).
+
+I built Dracon to hit the “powerful but transparent” sweet spot—especially for
+modern ML and research codebases, where you need to juggle random YAML files coming from both your package, your collaborators, and your users.
+Adding to that are environment variables, complex overrides, and boilerplate CLI argument parsing.
+Dracon gives you one system to catch all of these moving pieces and turn them
+into a structured, type safe config system. Minimal ceremony, maximum flexibility.
+
+### Key Features
+
+- Layered, explicit config: YAML-based, supports environment and CLI overrides, modular includes, and inline expressions, which are simply python code (with guardrails).
+- Pydantic integration: Native support for schema validation and type checking
+- Automatic CLI generation: Turn a Pydantic Model into a CLI app that can use any combination of config files, CLI args, and default values. Every config parameter also becomes overrideable with a CLI flag, automatically, including nested structures
+- Composability: Easily mix and match config files for experiments, model variants, etc.
 
 #### Compose Your Configurations
 
