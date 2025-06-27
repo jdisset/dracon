@@ -5,32 +5,34 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Dracon is a modular configuration system and CLI generator for Python, built on top of YAML.
-It’s designed for research and production projects that need flexible, explicit, and easily composable configs—without the magic or friction of other frameworks.
+It’s designed for research and production projects that need flexible, explicit, and easily composable configs—without magic or friction.
 
 #### Why Dracon?
 
 Most config systems I've had the pleasure to deal with were either:
 
-- Too simple (“just a dict, some manual args, and pain”)
+- Too simple ("just a dict, argparse, and pain")
 - Too magical (opaque, sometimes bespoke frameworks that obscure what’s actually in use), or
-- Too rigid (I have a lot of respect for Hydra, but often found myself fighting their "Proper Way" instead of getting work done).
+- Too rigid (I have a lot of respect for Hydra, but often found myself fighting the "Proper Way" instead of getting work done).
 
-I built Dracon to hit the “powerful but transparent” sweet spot—especially for
-modern ML and research codebases, where you need to juggle random YAML files coming from both your package, your collaborators, and your users.
-Adding to that are environment variables, complex overrides, and boilerplate CLI argument parsing.
-Dracon gives you one system to catch all of these moving pieces and turn them
-into a structured, type safe config system. Minimal ceremony, maximum flexibility.
+I built Dracon to hit the “powerful but transparent” sweet spot, especially for
+modern ML and research codebases, where you need to juggle random YAML files
+coming from your packages, your local machine, and your users. Adding to that
+are environment variables, N layers of overrides, and boilerplate CLI argument
+parsing. Dracon gives you simple tools to catch all of these moving pieces and
+turn them into a structured, type safe, highly configurable system.
+Minimal ceremony, maximum efficiency.
 
 ### Key Features
 
-- Layered, explicit config: YAML-based, supports environment and CLI overrides, modular includes, and inline expressions, which are simply python code (with guardrails).
+- Layered, explicit config: YAML-based, supports environment and CLI overrides, modular includes, variables and inline expressions, which are simply python code (with guardrails).
 - Pydantic integration: Native support for schema validation and type checking
-- Automatic CLI generation: Turn a Pydantic Model into a CLI app that can use any combination of config files, CLI args, and default values. Every config parameter also becomes overrideable with a CLI flag, automatically, including nested structures
+- Automatic CLI generation: Turn a Pydantic Model into a CLI app that can use any combination of config files, CLI args, and default values. Every config parameter becomes overrideable with a CLI flag, automatically, including nested structures
 - Composability: Easily mix and match config files for experiments, model variants, etc.
 
 #### Compose Your Configurations
 
-Load, merge, reuse and include configurations from whole YAML files or parts of them, from packages, environment variables or custom sources, using a powerful merge and include syntax (`!include`, `<<{dict_opts}[list_opts]@path.to.subey`). Manipulate the configuration graph with instructions like `!each(...)` and `!if`.
+Load, merge, reuse and include configurations from whole YAML files or parts of them, from packages, environment variables or custom sources, using a powerful merge and include syntax (`!include`, `<<{dict_opts}[list_opts]@path.to.subkey`). Manipulate the configuration graph with instructions like `!each(...)` and `!if`.
 
 #### Generate CLIs Automatically
 
