@@ -40,7 +40,8 @@ jobs:
             pymdown-extensions \
             mkdocs-literate-nav \
             mkdocs-section-index \
-            mkdocs-print-site-plugin
+            mkdocs-print-site-plugin \
+            mkdocs-include-markdown-plugin
 
       - name: Build MkDocs site
         run: mkdocs build --clean --site-dir _site
