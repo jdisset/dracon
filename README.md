@@ -3,6 +3,7 @@
 <img src="https://raw.githubusercontent.com/jdisset/dracon/main/docs/dracon_logo.svg" alt="Dracon Logo" width="250"/>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Documentation](https://img.shields.io/badge/docs-available-brightgreen.svg)](https://jdisset.github.io/dracon/)
 
 Dracon is a configuration system and CLI generator for Python, built on YAML. It's for projects that need flexible, explicit, and composable configs, without magic or friction.
 
