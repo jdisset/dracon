@@ -39,7 +39,8 @@ jobs:
             mkdocs-macros-plugin \
             pymdown-extensions \
             mkdocs-literate-nav \
-            mkdocs-section-index
+            mkdocs-section-index \
+            mkdocs-print-site-plugin
 
       - name: Build MkDocs site
         run: mkdocs build --clean --site-dir _site
