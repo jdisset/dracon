@@ -27,7 +27,7 @@ defaults: &defaults
 
 service_config:
   # Inherit from defaults using the plain merge key
-  <<: *defaults
+  <<: *defaults # standard YAML merge (existing wins, replace keys - non recursive). Equivalent to <<{>~}[>~]: *defaults
   # Override specific values
   timeout: 60
   # Add new values
@@ -41,8 +41,6 @@ service_config:
 # Note: timeout: 60 defined *after* the merge would override the merged value.
 ```
 
-If you want the standard YAML merge behavior (replace keys, new wins), use `<<{~<}: *defaults`.
-
 ## Advanced Merging with Options
 
 Dracon extends `<<:` with options to control dictionary and list merging precisely:
@@ -50,18 +48,18 @@ Dracon extends `<<:` with options to control dictionary and list merging precise
 `<<{dict_opts}[list_opts]@target_path: source_node`
 
 - `{dict_opts}`: Controls dictionary merging.
-  - `+` (Default): **Append/Recurse.** Merges nested dicts.
-  - `~`: **Replace.** Overwrites entire value for conflicting keys.
-  - `<`: **New value wins** priority. (Default for `~`)
-  - `>` (Default for `+`): **Existing value wins** priority.
+  - `~`: (Default) **Replace.** Overwrites entire value for conflicting keys.
+  - `+` **Append/Recurse.** Merges nested dicts.
+  - `>` (Default): **Existing value wins** priority.
+  - `<`: **New value (i.e. source_node) wins** priority.
   - `N` (e.g., `+2`): Limit recursion depth.
 - `[list_opts]`: Controls list merging (only if both existing and new values are lists).
-  - `~` (Default): **Replace** list.
+  - `~` (Default): **Replace** full list.
   - `+`: **Concatenate** lists.
-  - `<`: **New list wins** / Prepends in `+` mode.
-  - `>` (Default): **Existing list wins** / Appends in `+` mode.
+  - `>` (Default): **Existing list wins** / Appends new list in `+` mode.
+  - `<`: **New list (i.e. from source_node) wins** / Prepends new list in `+` mode.
 - `@target_path`: (Optional) Apply the merge to a sub-key relative to the current node. Uses [KeyPath](../reference/keypaths.md) syntax.
-- `source_node`: The node to merge in (e.g., `*anchor`, `!include file:other.yaml`).
+- `source_node`: The node to merge in (e.g., `*anchor`, `!include file:other.yaml`, or a regular YAML mapping).
 
 **Default `<<:` key (no options):** Equivalent to `<<{+>}[~>]` (Dict: Append/Recurse, Existing Wins; List: Replace, Existing Wins).
 
@@ -85,22 +83,22 @@ Dracon extends `<<:` with options to control dictionary and list merging precise
     # Result prod: { db: { host: prod.db, port: 5432 }, settings: { theme: light, workers: 4 } }
     ```
 
-2.  **Append to List, Existing First:**
+2.  **Replace and Append to List, Existing First:**
 
     ```yaml
     defaults: &defaults
       middlewares: [logging, auth]
 
+    # Replace
     custom:
-      <<[+>]: *defaults # Concatenate lists (+), existing first (>)
+      <<[~>]: *defaults # Replace lists (~), existing first (>)
       middlewares: [cors, caching] # This definition *overwrites* the merged list
-
     # Result custom: { middlewares: [cors, caching] }
-    # To actually append, define the list *before* the merge key:
-    custom_append:
-      middlewares: [cors, caching]
-      <<[+>]: *defaults # Concatenates, existing ([cors, caching]) first
 
+    # Append
+    custom_append:
+      <<[+>]: *defaults # Concatenates, existing ([cors, caching]) first
+      middlewares: [cors, caching]
     # Result custom_append: { middlewares: [cors, caching, logging, auth] }
     ```
 
@@ -116,9 +114,8 @@ Dracon extends `<<:` with options to control dictionary and list merging precise
         endpoint: /a
       service_b:
         endpoint: /b
-        # Merge common settings only into service_b
-        # Default for targeted merge is often {<+} (new wins)
-        <<@service_b: *common # Equivalent to <<{<+}@service_b: *common
+
+    <<@app_config.service_b: *common
 
     # Result app_config:
     # { service_a: { endpoint: /a },
