@@ -9,7 +9,7 @@ KeyPaths use **dot (`.`) notation** as the primary separator, with special chara
 - **Segment Separator (`.`):** Separates keys in mappings or indices in sequences.
   - _Example:_ `database.host`, `users.0.name`
 - **Absolute Root (`/`):** When used _only_ at the **beginning** of a path, it indicates the path starts from the absolute root of the configuration document being processed. It is **not** used as a separator between segments.
-  - _Example:_ `/app/name` (Incorrect!), `/app.name` (Correct), `/services.0.port` (Correct)
+  - _Example:_ `/app/name` (Incorrect! Or rather, probably not what you meant: it's strictly equivalent to `/name`), `/app.name` (Correct), `/services.0.port` (Correct)
 - **Parent (`..`):** Navigates one level up in the hierarchy. Can be chained (`...` for two levels up, etc.). These are often resolved during path simplification (e.g., `a.b..c` becomes `a.c`).
   - _Example:_ `config.database..timeout` (accesses `timeout` sibling of `database`)
 - **Current (`.`):** Represents the current level. Often used implicitly for relative paths in interpolation, e.g., `${@.sibling}` refers to a sibling key. A leading `.` like `.!include .sibling_file` would typically be resolved relative to the current node's location context (often the parent directory).
@@ -21,18 +21,19 @@ KeyPaths use **dot (`.`) notation** as the primary separator, with special chara
   - Partial segment matching with `*` is also supported within patterns (e.g., `a.b*.c` matches `a.b.c` and `a.bcd.c`).
 
 !!! warning "Separator is `.` not `/`"
-    Remember that `/` denotes the absolute root. All subsequent levels in the path _must_ be separated by dots (`.`). `a/b/c` will actually simplify to `/c` ; when what you probably meant was `a.b.c`.
+Remember that `/` denotes the absolute root. All subsequent levels in the path _must_ be separated by dots (`.`). `a/b/c` will actually simplify to `/c` ; when what you probably meant was `a.b.c`.
 
 ## Usage in Dracon
 
 KeyPaths are the standard way to target nodes in various Dracon features:
 
-1.  **Value References (`@` in `${...}`):**
+1.  **Value References (`@` in `${...}`) and Node Copies (`&`):**
 
-    - `${@/path.from.root}`: Absolute KeyPath.
+    - `${@/path.from.root}`: Absolute KeyPath, starting from the root of the **ENTIRE** constructed configuration document.
     - `${@.sibling_key}`: Relative KeyPath (sibling).
-    - `${@../parent.key}`: Relative KeyPath (navigating up).
-    - _Example:_ `${@/database.host}`, `${@.name}`
+    - `${@..parent.key}`: Relative KeyPath (navigating up).
+    - `${&/key.subkey}`: Absolute KeyPath, starting from the root of the **CURRENT** configuration graph being processed.
+    - _Example:_ `${@/database.host}`, `${@.name}`, `${@..config.timeout}`, `${&/defaults.timeout * 2}` (copies the current value of `defaults.timeout` and multiplies it by 2).
     - See [Interpolation Syntax](./interpolation_syntax.md).
 
 2.  **Merge Targets (`<<...@target_path:`):**

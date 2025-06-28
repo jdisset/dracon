@@ -27,7 +27,7 @@ config: !include file:../shared/base.yaml
 secrets: !include file:$DIR/secrets.yaml
 
 # Absolute path
-global_config: !include file:/etc/myapp/config.yaml
+global_config: !include file:/etc/myapp/config # note: specifying the .yaml (or .yml) extension is always optional
 ```
 
 ### File with KeyPath
@@ -37,7 +37,7 @@ global_config: !include file:/etc/myapp/config.yaml
 db_host: !include file:config/database.yaml@host
 
 # Include nested key
-redis_config: !include file:config/cache.yaml@redis.connection
+redis_config: !include file:config/cache@redis.connection # note: specifying the .yaml (or .yml) extension is always optional
 ```
 
 ## Package Includes
@@ -46,10 +46,10 @@ Load resources from Python packages:
 
 ```yaml
 # Include from package
-defaults: !include pkg:mypackage:config/defaults.yaml
+defaults: !include pkg:mypackage:config/defaults # note: specifying the .yaml (or .yml) extension is always optional
 
 # With keypath
-db_defaults: !include pkg:mypackage:config/database.yaml@development
+db_defaults: !include pkg:mypackage:config/database@development
 ```
 
 ## Environment Variable Includes
@@ -100,7 +100,8 @@ base_config: &base
 
 service_a:
   name: service-a
-  <<: !include &base  # Include from anchor
+  <<: !include &base # Include from anchor
+
 ```
 
 ## Merge with Includes
