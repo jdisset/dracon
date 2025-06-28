@@ -48,8 +48,8 @@ Dracon extends `<<:` with options to control dictionary and list merging precise
 `<<{dict_opts}[list_opts]@target_path: source_node`
 
 - `{dict_opts}`: Controls dictionary merging.
-  - `~`: (Default) **Replace.** Overwrites entire value for conflicting keys.
-  - `+` **Append/Recurse.** Merges nested dicts.
+  - `~`: **Replace.** Overwrites entire value for conflicting keys.
+  - `+` (Default) **Append/Recurse.** Merges nested dicts.
   - `>` (Default): **Existing value wins** priority.
   - `<`: **New value (i.e. source_node) wins** priority.
   - `N` (e.g., `+2`): Limit recursion depth.
@@ -116,7 +116,6 @@ Dracon extends `<<:` with options to control dictionary and list merging precise
         endpoint: /b
 
     <<@app_config.service_b: *common
-
     # Result app_config:
     # { service_a: { endpoint: /a },
     #   service_b: { endpoint: /b, timeout: 10, retries: 2 } }
