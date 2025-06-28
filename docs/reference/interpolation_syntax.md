@@ -42,40 +42,45 @@ computed: ${$HOME + '/data'}
 
 ## Reference System
 
-### KeyPath References (`@`)
+### Construction-time References (`@`)
 
 Reference other keys in the same configuration:
 
 ```yaml
 environment: prod
 database:
-  host: "db.${@/environment}.local"  # References /environment
-  backup_host: "backup.${@host}"      # References database/host
+  host: "db.${@/environment}.local" # References /environment
+  backup_host: "backup.${@host}" # References database/host
 ```
 
 #### Reference Syntax
+
+!!! note
+KeyPaths use a dot-separated syntax to navigate the YAML structure. The slash (`/`) is a special character that means "root".
+
 - `@/key`: Absolute reference from root
-- `@key`: Relative reference from current level
-- `@../key`: Parent level reference
-- `@/nested/deep/key`: Deep nested reference
+- `@key.subkey`: Relative reference from current level
+- `@..key`: Parent level reference
+- `@/nested.deep.key`: Deep nested reference (starting at root)
 
-### Anchor References (`&`)
+### Node (composition-time) Copies (`&`)
 
-Reference YAML anchors and process them:
+Will duplicate the referenced node:
 
 ```yaml
-defaults: &defaults
+defaults:
   timeout: 30
   retries: 3
 
 service_config:
   name: my-service
-  timeout: ${&defaults.timeout * 2}  # References anchor content
+  timeout: ${&/defaults.timeout * 2} # References anchor content
 ```
 
 ## Built-in Functions
 
 ### OS Functions
+
 ```yaml
 # Environment variables
 api_url: ${getenv('API_URL', 'http://localhost:8080')}
@@ -92,6 +97,7 @@ script_dir: ${dirname(__file__)}
 ```
 
 ### Dracon Functions
+
 ```yaml
 # Construct deferred nodes
 output_path: ${construct(deferred_node, {'runtime_var': 'value'})}
@@ -104,6 +110,7 @@ parent_dir: ${__DRACON__PARENT_PATH}
 ## Context Variables
 
 ### Automatic Context (in file loading)
+
 ```yaml
 # File information
 config_backup: ${DIR}/backup/${FILE_STEM}.backup
@@ -112,6 +119,7 @@ config_size: ${FILE_SIZE}
 ```
 
 ### Custom Context
+
 ```python
 # Provided when loading
 loader.load('config.yaml', context={
@@ -138,7 +146,7 @@ debug_mode: ${getenv('DEBUG', 'false').lower() == 'true'}
 
 # Complex conditionals
 log_level: ${
-  'DEBUG' if getenv('ENVIRONMENT') == 'dev' 
+  'DEBUG' if getenv('ENVIRONMENT') == 'dev'
   else 'WARNING' if getenv('ENVIRONMENT') == 'prod'
   else 'INFO'
 }
@@ -162,7 +170,7 @@ merged_config: ${dict(base_config, **override_config)}
 
 # Filter dictionaries
 prod_settings: ${
-  {k: v for k, v in all_settings.items() 
+  {k: v for k, v in all_settings.items()
    if not k.startswith('dev_')}
 }
 ```
@@ -245,7 +253,7 @@ database:
   host: db.${getenv('ENVIRONMENT', 'dev')}.local
   pool_size: ${int(getenv('DB_POOL_SIZE', '10'))}
   ssl_mode: ${
-    'require' if getenv('ENVIRONMENT') == 'prod' 
+    'require' if getenv('ENVIRONMENT') == 'prod'
     else 'prefer'
   }
 ```
@@ -256,9 +264,9 @@ database:
 services:
   auth_service: http://${getenv('AUTH_HOST', 'localhost')}:${getenv('AUTH_PORT', '8001')}
   data_service: http://${getenv('DATA_HOST', 'localhost')}:${getenv('DATA_PORT', '8002')}
-  
+
 service_mesh: ${
-  [f"http://{service}:{port}" 
+  [f"http://{service}:{port}"
    for service, port in zip(service_hosts, service_ports)]
 }
 ```
@@ -268,7 +276,7 @@ service_mesh: ${
 ```yaml
 # Validate required environment variables
 database_url: ${
-  getenv('DATABASE_URL') or 
+  getenv('DATABASE_URL') or
   (_ for _ in ()).throw(ValueError('DATABASE_URL is required'))
 }
 ```
