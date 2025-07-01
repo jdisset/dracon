@@ -83,8 +83,14 @@ myapp --database.host +config.yaml@database.prod_host
 Define variables for use in configuration interpolation:
 
 ```bash
-# Define context variables
-myapp --define.region us-west-2 --define.version 1.2.3
+# Define context variables (preferred shorthand)
+myapp ++region us-west-2 ++version 1.2.3
+
+# Also supports equals syntax
+myapp ++region=us-west-2 ++version=1.2.3
+
+# Legacy longer form (still supported)
+myapp --define.region us-west-2 --define.version=1.2.3
 
 # Use in YAML files
 region_config: ${region}
