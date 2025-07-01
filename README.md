@@ -167,7 +167,9 @@ $ python main.py +config/prod.yaml --workers 8 # Load prod config, override work
 # DB Host will be db.prod.svc.cluster.local
 
 # Define a context variable (only useful if YAML used ${my_var})
-$ python main.py -e prod --define.my_var=some_value
+$ python main.py -e prod ++my_var=some_value
+# Or with space-separated syntax
+$ python main.py -e prod ++my_var some_value
 
 # Pass a file path as a value for an argument marked with is_file=True
 # (or use '+' prefix to force loading even without is_file)

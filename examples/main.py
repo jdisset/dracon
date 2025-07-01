@@ -36,7 +36,7 @@ if __name__ == "__main__":
     # 2. Identifying config files specified with '+' (e.g., +config/prod.yaml).
     # 3. Loading and merging these config files sequentially.
     # 4. Applying direct CLI overrides (e.g., --workers 8).
-    # 5. Handling --define.VAR=value for context variables.
+    # 5. Handling ++VAR=value (or --define.VAR=value) for context variables.
     # 6. Validating the final merged configuration against AppConfig.
     # 7. Returning the validated AppConfig instance and a dict of raw args.
     cli_config, raw_args = program.parse_args(sys.argv[1:])

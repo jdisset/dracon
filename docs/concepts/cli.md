@@ -14,7 +14,7 @@ Instead of manually writing argument parsing logic using libraries like `argpars
     - Generating a `--help` message automatically.
     - Handling special Dracon arguments:
       - `+config/file.yaml`: Loads and merges specified YAML configuration files.
-      - `--define.VAR=value`: Sets context variables for interpolation.
+      - `++VAR=value` or `++VAR value`: Sets context variables for interpolation (shorthand for `--define.VAR=value`).
     - Applying overrides from the CLI onto the defaults and loaded files.
     - Validating the final configuration against your Pydantic model.
     - Returning the validated Pydantic model instance.
@@ -27,7 +27,7 @@ This is where Dracon's CLI integrates seamlessly with its configuration loading 
 2.  **`+file1.yaml`:** The first configuration file specified with `+` is loaded and composed (including its own includes, merges, etc.). Its values override the Pydantic defaults.
 3.  **`+file2.yaml`:** The second `+` file is loaded and _merged onto the result_ of step 2 (using Dracon's default merge strategy `<<{<+}[<~]` unless customized globally, though CLI merging isn't typically customized).
 4.  **... Subsequent `+fileN.yaml` files:** Each is merged sequentially.
-5.  **`--define.VAR=value` Context:** Variables defined via `--define.` are added to the context, potentially influencing subsequent interpolations within CLI argument values or during final resolution.
+5.  **`++VAR=value` Context:** Variables defined via `++` (or the longer form `--define.VAR=value`) are added to the context, potentially influencing subsequent interpolations within CLI argument values or during final resolution.
 6.  **CLI Argument Overrides (`--key value`, positional args):** Values provided directly on the command line override any values from previous steps.
 
     - **Nested Keys:** Use dot notation (`--database.host db.prod`) to target nested fields within your Pydantic model. Dracon internally builds the necessary nested dictionary structure.

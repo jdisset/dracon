@@ -503,6 +503,114 @@ def test_define_context_vars(program, config_files):
     assert output == "/tmp/ctx_output"
 
 
+def test_plusplus_shorthand_define(program, config_files):
+    """test ++ shorthand for defining context variables"""
+    print("\n--- test_plusplus_shorthand_define ---")
+    context_conf = config_files / "context_var_test.yaml"
+    args = [
+        f"+{context_conf}",
+        "++my_var",  # shorthand syntax
+        "42",  # value
+    ]
+    print(f"parsing args: {args}")
+    config, raw_args = program.parse_args(args)
+    print(f"parsed config: {config}")
+    print(f"raw args dict: {raw_args}")
+
+    assert isinstance(config, AppConfig)
+    assert config.environment == "ctx_test"  # from context_var_test.yaml
+    assert config.log_level == "INFO"  # default
+    assert config.workers == 42  # from context variable
+    assert config.database.host == "ctx_host"  # from context_var_test.yaml
+    assert config.database.username == "ctx_user"  # from context_var_test.yaml
+    assert isinstance(config.output_path, DeferredNode)
+    print(f"output_path before run: {config.output_path}")
+
+    # test deferred construction
+    print("calling config.run()...")
+    output = config.run()
+    print(f"config.run() returned: {output}")
+    # output_path isn't interpolated in context_var_test.yaml
+    assert output == "/tmp/ctx_output"
+
+
+def test_plusplus_multiple_defines(program, config_files):
+    """test multiple ++ shorthand defines in combination with --define"""
+    print("\n--- test_plusplus_multiple_defines ---")
+    context_conf = config_files / "context_var_test.yaml"
+    
+    # create a config file that uses multiple context variables
+    multi_var_content = """
+workers: ${my_var}
+environment: ${third_var}
+database:
+    host: ctx_host
+    port: ${another_var}
+    username: ctx_user
+    password: ctx_password
+output_path: /tmp/ctx_output
+"""
+    multi_var_file = config_files / "multi_var_test.yaml"
+    multi_var_file.write_text(multi_var_content)
+    
+    args = [
+        f"+{multi_var_file}",
+        "++my_var",  # shorthand syntax
+        "42",
+        "--define.another_var",  # regular syntax
+        "100",
+        "++third_var",  # another shorthand
+        "foo",
+    ]
+    print(f"parsing args: {args}")
+    config, raw_args = program.parse_args(args)
+    print(f"parsed config: {config}")
+    print(f"raw args dict: {raw_args}")
+
+    assert isinstance(config, AppConfig)
+    assert config.workers == 42  # from ++my_var
+    assert config.database.port == 100  # from --define.another_var
+    assert config.environment == "foo"  # from ++third_var
+
+
+def test_define_equals_syntax(program, config_files):
+    """test --define with equals syntax as documented"""
+    print("\n--- test_define_equals_syntax ---")
+    context_conf = config_files / "context_var_test.yaml"
+    args = [
+        f"+{context_conf}",
+        "--define.my_var=42",  # equals syntax
+    ]
+    print(f"parsing args: {args}")
+    config, raw_args = program.parse_args(args)
+    print(f"parsed config: {config}")
+    print(f"raw args dict: {raw_args}")
+
+    assert isinstance(config, AppConfig)
+    assert config.environment == "ctx_test"  # from context_var_test.yaml
+    assert config.log_level == "INFO"  # default
+    assert config.workers == 42  # from context variable
+    assert config.database.host == "ctx_host"  # from context_var_test.yaml
+    assert config.database.username == "ctx_user"  # from context_var_test.yaml
+
+
+def test_plusplus_equals_syntax(program, config_files):
+    """test ++ shorthand with equals syntax"""
+    print("\n--- test_plusplus_equals_syntax ---")
+    context_conf = config_files / "context_var_test.yaml"
+    args = [
+        f"+{context_conf}",
+        "++my_var=42",  # shorthand with equals
+    ]
+    print(f"parsing args: {args}")
+    config, raw_args = program.parse_args(args)
+    print(f"parsed config: {config}")
+    print(f"raw args dict: {raw_args}")
+
+    assert isinstance(config, AppConfig)
+    assert config.workers == 42  # from context variable
+
+
 def test_required_args_missing(program, capfd):
     """test error handling when required args are missing"""
     print("\n--- test_required_args_missing ---")

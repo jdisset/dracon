@@ -83,7 +83,7 @@ This script uses Dracon to create the CLI program based on `AppConfig`.
   - Parses standard CLI arguments (`-e`, `--workers`, etc.).
   - Detects configuration files prefixed with `+` (e.g., `+config/prod.yaml`).
   - Loads and merges the base Pydantic defaults, the specified config files (in order), and CLI overrides according to Dracon's precedence rules.
-  - Handles `--define.VAR=value` arguments.
+  - Handles `++VAR=value` arguments for defining context variables (or the longer form `--define.VAR=value`).
   - Validates the final configuration object against `AppConfig`.
   - Returns the validated `AppConfig` instance (`cli_config`).
 - `cli_config.process_data()`: We call our application logic using the fully configured object.

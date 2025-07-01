@@ -272,9 +272,16 @@ myapp --app.logging.level DEBUG
 ### Variable Definition
 
 ```bash
-# Define context variables
+# Define context variables (preferred shorthand)
+myapp ++environment production
+myapp ++version 1.2.3
+
+# Also supports equals syntax
+myapp ++environment=production ++version=1.2.3
+
+# Legacy longer form (still supported)
 myapp --define.environment production
-myapp --define.version 1.2.3
+myapp --define.version=1.2.3
 
 # Use in configuration files as ${environment}, ${version}
 ```

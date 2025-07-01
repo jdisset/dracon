@@ -531,10 +531,27 @@ class Program(BaseModel, Generic[T]):
         target_dict, real_name, arg_obj = raw_args, None, None  # default target is raw_args
 
         if argstr.startswith('--define.'):  # it's a variable definition
-            var_name = argstr[9:]
-            if not var_name:
+            var_part = argstr[9:]
+            if not var_part:
                 raise ArgParseError("empty variable name after --define.")
-            var_value, i = self._read_value(argv, i)
+            # check for equals syntax: --define.VAR=value
+            if '=' in var_part:
+                var_name, var_value = var_part.split('=', 1)
+            else:
+                var_name = var_part
+                var_value, i = self._read_value(argv, i)
+            defined_vars[var_name] = var_value
+
+        elif argstr.startswith('++'):  # shorthand for --define
+            var_part = argstr[2:]
+            if not var_part:
+                raise ArgParseError("empty variable name after ++")
+            # check for equals syntax: ++VAR=value
+            if '=' in var_part:
+                var_name, var_value = var_part.split('=', 1)
+            else:
+                var_name = var_part
+                var_value, i = self._read_value(argv, i)
             defined_vars[var_name] = var_value
 
         elif argstr.startswith('+'):  # it's an include

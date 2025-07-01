@@ -163,8 +163,11 @@ myapp --database.host db.example.com --database.port 5433
 # Load values from files
 myapp --api-key +secrets/api.key
 
-# Define runtime variables
-myapp --define.region us-west-2 --define.version 1.2.3
+# Define runtime variables (preferred shorthand)
+myapp ++region us-west-2 ++version 1.2.3
+
+# Also supports equals syntax
+myapp ++region=us-west-2 ++version=1.2.3
 ```
 
 ## Basic Instructions
