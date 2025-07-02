@@ -357,6 +357,12 @@ class Program(BaseModel, Generic[T]):
         )
         self._arg_map = {f'-{a.short}': a for a in self._args if a.short}
         self._arg_map.update({f'--{a.long}': a for a in self._args if a.long})
+        
+        # validate positional arguments - if any positional arg is a list, no other positional args allowed
+        positional_args = [arg for arg in self._args if arg.positional]
+        list_positional_args = [arg for arg in positional_args if self._is_list_arg(arg)]
+        if list_positional_args and len(positional_args) > 1:
+            raise ValueError("When a positional argument is a list, no other positional arguments are allowed.")
 
     def parse_args(self, argv: List[str], **kwargs) -> tuple[Optional[T], Dict[str, Any]]:
         """parses command line arguments and generates configuration."""
@@ -561,7 +567,13 @@ class Program(BaseModel, Generic[T]):
             if not self._positionals:
                 raise ArgParseError(f"unexpected positional argument {argstr}")
             arg_obj = self._positionals.pop()
-            raw_args[arg_obj.real_name] = argstr  # positional args always go to raw_args
+            
+            # handle list positional arguments
+            if self._is_list_arg(arg_obj):
+                value, i = self._collect_list_values(argv, i)
+                raw_args[arg_obj.real_name] = value
+            else:
+                raw_args[arg_obj.real_name] = argstr
 
         else:  # handle options (-s, --long, --nested.key)
             arg_obj = self._arg_map.get(argstr)
@@ -581,7 +593,7 @@ class Program(BaseModel, Generic[T]):
                 target_dict[real_name] = True
 
             else:  # option requires a value
-                v, i = self._read_value(argv, i)
+                v, i = self._read_value(argv, i, arg_obj)
                 # if is_file=true, prepend '+' to trigger loading, ensure 'file:' scheme
                 if arg_obj and arg_obj.is_file and not v.startswith('+'):
                     v = f"+{v}"  # allow pkg:path etc. with is_file
@@ -590,13 +602,45 @@ class Program(BaseModel, Generic[T]):
                 logger.debug(f"setting {real_name} to {target_dict[real_name]}")
         return i + 1
 
-    def _read_value(self, argv: List[str], i: int) -> tuple[str, int]:
+    def _is_list_arg(self, arg_obj: Arg) -> bool:
+        """checks if an argument expects a list type"""
+        if not arg_obj or not arg_obj.arg_type:
+            return False
+        origin = typing_get_origin(arg_obj.arg_type)
+        if origin is Annotated:
+            args = get_args(arg_obj.arg_type)
+            if args:
+                origin = typing_get_origin(args[0])
+        return origin in (list, List)
+
+    def _read_value(self, argv: List[str], i: int, arg_obj: Optional[Arg] = None) -> tuple[str, int]:
         """reads the value for an option, advancing the index."""
         original_arg = argv[i]
         i += 1
         if i >= len(argv) or argv[i].startswith('-'):
             raise ArgParseError(f"expected value for argument {original_arg}")
+        
+        # check if this argument expects a list type
+        if arg_obj and self._is_list_arg(arg_obj):
+            return self._collect_list_values(argv, i)
+        
         return argv[i], i
+
+    def _collect_list_values(self, argv: List[str], i: int) -> tuple[str, int]:
+        """collect multiple values for list arguments"""
+        values = []
+        start_i = i
+        while i < len(argv) and not argv[i].startswith('-'):
+            value = argv[i]
+            # strip quotes from individual values (shell quoting behavior)
+            if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+                value = value[1:-1]
+            values.append(value)
+            i += 1
+        # if we only got one value, check if it looks like YAML syntax
+        if len(values) == 1 and (argv[start_i].startswith('[') or "'" in argv[start_i]):
+            return argv[start_i], i - 1  # use original unstripped value for YAML
+        return str(values), i - 1
 
     def _compose_value(self, value: str, loader: DraconLoader) -> Any:
         """start composition from file/key reference if value starts with +"""

@@ -538,7 +538,7 @@ def test_plusplus_multiple_defines(program, config_files):
     """test multiple ++ shorthand defines in combination with --define"""
     print("\n--- test_plusplus_multiple_defines ---")
     context_conf = config_files / "context_var_test.yaml"
-    
+
     # create a config file that uses multiple context variables
     multi_var_content = """
 workers: ${my_var}
@@ -552,7 +552,7 @@ output_path: /tmp/ctx_output
 """
     multi_var_file = config_files / "multi_var_test.yaml"
     multi_var_file.write_text(multi_var_content)
-    
+
     args = [
         f"+{multi_var_file}",
         "++my_var",  # shorthand syntax
@@ -1362,3 +1362,94 @@ config: !include file:$DIR/${nested_path}""")
     cli_config, _ = program.parse_args([f'+{main_file}'])
 
     assert cli_config.config['data']['result'] == "success"
+
+
+def test_list_args_1(program):
+    class ListConfig(BaseModel):
+        items: Annotated[List[str], Arg(help="List of items", positional=True)] = []
+        other: Annotated[List[str], Arg(help="List of stuff with --other")] = []
+
+    program = make_program(ListConfig, name="list-app", context={'ListConfig': ListConfig})
+    items = ["i1", "i2", "i3"]
+
+    args1 = ["--items", "['i1', 'i2', 'i3']"]  # using --items with a string representation
+    print(f"parsing args: {args1}")
+    config1, _ = program.parse_args(args1)
+    print(f"parsed config1: {config1}")
+    assert isinstance(config1, ListConfig)
+    assert config1.items == items
+
+    args1 = ["['i1', 'i2', 'i3']"]  # using positional with a string representation
+    print(f"parsing args: {args1}")
+    config1, _ = program.parse_args(args1)
+    print(f"parsed config1: {config1}")
+    assert isinstance(config1, ListConfig)
+    assert config1.items == items
+
+    args2 = ["--items", *items]  # using --items with unpacking
+    print(f"parsing args: {args2}")
+    config2, _ = program.parse_args(args2)
+    print(f"parsed config1: {config2}")
+    assert isinstance(config2, ListConfig)
+    assert config2.items == items
+
+    args2 = [*items]  # using positional with unpacking (space separated)
+    print(f"parsing args: {args2}")
+    config2, _ = program.parse_args(args2)
+    print(f"parsed config1: {config2}")
+    assert isinstance(config2, ListConfig)
+    assert config2.items == items
+
+    args = ["['i1', 'i2', 'i3']", "--other", "['o1', 'o2']"]
+    config, _ = program.parse_args(args)
+    assert isinstance(config, ListConfig)
+    assert config.items == items
+    assert config.other == ["o1", "o2"]
+
+    args = [*items, "--other", "['o1', 'o2']"]
+    config, _ = program.parse_args(args)
+    assert isinstance(config, ListConfig)
+    assert config.items == items
+    assert config.other == ["o1", "o2"]
+
+    args = [*items, "--other", 'o1', 'o2']
+    config, _ = program.parse_args(args)
+    assert isinstance(config, ListConfig)
+    assert config.items == items
+    assert config.other == ["o1", "o2"]
+
+    args = ["--other", 'o1', 'o2', *items]
+    config, _ = program.parse_args(args)
+    assert isinstance(config, ListConfig)
+    assert len(config.items) == 0  # no items provided since they are after --other
+    assert config.other == ["o1", "o2"] + items
+
+    args = ["--other", 'o1', 'o2', '--items', *items]
+    config, _ = program.parse_args(args)
+    assert isinstance(config, ListConfig)
+    assert config.items == items
+    assert config.other == ["o1", "o2"]
+
+    args = [*items, "--other", '"o1 with space"', '""with " quotes""']
+    config, _ = program.parse_args(args)
+    assert isinstance(config, ListConfig)
+    assert config.items == items
+    assert config.other == ["o1 with space", '"with " quotes"']
+
+
+def test_list_args_2(program):
+    class ListConfig(BaseModel):
+        items: Annotated[List[str], Arg(help="List of items", positional=True)] = []
+        other: Annotated[List[str], Arg(help="List of stuff", positional=True)] = []
+
+    # creating the program should fail because when a positional argument is a list, no other positional arguments can be defined
+    with pytest.raises(
+        ValueError,
+        match="When a positional argument is a list, no other positional arguments are allowed.",
+    ):
+        make_program(ListConfig, name="list-app", context={'ListConfig': ListConfig})
+        
+
+# a similar simpler syntax for mappings could be:
+# myprog --dictlike '{"key1": "value1", "key2": "value2", "key3": {"nested1": "vnest1", "nested2": "vnest2"}}'
+# myprog --dictlike key1=value1 key2=value2 key3.nested1=vnest1 key3.nested2=vnest2
