@@ -136,6 +136,10 @@ class MergeKey(BaseModel):
     list_priority: MergePriority = MergePriority.EXISTING
     list_depth: Optional[int] = None
 
+    # context propagation - whether to propagate new context up
+    # only (<) is supported because modifying existing node's context doesn't make sense
+    context_propagation: bool = False  # False (default) or True (with (<) option)
+
     keypath: Optional[str] = None
 
     @staticmethod
@@ -180,15 +184,18 @@ class MergeKey(BaseModel):
         # to find the dict_mode and list_mode, we need to parse the raw key
         # things inside {} concern the dict_mode and priority
         # things inside [] concern the list_mode and priority
+        # things inside () concern the context propagation
 
         super().model_post_init(*args, **kwargs)
 
-        # check that only zero or one [] and {} are present
+        # check that only zero or one [], {}, and () are present
         assert self.raw.count('{') <= 1, 'Only one {} is allowed in merge key'
         assert self.raw.count('[') <= 1, 'Only one [] is allowed in merge key'
+        assert self.raw.count('(') <= 1, 'Only one () is allowed in merge key'
         # check that they close properly
         assert self.raw.count('{') == self.raw.count('}'), 'Mismatched {} in merge key'
         assert self.raw.count('[') == self.raw.count(']'), 'Mismatched [] in merge key'
+        assert self.raw.count('(') == self.raw.count(')'), 'Mismatched () in merge key'
 
         # check if it has a keypath part (anything after @)
         default_dict_priority = MergePriority.EXISTING
@@ -221,6 +228,15 @@ class MergeKey(BaseModel):
         self.list_mode, self.list_priority, self.list_depth = self.get_mode_priority(
             list_str, default_mode=default_list_mode, default_priority=default_list_priority
         )
+
+        # parse context propagation option
+        context_str = re.search(r'\((.+)\)', self.raw)
+        if context_str:
+            context_str = context_str.group(1)
+            if context_str == '<':
+                self.context_propagation = True
+            else:
+                raise ValueError(f'Invalid context propagation option: {context_str}. Only < is allowed')
 
 
 DEFAULT_ADD_TO_CONTEXT_MERGE_KEY = MergeKey(raw='<<{~<}[~<]')
@@ -261,6 +277,7 @@ def merged(existing: Any, new: Any, k: MergeKey = DEFAULT_ADD_TO_CONTEXT_MERGE_K
             elif other.tag.startswith('!'):
                 result.tag = other.tag
 
+
         for key, value in other.items():
             if key not in result:
                 result[key] = value
@@ -288,6 +305,10 @@ def add_to_context(new_context, existing_item, merge_key=DEFAULT_ADD_TO_CONTEXT_
 
     if hasattr(existing_item, 'context'):
         existing_item.context = context_add(existing_item.context, new_context, merge_key)
+    else:
+        # if no context exists, just add it
+        existing_item.context = new_context
+    
     if hasattr(existing_item, '_clear_ctx') and existing_item._clear_ctx:
         for k in existing_item._clear_ctx:
             if k in existing_item.context:
@@ -305,7 +326,16 @@ def reset_context(item, ignore_dracon_namespace=True):
 
 
 def context_add(existing, new, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
-    m = merged(existing, new, merge_key)
+    # Handle context propagation if specified
+    if hasattr(merge_key, 'context_propagation') and merge_key.context_propagation:
+        # Context propagation is enabled with (<) - new context should win
+        # Create a modified merge key that uses new priority for dicts
+        mode_char = '+' if merge_key.dict_mode == MergeMode.APPEND else '~'
+        modified_key = MergeKey(raw=f"{{{mode_char}<}}")
+        m = merged(existing, new, modified_key)
+    else:
+        # No context propagation - use the merge key as is
+        m = merged(existing, new, merge_key)
     return m
 
 
