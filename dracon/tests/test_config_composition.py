@@ -429,5 +429,96 @@ composite_ref: !include file:$DIR/includes/composite.yaml
     assert config["composite_ref"]["nested"]["another_key"] == "another_value"
 
 
+# TODO: context propagation feature.
+# it should allow to propagate any context upstream. That probably requires having a context holder at the CompositionResult level? Or maybe every node should have a context?
+
+
+def test_context_propagation(tmp_path):
+    from dracon import load
+
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+
+    main_default = """
+    !set_default var1: 0
+    var1value: ${var1}
+    <<:
+        !define var1: 42
+        included_key: included_value
+"""
+    main1 = base_dir / "main_default.yaml"
+    main1.write_text(main_default)
+
+    main_with_prop = """
+    !set_default var1: 0
+    var1value: ${var1}
+    <<(<):
+        !define var1: 42
+        included_key: included_value
+    """
+    main2 = base_dir / "main_with_prop.yaml"
+    main2.write_text(main_with_prop)
+
+    config_default = load(str(main1))
+    config_with_prop = load(str(main2))
+    assert config_default["var1value"] == 0
+    assert config_default["included_key"] == "included_value"
+    assert config_with_prop["var1value"] == 42
+    assert config_with_prop["included_key"] == "included_value"
+
+
+# def test_context_propagation_w_includes(tmp_path):
+#     from dracon import load
+#
+#     base_dir = tmp_path / "base"
+#     includes_dir = base_dir / "includes"
+#
+#     base_dir.mkdir()
+#     includes_dir.mkdir()
+#
+#     included_content = """
+# !define var1: 42
+# included_dir: $DIR
+# """
+#     included_file = includes_dir / "included.yaml"
+#     included_file.write_text(included_content)
+#
+#     main_content_with_context_prop = """
+# !set_default var1: 0
+# var1value: ${var1}
+# current_dir: $DIR
+# <<(<): !include file:$DIR/includes/included.yaml
+# """
+#     main1 = base_dir / "main.yaml"
+#     main1.write_text(main_content_with_context_prop)
+#
+#     main_content_without_context_prop = """
+#     !set_default var1: 0
+#     var1value: $var1
+#     current_dir: $DIR
+#     <<: !include file:$DIR/includes/included.yaml
+# """
+#     main2 = base_dir / "main_no_context.yaml"
+#     main2.write_text(main_content_without_context_prop)
+#
+#     config_with_context = load(str(main1))
+#     config_without_context = load(str(main2))
+#
+#     assert config_with_context["var1value"] == 42
+#     assert config_with_context["included_key"] == "included_value"
+#     assert config_with_context["nested"]["key1"] == "value1"
+#
+#     # loader-specific variables should be preserved
+#     assert config_with_context["current_dir"] == str(base_dir)
+#     assert config_with_context["included_dir"] == str(includes_dir)
+#
+#     assert config_without_context["var1value"] == 0
+#     assert config_without_context["included_key"] == "included_value"
+#     assert config_without_context["nested"]["key1"] == "value1"
+#
+#     assert config_without_context["current_dir"] == str(base_dir)
+#     assert config_without_context["included_dir"] == str(includes_dir)
+#
+
 if __name__ == "__main__":
     pytest.main([__file__])

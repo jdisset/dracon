@@ -150,20 +150,34 @@ class IncludeNode(ContextNode):
 
 
 class MergeNode(DraconScalarNode):
-    def __init__(self, value, start_mark=None, end_mark=None, tag=None, anchor=None, comment=None):
+    def __init__(
+        self,
+        value,
+        start_mark=None,
+        end_mark=None,
+        tag=None,
+        anchor=None,
+        comment=None,
+        context=None,
+    ):
         self.merge_key_raw = value
         DraconScalarNode.__init__(
             self, STR_TAG, value, start_mark, end_mark, comment=comment, anchor=anchor
+        )
+        self.context = (
+            ShallowDict(context or {}) if not isinstance(context, ShallowDict) else context
         )
 
     def __getstate__(self):
         state = DraconScalarNode.__getstate__(self)
         state['merge_key_raw'] = self.merge_key_raw
+        state['context'] = self.context.copy()  # Shallow copy the context
         return state
 
     def __setstate__(self, state):
         DraconScalarNode.__setstate__(self, state)
         self.merge_key_raw = state['merge_key_raw']
+        self.context = state['context']
 
 
 class UnsetNode(DraconScalarNode):
@@ -201,8 +215,10 @@ class DraconMappingNode(MappingNode):
         flow_style: Any = None,
         comment: Any = None,
         anchor: Any = None,
+        context=None,
     ) -> None:
         MappingNode.__init__(self, tag, value, start_mark, end_mark, flow_style, comment, anchor)
+        self.context = context if context is not None else ShallowDict()
         self._recompute_map()
 
     def _recompute_map(self):
@@ -514,13 +530,5 @@ def dracon_sequence_node_hash(self):
     elements_hash = hash(tuple(hash(v) for v in self.value))
     return hash((self.__class__.__name__, self.tag, elements_hash, self.anchor))
 
-
-# DraconScalarNode.__hash__ = dracon_scalar_node_hash
-# ContextNode.__hash__ = context_node_hash
-# IncludeNode.__hash__ = include_node_hash
-# MergeNode.__hash__ = merge_node_hash
-# UnsetNode.__hash__ = unset_node_hash
-# DraconMappingNode.__hash__ = dracon_mapping_node_hash
-# DraconSequenceNode.__hash__ = dracon_sequence_node_hash
 
 ##────────────────────────────────────────────────────────────────────────────}}}

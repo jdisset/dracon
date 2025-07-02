@@ -285,3 +285,42 @@ def test_sequential_merge_order_existing_wins(merge_order_files):
         "final_key": "final_value",  # Original key in main map
     }
     assert config == expected
+
+
+def test_merge_key_parses_context_propagation():
+    """Test that MergeKey correctly parses (<) option."""
+    mk = MergeKey(raw="<<(<)")
+    assert mk.context_propagation is True
+    assert mk.dict_mode == MergeMode.APPEND  # default
+    assert mk.dict_priority == MergePriority.EXISTING  # default
+
+
+def test_merge_key_no_context_propagation():
+    """Test that no parentheses means no context propagation."""
+    mk = MergeKey(raw="<<")
+    assert mk.context_propagation is False
+
+
+def test_merge_key_context_with_other_options():
+    """Test that context option works with other options."""
+    mk = MergeKey(raw="<<(<){+<}[~>]")
+    assert mk.context_propagation is True
+    assert mk.dict_mode == MergeMode.APPEND
+    assert mk.dict_priority == MergePriority.NEW
+    assert mk.list_mode == MergeMode.REPLACE
+    assert mk.list_priority == MergePriority.EXISTING
+
+
+def test_merge_key_invalid_context_option():
+    """Test that invalid context propagation options raise errors."""
+    with pytest.raises(ValueError, match="Only < is allowed"):
+        MergeKey(raw="<<(x)")
+
+    with pytest.raises(ValueError, match="Only < is allowed"):
+        MergeKey(raw="<<(>)")
+
+    with pytest.raises(Exception):  # Pydantic wraps assertion errors
+        MergeKey(raw="<<(<)(<)")
+
+    with pytest.raises(Exception):  # Pydantic wraps assertion errors
+        MergeKey(raw="<<(<")
