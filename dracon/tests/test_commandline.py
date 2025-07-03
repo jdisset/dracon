@@ -1623,3 +1623,56 @@ def test_interpolable_args(program):
     config, _ = program.parse_args(args, context={'INTERPOLATED_VAR': 'interpolated_item'})
     assert isinstance(config, InterpolatedConfig)
     assert config.list_of_values == ["item1", "interpolated_item"]
+
+
+class ClassA(BaseModel):
+    name: str = ''
+
+
+def test_define_context_file_loading_direct(tmp_path):
+    # control test: direct loading with context works
+    config_file = tmp_path / "test_define.yaml"
+    config_file.write_text("""!ClassA
+name: val_${str(1)}
+""")
+    loader = DraconLoader(context={'ClassA': ClassA})
+    direct_config = loader.load(str(config_file))
+    assert isinstance(direct_config, ClassA)
+    assert direct_config.name == 'val_1'
+
+
+def test_define_context_file_loading_explicit(tmp_path):
+    config_file = tmp_path / "test_define.yaml"
+    config_file.write_text("""!ClassA
+name: val_${str(1)}
+""")
+
+    # CLI with explicit +file.yaml syntax, should work (just like direct loading above)
+    class ConfigWithExplicitInclude(BaseModel):
+        data: ClassA
+
+    program1 = make_program(
+        ConfigWithExplicitInclude, name="test-explicit-include", context={'ClassA': ClassA}
+    )
+
+    config1, _ = program1.parse_args(["--data", f"+{config_file}"])
+    assert isinstance(config1, ConfigWithExplicitInclude)
+    assert isinstance(config1.data, ClassA)
+    assert config1.data.name == 'val_1'
+
+
+def test_define_context_cli_file_loading_is_file(tmp_path):
+    config_file = tmp_path / "test_define.yaml"
+    config_file.write_text("""!ClassA
+name: val_${str(1)}
+""")
+
+    # CLI with is_file=True syntax (allow to skip the +)
+    class ConfigWithFileArg(BaseModel):
+        data: Annotated[ClassA, Arg(is_file=True, help="Load ClassA from file")]
+
+    program2 = make_program(ConfigWithFileArg, name="test-file-arg", context={'ClassA': ClassA})
+    config2, _ = program2.parse_args(["--data", str(config_file)])
+    assert isinstance(config2, ConfigWithFileArg)
+    assert isinstance(config2.data, ClassA)
+    assert config2.data.name == 'val_1'

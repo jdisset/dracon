@@ -411,6 +411,10 @@ class Program(BaseModel, Generic[T]):
         if print_help in actions:
             print_help(self, None)
         try:
+            # merge stored context from Program instance with kwargs
+            program_context = getattr(self, 'context', None)
+            if program_context:
+                kwargs = {'context': program_context, **kwargs}
             conf = self._generate_config(
                 raw_args, nested_args, defined_vars, confs_to_merge, **kwargs
             )
