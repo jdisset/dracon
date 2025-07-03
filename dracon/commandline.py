@@ -36,7 +36,7 @@ from dracon.keypath import KeyPath
 from dracon.lazy import resolve_all_lazy
 from dracon.merge import MergeKey
 from dracon.resolvable import Resolvable, get_inner_type
-from dracon.utils import build_nested_dict
+from dracon.utils import build_nested_dict, list_like, dict_like
 
 logger = logging.getLogger(__name__)
 
@@ -357,12 +357,19 @@ class Program(BaseModel, Generic[T]):
         )
         self._arg_map = {f'-{a.short}': a for a in self._args if a.short}
         self._arg_map.update({f'--{a.long}': a for a in self._args if a.long})
-        
-        # validate positional arguments - if any positional arg is a list, no other positional args allowed
+
+        # validate positional arguments - if any positional arg is a collection, no other positional args allowed
         positional_args = [arg for arg in self._args if arg.positional]
-        list_positional_args = [arg for arg in positional_args if self._is_list_arg(arg)]
-        if list_positional_args and len(positional_args) > 1:
-            raise ValueError("When a positional argument is a list, no other positional arguments are allowed.")
+        for arg in positional_args:
+            collection_type = self._get_collection_type(arg)
+            if collection_type == "list_like" and len(positional_args) > 1:
+                raise ValueError(
+                    "When a positional argument is a list, no other positional arguments are allowed."
+                )
+            elif collection_type == "dict_like" and len(positional_args) > 1:
+                raise ValueError(
+                    "When a positional argument is a dict, no other positional arguments are allowed."
+                )
 
     def parse_args(self, argv: List[str], **kwargs) -> tuple[Optional[T], Dict[str, Any]]:
         """parses command line arguments and generates configuration."""
@@ -567,10 +574,14 @@ class Program(BaseModel, Generic[T]):
             if not self._positionals:
                 raise ArgParseError(f"unexpected positional argument {argstr}")
             arg_obj = self._positionals.pop()
-            
-            # handle list positional arguments
-            if self._is_list_arg(arg_obj):
+
+            # handle collection positional arguments
+            collection_type = self._get_collection_type(arg_obj)
+            if collection_type == "list_like":
                 value, i = self._collect_list_values(argv, i)
+                raw_args[arg_obj.real_name] = value
+            elif collection_type == "dict_like":
+                value, i = self._collect_dict_values(argv, i)
                 raw_args[arg_obj.real_name] = value
             else:
                 raw_args[arg_obj.real_name] = argstr
@@ -602,28 +613,47 @@ class Program(BaseModel, Generic[T]):
                 logger.debug(f"setting {real_name} to {target_dict[real_name]}")
         return i + 1
 
-    def _is_list_arg(self, arg_obj: Arg) -> bool:
-        """checks if an argument expects a list type"""
+    def _get_collection_type(self, arg_obj: Arg) -> Optional[str]:
+        """checks if an argument expects a collection type and returns the type"""
         if not arg_obj or not arg_obj.arg_type:
-            return False
-        origin = typing_get_origin(arg_obj.arg_type)
-        if origin is Annotated:
-            args = get_args(arg_obj.arg_type)
-            if args:
-                origin = typing_get_origin(args[0])
-        return origin in (list, List)
+            return None
 
-    def _read_value(self, argv: List[str], i: int, arg_obj: Optional[Arg] = None) -> tuple[str, int]:
+        # unwrap Annotated types
+        actual_type = arg_obj.arg_type
+        origin = typing_get_origin(actual_type)
+        if origin is Annotated:
+            actual_type = get_args(actual_type)[0]
+            origin = typing_get_origin(actual_type) or actual_type
+        elif not origin:
+            origin = actual_type
+
+        try:  # test by creating an empty instance
+            dummy = origin()
+            if dict_like(dummy):
+                return "dict_like"
+            elif list_like(dummy) or isinstance(dummy, set):
+                return "list_like"
+        except:
+            pass
+        return None
+
+    def _read_value(
+        self, argv: List[str], i: int, arg_obj: Optional[Arg] = None
+    ) -> tuple[str, int]:
         """reads the value for an option, advancing the index."""
         original_arg = argv[i]
         i += 1
         if i >= len(argv) or argv[i].startswith('-'):
             raise ArgParseError(f"expected value for argument {original_arg}")
-        
-        # check if this argument expects a list type
-        if arg_obj and self._is_list_arg(arg_obj):
-            return self._collect_list_values(argv, i)
-        
+
+        # check if this argument expects a collection type
+        if arg_obj:
+            collection_type = self._get_collection_type(arg_obj)
+            if collection_type == "list_like":
+                return self._collect_list_values(argv, i)
+            elif collection_type == "dict_like":
+                return self._collect_dict_values(argv, i)
+
         return argv[i], i
 
     def _collect_list_values(self, argv: List[str], i: int) -> tuple[str, int]:
@@ -632,8 +662,9 @@ class Program(BaseModel, Generic[T]):
         start_i = i
         while i < len(argv) and not argv[i].startswith('-'):
             value = argv[i]
-            # strip quotes from individual values (shell quoting behavior)
-            if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+            if (value.startswith('"') and value.endswith('"')) or (
+                value.startswith("'") and value.endswith("'")
+            ):
                 value = value[1:-1]
             values.append(value)
             i += 1
@@ -641,6 +672,38 @@ class Program(BaseModel, Generic[T]):
         if len(values) == 1 and (argv[start_i].startswith('[') or "'" in argv[start_i]):
             return argv[start_i], i - 1  # use original unstripped value for YAML
         return str(values), i - 1
+
+    def _collect_dict_values(self, argv: List[str], i: int) -> tuple[str, int]:
+        """collect multiple key=value pairs for dict arguments"""
+        pairs = []
+        start_i = i
+        while i < len(argv) and not argv[i].startswith('-'):
+            value = argv[i]
+            if value.startswith('{') or value.startswith('['):  # looks like JSON/YAML syntax
+                if not pairs:
+                    return value, i
+                break
+            if '=' in value:  # check for key=value syntax
+                pairs.append(value)
+            else:
+                break
+            i += 1
+
+        if len(pairs) == 0 and i > start_i:
+            return argv[start_i], i - 1
+
+        flat_dict = {}
+        for pair in pairs:
+            key, value = pair.split('=', 1)
+            # strip quotes from value
+            if (value.startswith('"') and value.endswith('"')) or (
+                value.startswith("'") and value.endswith("'")
+            ):
+                value = value[1:-1]
+            flat_dict[key] = value
+
+        nested_dict = build_nested_dict(flat_dict)
+        return str(nested_dict), i - 1
 
     def _compose_value(self, value: str, loader: DraconLoader) -> Any:
         """start composition from file/key reference if value starts with +"""
@@ -690,10 +753,6 @@ class Program(BaseModel, Generic[T]):
 
         # compose initial structure from defaults
         current_composition = loader.compose_config_from_str(pdump_str)
-        # logger.debug(
-        #     f"current_composition after adding resolvable fields:\n{current_composition}\n"
-        # )
-        # logger.debug(f"loader deferred paths: {loader.deferred_paths}")
 
         # merge included config files
         if confs_to_merge:
@@ -704,7 +763,6 @@ class Program(BaseModel, Generic[T]):
                 current_composition = loader.merge(
                     current_composition, this_conf, merge_key=MergeKey(raw="<<{<~}[<~]")
                 )
-                # logger.debug(f"current_composition after merging {conf}:\n{current_composition}\n")
 
         from dracon.nodes import Node
 
@@ -726,7 +784,6 @@ class Program(BaseModel, Generic[T]):
             current_composition = loader.merge(
                 current_composition, raw_args_composition, merge_key=MergeKey(raw="<<{<+}[<~]")
             )
-            # logger.debug(f"current_composition after merging args:\n{current_composition}\n")
 
         # merge nested args
         processed_nested_args = {k: compose_value(v) for k, v in nested_args.items()}
@@ -741,7 +798,6 @@ class Program(BaseModel, Generic[T]):
             current_composition = loader.merge(
                 current_composition, dict_composition, merge_key=MergeKey(raw="<<{<+}[<~]")
             )
-            # logger.debug(f"current_composition after merging nested args:\n{current_composition}\n")
 
         res = loader.load_node(current_composition.root)
         res = self.conf_type.model_validate(res)
