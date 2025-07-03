@@ -10,7 +10,7 @@ from pydantic import (
     WrapValidator,
     ValidationError,
 )
-from typing import Annotated, Optional, List, Literal, Union
+from typing import Annotated, Optional, List, Literal, Union, Dict, Any, Tuple, Set
 import subprocess
 import os
 from datetime import datetime
@@ -1450,6 +1450,137 @@ def test_list_args_2(program):
         make_program(ListConfig, name="list-app", context={'ListConfig': ListConfig})
         
 
-# a similar simpler syntax for mappings could be:
-# myprog --dictlike '{"key1": "value1", "key2": "value2", "key3": {"nested1": "vnest1", "nested2": "vnest2"}}'
-# myprog --dictlike key1=value1 key2=value2 key3.nested1=vnest1 key3.nested2=vnest2
+def test_dict_args_1(program):
+    class DictConfig(BaseModel):
+        config: Annotated[Dict[str, Any], Arg(help="Configuration dict", positional=True)] = {}
+        settings: Annotated[Dict[str, str], Arg(help="Settings dict with --settings")] = {}
+
+    program = make_program(DictConfig, name="dict-app", context={'DictConfig': DictConfig})
+
+    # test JSON-like syntax
+    args1 = ["--config", '{"key1": "value1", "key2": "value2"}']
+    print(f"parsing args: {args1}")
+    config1, _ = program.parse_args(args1)
+    print(f"parsed config1: {config1}")
+    assert isinstance(config1, DictConfig)
+    assert config1.config == {"key1": "value1", "key2": "value2"}
+
+    args1 = ['{"key1": "value1", "key2": "value2"}']  # positional JSON
+    print(f"parsing args: {args1}")
+    config1, _ = program.parse_args(args1)
+    print(f"parsed config1: {config1}")
+    assert isinstance(config1, DictConfig)
+    assert config1.config == {"key1": "value1", "key2": "value2"}
+
+    # test key=value space-separated syntax
+    args2 = ["--config", "key1=value1", "key2=value2"]
+    print(f"parsing args: {args2}")
+    config2, _ = program.parse_args(args2)
+    print(f"parsed config1: {config2}")
+    assert isinstance(config2, DictConfig)
+    assert config2.config == {"key1": "value1", "key2": "value2"}
+
+    args2 = ["key1=value1", "key2=value2"]  # positional key=value
+    print(f"parsing args: {args2}")
+    config2, _ = program.parse_args(args2)
+    print(f"parsed config1: {config2}")
+    assert isinstance(config2, DictConfig)
+    assert config2.config == {"key1": "value1", "key2": "value2"}
+
+    # test nested key syntax
+    args3 = ["--config", "key1=value1", "nested.subkey=subvalue", "key2=value2"]
+    config3, _ = program.parse_args(args3)
+    assert isinstance(config3, DictConfig)
+    assert config3.config == {"key1": "value1", "nested": {"subkey": "subvalue"}, "key2": "value2"}
+
+    args3 = ["key1=value1", "nested.subkey=subvalue", "key2=value2"]  # positional nested
+    config3, _ = program.parse_args(args3)
+    assert isinstance(config3, DictConfig)
+    assert config3.config == {"key1": "value1", "nested": {"subkey": "subvalue"}, "key2": "value2"}
+
+    # test mixed usage
+    args = ['{"existing": "json"}', "--settings", "opt1=val1", "opt2=val2"]
+    config, _ = program.parse_args(args)
+    assert isinstance(config, DictConfig)
+    assert config.config == {"existing": "json"}
+    assert config.settings == {"opt1": "val1", "opt2": "val2"}
+
+    args = ["key1=value1", "key2=value2", "--settings", '{"json": "style"}']
+    config, _ = program.parse_args(args)
+    assert isinstance(config, DictConfig)
+    assert config.config == {"key1": "value1", "key2": "value2"}
+    assert config.settings == {"json": "style"}
+
+    # test quoted values
+    args = ["key1=value1", 'key2="value with spaces"', "key3='quoted value'"]
+    config, _ = program.parse_args(args)
+    assert isinstance(config, DictConfig)
+    assert config.config == {"key1": "value1", "key2": "value with spaces", "key3": "quoted value"}
+
+
+def test_dict_args_2(program):
+    class DictConfig(BaseModel):
+        config: Annotated[Dict[str, Any], Arg(help="Configuration dict", positional=True)] = {}
+        settings: Annotated[Dict[str, str], Arg(help="Settings dict", positional=True)] = {}
+
+    # creating the program should fail because when a positional argument is a dict, no other positional arguments can be defined
+    with pytest.raises(
+        ValueError,
+        match="When a positional argument is a dict, no other positional arguments are allowed.",
+    ):
+        make_program(DictConfig, name="dict-app", context={'DictConfig': DictConfig})
+
+
+def test_list_like_containers(program):
+    """Test that tuple, set and other list-like containers work with space-separated syntax"""
+    
+    class TupleConfig(BaseModel):
+        items: Annotated[Tuple[str, ...], Arg(help="Tuple of items", positional=True)] = ()
+        other: Annotated[Tuple[str, str], Arg(help="Fixed size tuple")] = ("default1", "default2")
+
+    program = make_program(TupleConfig, name="tuple-app", context={'TupleConfig': TupleConfig})
+
+    # test tuple with space-separated syntax
+    args = ["--items", "i1", "i2", "i3"]
+    config, _ = program.parse_args(args)
+    assert isinstance(config, TupleConfig)
+    assert config.items == ("i1", "i2", "i3")
+
+    # test tuple with YAML syntax  
+    args = ["--items", "['t1', 't2']"]
+    config, _ = program.parse_args(args)
+    assert isinstance(config, TupleConfig)
+    assert config.items == ("t1", "t2")
+
+    # test positional tuple
+    args = ["i1", "i2", "i3"]
+    config, _ = program.parse_args(args)
+    assert isinstance(config, TupleConfig)
+    assert config.items == ("i1", "i2", "i3")
+
+    # test fixed-size tuple
+    args = ["--other", "a", "b"]
+    config, _ = program.parse_args(args)
+    assert isinstance(config, TupleConfig)
+    assert config.other == ("a", "b")
+
+
+def test_set_containers(program):
+    """Test that set containers work with space-separated syntax"""
+    
+    class SetConfig(BaseModel):
+        tags: Annotated[Set[str], Arg(help="Set of tags")] = set()
+
+    program = make_program(SetConfig, name="set-app", context={'SetConfig': SetConfig})
+
+    # test set with space-separated syntax
+    args = ["--tags", "tag1", "tag2", "tag1"]  # duplicate should be removed
+    config, _ = program.parse_args(args)
+    assert isinstance(config, SetConfig)
+    assert config.tags == {"tag1", "tag2"}
+
+    # test set with YAML syntax
+    args = ["--tags", "['s1', 's2', 's1']"]
+    config, _ = program.parse_args(args)
+    assert isinstance(config, SetConfig)
+    assert config.tags == {"s1", "s2"}
