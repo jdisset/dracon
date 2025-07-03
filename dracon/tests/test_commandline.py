@@ -18,6 +18,7 @@ from datetime import datetime
 from dracon import Arg, DeferredNode, construct, DraconLoader, make_program, DraconError
 from dracon.commandline import ArgParseError
 from dracon.loader import dump_to_node
+from dracon.lazy import LazyDraconModel
 from dracon import CompositionResult, DraconMappingNode, resolve_all_lazy
 
 
@@ -1448,7 +1449,7 @@ def test_list_args_2(program):
         match="When a positional argument is a list, no other positional arguments are allowed.",
     ):
         make_program(ListConfig, name="list-app", context={'ListConfig': ListConfig})
-        
+
 
 def test_dict_args_1(program):
     class DictConfig(BaseModel):
@@ -1533,7 +1534,7 @@ def test_dict_args_2(program):
 
 def test_list_like_containers(program):
     """Test that tuple, set and other list-like containers work with space-separated syntax"""
-    
+
     class TupleConfig(BaseModel):
         items: Annotated[Tuple[str, ...], Arg(help="Tuple of items", positional=True)] = ()
         other: Annotated[Tuple[str, str], Arg(help="Fixed size tuple")] = ("default1", "default2")
@@ -1546,7 +1547,7 @@ def test_list_like_containers(program):
     assert isinstance(config, TupleConfig)
     assert config.items == ("i1", "i2", "i3")
 
-    # test tuple with YAML syntax  
+    # test tuple with YAML syntax
     args = ["--items", "['t1', 't2']"]
     config, _ = program.parse_args(args)
     assert isinstance(config, TupleConfig)
@@ -1567,7 +1568,7 @@ def test_list_like_containers(program):
 
 def test_set_containers(program):
     """Test that set containers work with space-separated syntax"""
-    
+
     class SetConfig(BaseModel):
         tags: Annotated[Set[str], Arg(help="Set of tags")] = set()
 
@@ -1584,3 +1585,41 @@ def test_set_containers(program):
     config, _ = program.parse_args(args)
     assert isinstance(config, SetConfig)
     assert config.tags == {"s1", "s2"}
+
+
+def test_interpolable_args(program):
+    """Test that interpolated arguments work correctly"""
+
+    class InterpolatedConfig(
+        LazyDraconModel
+    ):  # using LazyDraconModel will allow lazy evaluation of the value
+        value: Annotated[str, Arg(help="String value")] = "${INTERPOLATED_VAR}"
+        list_of_values: Annotated[List[str], Arg(help="List of values")] = []
+
+    program = make_program(
+        InterpolatedConfig,
+        name="interpolated-app",
+        context={'InterpolatedConfig': InterpolatedConfig, 'INTERPOLATED_VAR': 'default_value'},
+    )
+
+    # test without interpolation
+    args = ["--value", "static_value"]
+    config, _ = program.parse_args(args)
+    assert isinstance(config, InterpolatedConfig)
+    assert config.value == "static_value"
+
+    # test with interpolation
+    args = ["--value", "${INTERPOLATED_VAR}"]
+    config, _ = program.parse_args(args, context={'INTERPOLATED_VAR': 'interpolated_value'})
+    assert isinstance(config, InterpolatedConfig)
+    assert config.value == "interpolated_value"
+
+    args = ["--list-of-values", "item1", "item2"]
+    config, _ = program.parse_args(args)
+    assert isinstance(config, InterpolatedConfig)
+    assert config.list_of_values == ["item1", "item2"]
+
+    args = ["--list-of-values", "item1", "${INTERPOLATED_VAR}"]
+    config, _ = program.parse_args(args, context={'INTERPOLATED_VAR': 'interpolated_item'})
+    assert isinstance(config, InterpolatedConfig)
+    assert config.list_of_values == ["item1", "interpolated_item"]
