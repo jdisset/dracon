@@ -448,6 +448,21 @@ def test_instruction_if_true():
     }
 
 
+def test_root_define_class():
+    yaml_content = """
+    !ClassA
+    !define available: "${[0, 1]}"
+    !define fullmat: ${[[x,y] for x in available for y in available]}
+    index: 1
+    name: val_${str(fullmat)}
+    """
+    loader = DraconLoader(enable_interpolation=True, context={'ClassA': ClassA})
+    config = loader.loads(yaml_content)
+    assert isinstance(config, ClassA)
+    assert config.index == 1
+    assert config.name == 'val_[[0, 0], [0, 1], [1, 0], [1, 1]]'
+
+
 def test_instruction_if_false():
     yaml_content = """
     !if ${False}:
@@ -810,25 +825,25 @@ def test_instruction_if_then_else_simple():
                 host: localhost
                 ssl: false
     """
-    
+
     # Test with prod environment
     def get_env_prod(x):
         return 'prod'
-    
+
     loader = DraconLoader(enable_interpolation=True, context={'get_env': get_env_prod})
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
-    
+
     assert config.database == {'host': 'prod-db.example.com', 'ssl': True}
-    
+
     # Test with non-prod environment
     def get_env_dev(x):
         return 'dev'
-    
+
     loader = DraconLoader(enable_interpolation=True, context={'get_env': get_env_dev})
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
-    
+
     assert config.database == {'host': 'localhost', 'ssl': False}
 
 
@@ -844,20 +859,20 @@ def test_instruction_if_then_only():
     
     other_config: always_present
     """
-    
+
     # Test with DEBUG=true
     loader = DraconLoader(enable_interpolation=True, context={'get_debug': lambda: 'true'})
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
-    
+
     assert config.debug_settings == {'log_level': 'DEBUG', 'verbose': True, 'trace': True}
     assert config.other_config == 'always_present'
-    
+
     # Test with DEBUG=false
     loader = DraconLoader(enable_interpolation=True, context={'get_debug': lambda: 'false'})
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
-    
+
     assert 'debug_settings' not in config
     assert config.other_config == 'always_present'
 
@@ -880,35 +895,35 @@ def test_instruction_if_nested_then_else():
                 cluster: dev
                 replicas: 1
     """
-    
+
     # Test prod + us-east-1
     def get_env_prod_us(var):
         return {'ENVIRONMENT': 'prod', 'REGION': 'us-east-1'}.get(var, '')
-    
+
     loader = DraconLoader(enable_interpolation=True, context={'get_env': get_env_prod_us})
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
-    
+
     assert config.deployment == {'cluster': 'prod-us-east', 'replicas': 5}
-    
+
     # Test prod + eu-west
     def get_env_prod_eu(var):
         return {'ENVIRONMENT': 'prod', 'REGION': 'eu-west-1'}.get(var, '')
-    
+
     loader = DraconLoader(enable_interpolation=True, context={'get_env': get_env_prod_eu})
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
-    
+
     assert config.deployment == {'cluster': 'prod-eu-west', 'replicas': 3}
-    
+
     # Test dev environment
     def get_env_dev(var):
         return {'ENVIRONMENT': 'dev', 'REGION': 'us-east-1'}.get(var, '')
-    
+
     loader = DraconLoader(enable_interpolation=True, context={'get_env': get_env_dev})
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
-    
+
     assert config.deployment == {'cluster': 'dev', 'replicas': 1}
 
 
@@ -926,19 +941,23 @@ def test_instruction_if_then_else_with_complex_expressions():
             size: 512MB
             max_connections: ${memory_gb * 5}
     """
-    
+
     # Test with high memory
-    loader = DraconLoader(enable_interpolation=True, context={'get_memory_gb': lambda: '16', 'int': int})
+    loader = DraconLoader(
+        enable_interpolation=True, context={'get_memory_gb': lambda: '16', 'int': int}
+    )
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
-    
+
     assert config == {'type': 'redis', 'size': '2GB', 'max_connections': 160}
-    
+
     # Test with low memory
-    loader = DraconLoader(enable_interpolation=True, context={'get_memory_gb': lambda: '4', 'int': int})
+    loader = DraconLoader(
+        enable_interpolation=True, context={'get_memory_gb': lambda: '4', 'int': int}
+    )
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
-    
+
     assert config == {'type': 'memory', 'size': '512MB', 'max_connections': 20}
 
 
@@ -957,20 +976,19 @@ def test_instruction_if_backward_compatibility():
     
     always_here: true
     """
-    
+
     # Test with feature enabled
     loader = DraconLoader(enable_interpolation=True, context={'enable_feature': True})
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
-    
+
     assert config.feature_config == {'enabled': True, 'settings': {'timeout': 30}}
     assert config.always_here == True
-    
+
     # Test with feature disabled
     loader = DraconLoader(enable_interpolation=True, context={'enable_feature': False})
     config = loader.loads(yaml_content)
     config.resolve_all_lazy()
-    
+
     assert config.feature_config == {'enabled': False}
     assert config.always_here == True
-
