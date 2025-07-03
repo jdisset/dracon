@@ -38,6 +38,19 @@ from dracon.merge import MergeKey
 from dracon.resolvable import Resolvable, get_inner_type
 from dracon.utils import build_nested_dict, list_like, dict_like
 
+COLOR_RED = "#EC7D76"
+COLOR_BLUE = "#8D5DE9"
+COLOR_YELLOW = "#F3CD73"
+COLOR_BOLD_CYAN = "bold #5DE6B6"
+COLOR_CYAN = "#5DE6B6"
+COLOR_BRIGHT_BLACK = "bright_black"
+COLOR_DIM = "dim"
+COLOR_ITALIC = "italic"
+COLOR_BOLD = "bold"
+COLOR_WHITE = "white"
+COLOR_DEFAULT = "default"
+COLOR_BOLD_RED = "bold #EC7D76"
+
 logger = logging.getLogger(__name__)
 
 B = TypeVar("B", bound=BaseModel)
@@ -189,15 +202,15 @@ def _append_arg_details(content: Text, arg: Arg, field: Optional[Any], is_positi
         default = arg.default_str
     required = not _is_optional_field(field) if field else False
     required_marker = (
-        Text(" (required)", style="red")
+        Text(" (required)", style=COLOR_RED)
         if required and (is_positional or '.' not in arg.real_name)
         else Text("")
     )
 
     if is_positional:
-        content.append(f"  {arg.real_name.upper()}", style="yellow")
+        content.append(f"  {arg.real_name.upper()}", style=COLOR_YELLOW)
         content.append(required_marker)
-        content.append(f" ({arg_type_str})\n", style="blue" if arg_type_str else "")
+        content.append(f" ({arg_type_str})\n", style=COLOR_BLUE if arg_type_str else "")
     else:
         parts = [f"-{arg.short}"] if arg.short else []
         if arg.long:
@@ -206,20 +219,20 @@ def _append_arg_details(content: Text, arg: Arg, field: Optional[Any], is_positi
         is_flag = get_inner_type(arg.arg_type) is bool
 
         if not is_flag:
-            content.append(f"  {option_str}", style="yellow")
+            content.append(f"  {option_str}", style=COLOR_YELLOW)
             if arg_type_str:
-                content.append(f" {arg_type_str}", style="blue")
+                content.append(f" {arg_type_str}", style=COLOR_BLUE)
             content.append(required_marker)
             content.append("\n")
         else:
-            content.append(f"  {option_str}", style="yellow")  # flags can't be required
+            content.append(f"  {option_str}", style=COLOR_YELLOW)  # flags can't be required
             content.append("\n")
 
     # indented details
     if help_text:
         content.append(f"    {help_text}\n")
     if default is not None:
-        content.append(f"    [default: {default}]\n", style="dim")
+        content.append(f"    [default: {default}]\n", style=COLOR_DIM)
     content.append("\n")
 
 
@@ -284,22 +297,22 @@ def print_help(prg: "Program", _) -> None:
 
     content = Text()
     if prg.description:
-        content.append(f"\n{prg.description}\n\n", style="italic")
-        content.append("─" * min(console.width - 4, 80) + "\n\n", style="bright_black")
+        content.append(f"\n{prg.description}\n\n", style=COLOR_ITALIC)
+        content.append("─" * min(console.width - 4, 80) + "\n\n", style=COLOR_BRIGHT_BLACK)
 
     usage = [prg.name or "command"] + ["[OPTIONS]"] if all_options_flags else []
     usage.extend(pos.real_name.upper() for pos in positionals)
-    content.append("Usage: ", style="bold")
-    content.append(" ".join(usage) + "\n\n", style="yellow")
+    content.append("Usage: ", style=COLOR_BOLD)
+    content.append(" ".join(usage) + "\n\n", style=COLOR_YELLOW)
 
     if positionals:
-        content.append("Arguments:\n", style="bold green")
+        content.append("Arguments:\n", style=COLOR_BOLD_CYAN)
         for arg in positionals:
             field = prg.conf_type.model_fields.get(arg.real_name)
             _append_arg_details(content, arg, field, is_positional=True)
 
     if all_options_flags or help_arg:
-        content.append("Options:\n", style="bold green")
+        content.append("Options:\n", style=COLOR_BOLD_CYAN)
         for arg in all_options_flags:
             # find corresponding field definition if possible
             field, model = None, prg.conf_type
@@ -317,11 +330,11 @@ def print_help(prg: "Program", _) -> None:
         if help_arg:  # ensure help is always last
             _append_arg_details(content, help_arg, None, is_positional=False)
 
-    title = Text(prg.name or "Command", style="bold cyan")
+    title = Text(prg.name or "Command", style=COLOR_BOLD_CYAN)
     if prg.version:
-        title.append(f" (v{prg.version})", style="cyan")
+        title.append(f" (v{prg.version})", style=COLOR_CYAN)
     console.print(
-        Panel(content, title=title, box=ROUNDED, border_style="bright_black", expand=False)
+        Panel(content, title=title, box=ROUNDED, border_style=COLOR_BRIGHT_BLACK, expand=False)
     )
     sys.exit(0)
 
@@ -435,14 +448,14 @@ class Program(BaseModel, Generic[T]):
         error_type = error['type']
 
         item_text = Text()
-        bullet_line = Text("  • ", style="default")
-        bullet_line.append("Arg ", style="white")
-        bullet_line.append(f"'{loc_str}'", style="cyan")
+        bullet_line = Text("  • ", style=COLOR_DEFAULT)
+        bullet_line.append("Arg ", style=COLOR_WHITE)
+        bullet_line.append(f"'{loc_str}'", style=COLOR_CYAN)
 
         if error_type == 'missing':
             bullet_line.append(" is missing.")
         else:
-            bullet_line.append(f": {msg}", style="white")
+            bullet_line.append(f": {msg}", style=COLOR_WHITE)
 
         item_text.append(bullet_line)
 
@@ -452,8 +465,8 @@ class Program(BaseModel, Generic[T]):
 
         if error_type != 'missing' and input_val is not None:
             input_repr = '\n     '.join([''] + dump(input_val).splitlines())
-            details_line = Text(f"\n    Input: {input_repr}", style="dim")
-            details_line.append(f"\n    Type: {type(input_val).__name__}", style="dim")
+            details_line = Text(f"\n    Input: {input_repr}", style=COLOR_DIM)
+            details_line.append(f"\n    Type: {type(input_val).__name__}", style=COLOR_DIM)
 
             if error.get('ctx'):
                 ctx_items = []
@@ -468,7 +481,7 @@ class Program(BaseModel, Generic[T]):
                     ctx_items.append(f"{k}={v_ctx_repr}")
                 if ctx_items:
                     ctx_display_str = ", ".join(ctx_items)
-                    details_line.append(f"\n    Context: {ctx_display_str}", style="dim")
+                    details_line.append(f"\n    Context: {ctx_display_str}", style=COLOR_DIM)
             item_text.append(details_line)
         return item_text
 
@@ -499,7 +512,7 @@ class Program(BaseModel, Generic[T]):
             is_first_group = False
 
             title = format_error_type_title(error_type_key)
-            all_error_text_segments.append(Text(f"{title}:\n", style="bold red"))
+            all_error_text_segments.append(Text(f"{title}:\n", style=COLOR_BOLD_RED))
 
             for error_item_data in errors_in_group:
                 all_error_text_segments.append(self._format_error_item_text(error_item_data))
@@ -513,14 +526,14 @@ class Program(BaseModel, Generic[T]):
         final_content = (
             assembled_text
             if assembled_text.plain.strip()
-            else Text("No specific error details to display.", style="dim")
+            else Text("No specific error details to display.", style=COLOR_DIM)
         )
 
         error_panel = Panel(
             final_content,
             # title=Text("Errors", style="bold red"),
             box=ROUNDED,
-            border_style="red",
+            border_style=COLOR_RED,
             expand=False,
             padding=(1, 5),
         )
