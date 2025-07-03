@@ -23,6 +23,8 @@ from typing import (
     get_origin as typing_get_origin,
 )
 
+from dracon.composer import CompositionResult
+from dracon.nodes import DraconMappingNode
 from pydantic import BaseModel, ValidationError, ConfigDict
 from pydantic_core import PydanticUndefined
 from rich.box import ROUNDED
@@ -799,12 +801,25 @@ class Program(BaseModel, Generic[T]):
                     val = val.root
             return val
 
+        def dict_to_node(d):
+            """convert a dict to DraconMappingNode, without dumping the full string first."""
+            if isinstance(d, Node):
+                return d
+            elif isinstance(d, dict):
+                node = DraconMappingNode(tag='tag:yaml.org,2002:map', value=[])
+                for k, v in d.items():
+                    key_node = loader.yaml.representer.represent_data(k)
+                    value_node = dict_to_node(v)
+                    node.value.append((key_node, value_node))
+                return node
+            else:
+                return loader.yaml.representer.represent_data(d)
+
         processed_raw_args = {k: compose_value(v) for k, v in raw_args.items()}
         raw_args_dict = build_nested_dict(processed_raw_args)
         if raw_args_dict:
-            raw_args_node = loader.dump_to_node(raw_args_dict)
-            raw_args_str = loader.dump(raw_args_node)
-            raw_args_composition = loader.compose_config_from_str(raw_args_str)
+            raw_args_node = dict_to_node(raw_args_dict)
+            raw_args_composition = CompositionResult(root=raw_args_node)
             current_composition = loader.merge(
                 current_composition, raw_args_composition, merge_key=MergeKey(raw="<<{<+}[<~]")
             )
@@ -813,14 +828,12 @@ class Program(BaseModel, Generic[T]):
         processed_nested_args = {k: compose_value(v) for k, v in nested_args.items()}
         nested_arg_dict = build_nested_dict(processed_nested_args)
 
-        temp_loader = DraconLoader()
-
         if nested_arg_dict:
-            arg_dict_node = temp_loader.dump_to_node(nested_arg_dict)
-            arg_dict_str = temp_loader.dump(arg_dict_node)
-            dict_composition = temp_loader.compose_config_from_str(arg_dict_str)
+            # reuse the dict_to_node function defined above
+            nested_args_node = dict_to_node(nested_arg_dict)
+            nested_args_composition = CompositionResult(root=nested_args_node)
             current_composition = loader.merge(
-                current_composition, dict_composition, merge_key=MergeKey(raw="<<{<+}[<~]")
+                current_composition, nested_args_composition, merge_key=MergeKey(raw="<<{<+}[<~]")
             )
 
         res = loader.load_node(current_composition.root)

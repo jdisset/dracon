@@ -1633,7 +1633,8 @@ def test_define_context_file_loading_direct(tmp_path):
     # control test: direct loading with context works
     config_file = tmp_path / "test_define.yaml"
     config_file.write_text("""!ClassA
-name: val_${str(1)}
+!define variable: 1
+name: val_${variable}
 """)
     loader = DraconLoader(context={'ClassA': ClassA})
     direct_config = loader.load(str(config_file))
@@ -1644,7 +1645,8 @@ name: val_${str(1)}
 def test_define_context_file_loading_explicit(tmp_path):
     config_file = tmp_path / "test_define.yaml"
     config_file.write_text("""!ClassA
-name: val_${str(1)}
+!define variable: 1
+name: val_${variable}
 """)
 
     # CLI with explicit +file.yaml syntax, should work (just like direct loading above)
@@ -1664,7 +1666,8 @@ name: val_${str(1)}
 def test_define_context_cli_file_loading_is_file(tmp_path):
     config_file = tmp_path / "test_define.yaml"
     config_file.write_text("""!ClassA
-name: val_${str(1)}
+!define variable: 1
+name: val_${variable}
 """)
 
     # CLI with is_file=True syntax (allow to skip the +)
