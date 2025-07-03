@@ -132,4 +132,76 @@ class LoggingConfig(BaseModel):
 
 The `action` function receives the `Program` instance and the parsed value for that argument.
 
+## Collection Arguments (Lists and Dictionaries)
+
+Dracon supports user-friendly syntaxes for list and dictionary arguments, making it easy to pass complex data structures via the command line.
+
+### List Arguments
+
+For fields typed as `List[T]`, `Tuple[T, ...]`, `Set[T]`, or other list-like containers, Dracon accepts multiple input formats:
+
+```python
+from pydantic import BaseModel
+from typing import Annotated, List, Tuple, Set
+from dracon import Arg
+
+class CollectionConfig(BaseModel):
+    tags: Annotated[List[str], Arg(help="List of tags to apply.")] = ["default"]
+    coordinates: Annotated[Tuple[int, ...], Arg(help="Coordinate values.")] = ()
+    categories: Annotated[Set[str], Arg(help="Unique categories.")] = set()
+```
+
+**Usage options:**
+
+```bash
+# Space-separated values (intuitive)
+$ python app.py --tags web api backend --coordinates 10 20 30
+
+# Traditional YAML/JSON syntax (also supported)
+$ python app.py --tags "['web', 'api', 'backend']" --coordinates "(10, 20, 30)"
+
+# For positional list arguments
+$ python app.py web api backend  # if tags is marked positional=True
+```
+
+### Dictionary Arguments
+
+For fields typed as `Dict[K, V]` or other dict-like containers, Dracon provides multiple convenient syntaxes:
+
+```python
+from pydantic import BaseModel
+from typing import Annotated, Dict, Any
+from dracon import Arg
+
+class ConfigWithDict(BaseModel):
+    settings: Annotated[Dict[str, Any], Arg(help="Configuration settings.")] = {}
+    metadata: Annotated[Dict[str, str], Arg(help="Additional metadata.")] = {}
+```
+
+**Usage options:**
+
+```bash
+# Key=value pairs (shell-friendly)
+$ python app.py --settings debug=true port=8080 host=localhost
+
+# Nested keys with dot notation
+$ python app.py --settings app.name=myapp app.version=1.0 cache.enabled=true
+
+# Mixed approaches
+$ python app.py --settings timeout=30 database.host=db.example.com
+
+# Traditional JSON syntax (also supported)
+$ python app.py --settings '{"debug": true, "port": 8080}'
+
+# For positional dict arguments
+$ python app.py debug=true port=8080  # if settings is marked positional=True
+```
+
+**Important Notes:**
+
+- When using positional arguments, only **one** collection argument (list or dict) is allowed per command
+- Values are automatically quote-stripped if wrapped in single or double quotes
+- Nested dictionary keys use dot notation: `parent.child.key=value`
+- Both syntaxes can be mixed with file loading: `--settings +config.yaml debug=true`
+
 By combining these `Arg` parameters, you can create sophisticated and user-friendly command-line interfaces directly from your Pydantic configuration models.

@@ -41,4 +41,15 @@ This is where Dracon's CLI integrates seamlessly with its configuration loading 
 - **Types:** Pydantic types determine expected input (str, int, float, bool). `bool` fields typically become flags (`--verbose`).
 - **Nested Models:** Fields that are Pydantic models allow nested overrides using dot notation (`--database.port 5433`). Dracon handles constructing the nested dictionary. If the nested argument itself is marked with `Arg(is_file=True)`, passing a file path will load that file's content _into_ that nested structure.
 
+## Collection Argument Support
+
+Dracon automatically detects and handles collection types (lists, tuples, sets, dictionaries) with user-friendly command-line syntaxes:
+
+- **List-like arguments** (`List[T]`, `Tuple[T, ...]`, `Set[T]`) accept space-separated values: `--tags web api backend`
+- **Dict-like arguments** (`Dict[K, V]`) accept key=value pairs: `--config debug=true port=8080`
+- **Nested dictionaries** use dot notation: `--config app.name=myapp database.host=localhost`
+- **Traditional syntax** is also supported: `--tags "['web', 'api']"` or `--config '{"debug": true}'`
+
+When a positional argument is a collection type, it consumes all remaining non-option arguments, so only one collection positional argument is allowed per command.
+
 This integration means your CLI automatically respects your defined configuration structure, types, defaults, and validation rules, while also benefiting from Dracon's powerful file loading, merging, and interpolation features.
