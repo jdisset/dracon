@@ -684,7 +684,14 @@ class Program(BaseModel, Generic[T]):
         # if we only got one value, check if it looks like YAML syntax
         if len(values) == 1 and (argv[start_i].startswith('[') or "'" in argv[start_i]):
             return argv[start_i], i - 1  # use original unstripped value for YAML
-        return str(values), i - 1
+
+        # convert to a proper YAML list representation that preserves interpolable elements
+        yaml_list_items = []
+        for value in values:
+            yaml_list_items.append(repr(value))
+
+        yaml_list = '[' + ', '.join(yaml_list_items) + ']'
+        return yaml_list, i - 1
 
     def _collect_dict_values(self, argv: List[str], i: int) -> tuple[str, int]:
         """collect multiple key=value pairs for dict arguments"""
@@ -815,7 +822,7 @@ class Program(BaseModel, Generic[T]):
         res = loader.load_node(current_composition.root)
         res = self.conf_type.model_validate(res)
 
-        resolve_all_lazy(res, context_override=loader.context)
+        resolve_all_lazy(res, root_obj=res, context_override=loader.context)
 
         if not isinstance(res, self.conf_type):
             raise ArgParseError(f"internal error: expected {self.conf_type} but got {type(res)}")

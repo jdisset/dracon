@@ -779,6 +779,18 @@ class LazyDraconModel(BaseModel):
             if v.validator is None:
                 v.validator = handler
             return v
+        elif list_like(v):
+            # handle list-like objects that may contain Lazy objects
+            processed_items = []
+            for item in v:
+                if isinstance(item, Lazy):
+                    # preserve Lazy objects in lists without validation
+                    processed_items.append(item)
+                else:
+                    processed_items.append(item)
+            # convert back to original type and let normal validation handle the container
+            converted = type(v)(processed_items)
+            return converted
         return handler(v, info)
 
     def __getattribute__(self, name):
