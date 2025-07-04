@@ -32,6 +32,8 @@ docs = [
 	"mkdocs-print-site-plugin"
 ]
 
+[project.scripts]
+dracon-print = "dracon_print:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["dracon"]
