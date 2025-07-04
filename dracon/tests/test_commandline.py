@@ -1617,11 +1617,13 @@ def test_interpolable_args(program):
     args = ["--list-of-values", "item1", "item2"]
     config, _ = program.parse_args(args)
     assert isinstance(config, InterpolatedConfig)
+    assert all(isinstance(v, str) for v in config.list_of_values)
     assert config.list_of_values == ["item1", "item2"]
 
     args = ["--list-of-values", "item1", "${INTERPOLATED_VAR}"]
     config, _ = program.parse_args(args, context={'INTERPOLATED_VAR': 'interpolated_item'})
     assert isinstance(config, InterpolatedConfig)
+    assert all(isinstance(v, str) for v in config.list_of_values)
     assert config.list_of_values == ["item1", "interpolated_item"]
 
 
