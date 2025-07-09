@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import sys
 import os
 from dracon import make_program
