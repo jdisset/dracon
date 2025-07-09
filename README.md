@@ -39,7 +39,7 @@ Merge configs from files, packages, or environment variables using `!include` an
 Generate type-safe CLIs directly from Pydantic models. Override any field-even nested ones-via command line (`--nested.arg 42`) or files (`+config.yaml`, `--arg +file@key`). Help is auto-generated:
 
 <img
-  src="https://raw.githubusercontent.com/jdisset/dracon/dev/docs/assets/cli_help.png"
+  src="https://raw.githubusercontent.com/jdisset/dracon/main/docs/assets/cli_help.png"
   alt="CLI help screenshot"
     width="650"
     height="auto"
