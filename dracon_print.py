@@ -70,7 +70,7 @@ class PrintConfig(BaseModel):
                 log.exception(e)
                 sys.exit(1)
 
-        if self.raw_output:
+        if self.str_output:
             print(str(res))
         else:
             output = dump(res, loader=loader)
