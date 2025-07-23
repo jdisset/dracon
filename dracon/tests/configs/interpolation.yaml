@@ -1,6 +1,6 @@
 base:
   <<{>}: *file:$DIR/base.yaml
-  <<: *file:$DIR/sub/subbase.yaml
+  <<: !include file:$DIR/sub/${str("sub-base")}.yaml # just to try a weird interpolation
   interpolated_addition: ${2+2}
   file_stem: ${"$FILE_STEM"}
 
