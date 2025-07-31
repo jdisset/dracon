@@ -1,4 +1,5 @@
 Dracon is a modular configuration system and command-line interface (CLI) generator for Python, built on top of YAML. It extends standard YAML with powerful features for composing complex configurations and seamlessly integrates with Pydantic for type safety and validation.
+Dracon is designed to hit a "powerful but transparent" sweet spot. It avoids being overly simplistic (requiring manual boilerplate) or overly magical (hiding configuration details). The goal is to provide explicit, composable tools to manage configuration layers from files, environment variables, and the CLI in a structured, type-safe, and predictable way.
 
 # 1. Configuration Loading & Pydantic Integration
 
@@ -30,6 +31,16 @@ config = load(['base.yaml', 'prod.yaml'], context={'AppConfig': AppConfig})
 loader = DraconLoader(context={'AppConfig': AppConfig})
 config = loader.load('config.yaml')
 ```
+
+### Loading Lifecycle
+
+When `load()` is called, the process unfolds in distinct stages:
+
+1.  **Composition:** The raw YAML is parsed. Instructions like `!define`, `!if`, and `!each` are executed immediately, manipulating the internal YAML structure and context _before_ anything else.
+2.  **Include Resolution:** `!include` directives are resolved recursively. The content from included sources is loaded, composed, and inserted into the main tree.
+3.  **Merging:** `<<:` keys are processed in the order they appear. The strategies you define (`{+<}`, `[+>]`, etc.) are applied to combine different parts of the configuration tree.
+4.  **Construction:** The final, composed YAML tree is traversed to build Python objects. Pydantic models are validated and instantiated at this stage. Values containing `${...}` are wrapped in `LazyInterpolable` objects.
+5.  **Lazy Interpolation Resolution:** `${...}` expressions are only evaluated when their corresponding values are accessed in your Python code (or when `resolve_all_lazy()` is called). This allows them to reference other fully constructed values in the configuration.
 
 ## Pydantic Model Construction in YAML
 
@@ -117,7 +128,7 @@ service_list:
 ```
 
 !!! note "Formal Dictionary Syntax"
-Dracon's shorthand is common, but for full YAML compliance, you can use the formal _complex key_ syntax (`? :`) to generate dictionaries:
+Dracon's shorthand is common, so recommended, but if for some reason you want full YAML compliance, you can use the formal _complex key_ syntax (`? :`) to generate dictionaries:
 `yaml
     databases:
       ? !each(env) ${environments}
@@ -391,7 +402,7 @@ Dracon uses dot-separated paths to reference specific locations in a configurati
 
 ## 4.2. Deferred Execution
 
-Delay construction or evaluation of parts of the configuration until runtime.
+Delay construction or evaluation of parts of the configuration until runtime. Useful for post-processing CLI args that depend on other values for example.
 
 - **`DeferredNode`**: Pauses the _entire construction_ of a YAML node branch. Created with `!deferred` tag or `deferred_paths`. Manually triggered with `construct(node, context={...})`. Use for late-binding of context or delaying resource-intensive object creation.
 
@@ -403,7 +414,7 @@ Delay construction or evaluation of parts of the configuration until runtime.
   final_path = construct(config.output_path, context={'runtime_id': 'job_123'})
   ```
 
-- **`Resolvable[T]`**: Delays the _final processing_ of a _single field's value_. Used as a type hint, often with `Arg(resolvable=True)`. Manually triggered with `value.resolve(context={...})`. Use for post-processing CLI args that depend on other values.
+- **`Resolvable[T]`**: Delays the _final processing_ of a _single field's value_. Used as a type hint, often with `Arg(resolvable=True)`. Manually triggered with `value.resolve(context={...})`. You usually want `DeferredNode`.
 
 ## 4.3. Secret Management
 
@@ -421,17 +432,3 @@ database:
 # Load from a secrets manager via a custom loader (advanced)
 api_key: !include vault:secret/data/myapp#api_key
 ```
-
-# 5. Design Philosophy
-
-> Dracon is designed to hit a "powerful but transparent" sweet spot. It avoids being overly simplistic (requiring manual boilerplate) or overly magical (hiding configuration details). The goal is to provide explicit, composable tools to manage configuration layers from files, environment variables, and the CLI in a structured, type-safe, and predictable way.
-
-# Loading Lifecycle
-
-When `load()` is called, the process unfolds in distinct stages:
-
-1.  **Composition:** The raw YAML is parsed. Instructions like `!define`, `!if`, and `!each` are executed immediately, manipulating the internal YAML structure and context _before_ anything else.
-2.  **Include Resolution:** `!include` directives are resolved recursively. The content from included sources is loaded, composed, and inserted into the main tree.
-3.  **Merging:** `<<:` keys are processed in the order they appear. The strategies you define (`{+<}`, `[+>]`, etc.) are applied to combine different parts of the configuration tree.
-4.  **Construction:** The final, composed YAML tree is traversed to build Python objects. Pydantic models are validated and instantiated at this stage. Values containing `${...}` are wrapped in `LazyInterpolable` objects.
-5.  **Lazy Interpolation Resolution:** `${...}` expressions are only evaluated when their corresponding values are accessed in your Python code (or when `resolve_all_lazy()` is called). This allows them to reference other fully constructed values in the configuration.
