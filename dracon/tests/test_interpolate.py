@@ -992,3 +992,33 @@ def test_instruction_if_backward_compatibility():
 
     assert config.feature_config == {'enabled': False}
     assert config.always_here == True
+
+
+def test_each_instruction_with_complex_key_syntax():
+    yaml_content = """
+    !define environments: [dev, staging, prod]
+
+    databases:
+      ? !each(env) ${environments}
+      : ${env}_database:
+          host: db.${env}.example.com
+          port: 5432
+          user: user_${env}
+    """
+
+    config = dr.loads(yaml_content, raw_dict=True)
+
+    dr.resolve_all_lazy(config)
+
+    expected_databases = {
+        'dev_database': {'host': 'db.dev.example.com', 'port': 5432, 'user': 'user_dev'},
+        'staging_database': {
+            'host': 'db.staging.example.com',
+            'port': 5432,
+            'user': 'user_staging',
+        },
+        'prod_database': {'host': 'db.prod.example.com', 'port': 5432, 'user': 'user_prod'},
+    }
+
+    assert 'databases' in config
+    assert config['databases'] == expected_databases
