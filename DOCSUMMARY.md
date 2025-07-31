@@ -340,6 +340,41 @@ myapp /path/to/data -e prod ++region=us-west-2
 myapp /path/to/data -e prod ++region us-west-2
 ```
 
+## Collection Arguments (Lists & Dictionaries)
+
+Dracon provides user-friendly syntaxes for passing collections via the command line for fields typed as `List`, `Tuple`, `Set`, or `Dict`.
+
+### List Arguments
+
+List-like arguments accept multiple values in two ways:
+
+1.  **Space-Separated Values:** Provide items directly after the flag.
+    ```bash
+    # Results in tags=['web', 'api', 'backend']
+    myapp --tags web api backend
+    ```
+2.  **YAML/JSON String:** Pass a single, quoted string representing the list.
+    ```bash
+    myapp --tags "['web', 'api', 'backend']"
+    ```
+
+### Dictionary Arguments
+
+Dictionary arguments can also be provided in multiple ways:
+
+1.  **Key-Value Pairs:** Use a `key=value` format, including dot notation for nested dictionaries.
+    ```bash
+    # Results in settings={'debug': True, 'app': {'name': 'myapp'}}
+    myapp --settings debug=true app.name=myapp
+    ```
+2.  **YAML/JSON String:** Pass a single, quoted string representing the dictionary.
+    ```bash
+    myapp --settings '{"debug": true, "app": {"name": "myapp"}}'
+    ```
+
+!!! note "Positional Collections"
+When a list or dictionary argument is marked as `positional=True`, it consumes all remaining non-option arguments. Therefore, a command can have **at most one** positional argument that is a collection type.
+
 # 4. Advanced Topics
 
 ## 4.1. KeyPaths
