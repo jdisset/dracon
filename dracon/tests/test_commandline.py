@@ -53,6 +53,10 @@ class AppConfig(BaseModel):
         return f"{self.database.host}_{self.database.port}"
 
 
+class AnyTypeApp(BaseModel):
+    value: Annotated[Any, Arg(help="An argument of any type.")]
+
+
 class NestedForFile(BaseModel):
     value_from_file: int
 
@@ -239,6 +243,16 @@ def program():
         },
     )
     print("program instance created.")
+    return prog
+
+
+@pytest.fixture
+def anythingprogram():
+    prog = make_program(
+        AnyTypeApp,
+        name="any-app",
+        context={},
+    )
     return prog
 
 
@@ -538,7 +552,6 @@ def test_plusplus_shorthand_define(program, config_files):
 def test_plusplus_multiple_defines(program, config_files):
     """test multiple ++ shorthand defines in combination with --define"""
     print("\n--- test_plusplus_multiple_defines ---")
-    context_conf = config_files / "context_var_test.yaml"
 
     # create a config file that uses multiple context variables
     multi_var_content = """
@@ -572,6 +585,30 @@ output_path: /tmp/ctx_output
     assert config.workers == 42  # from ++my_var
     assert config.database.port == 100  # from --define.another_var
     assert config.environment == "foo"  # from ++third_var
+
+
+def test_plusplus_list_defines(anythingprogram, config_files):
+    anything_context = """
+!set_default my_var: 42
+value: 
+    itsadict: hehe
+    var: ${my_var}
+"""
+    anything_file = config_files / "anything_test.yaml"
+    anything_file.write_text(anything_context)
+
+    args = [
+        f"+{anything_file}",
+        "++my_var",
+        "${[42, 1]}",
+    ]
+
+    print(f"parsing args: {args}")
+    config, raw_args = anythingprogram.parse_args(args)
+    print(f"parsed config: {config}")
+    print(f"raw args dict: {raw_args}")
+
+    assert config.value == {'itsadict': 'hehe', 'var': [42, 1]}
 
 
 def test_define_equals_syntax(program, config_files):
