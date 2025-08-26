@@ -1,6 +1,6 @@
 import pytest
 from pydantic import BaseModel
-from dracon import DraconLoader, DraconError
+from dracon import DraconLoader, DraconError, load
 
 
 class MyContextModel(BaseModel):
@@ -117,7 +117,7 @@ def test_package_path_resolution():
     Verify that tags with package paths (e.g., !some.package.Class) are resolved correctly.
     """
     loader = DraconLoader()
-    
+
     loaded_obj = loader.loads(yaml_string_with_package_path)
     assert isinstance(loaded_obj, BaseModel)
     # pydantic.BaseModel won't have name/value fields, so we just check the type
@@ -128,7 +128,7 @@ def test_root_tag_with_package_path():
     Verify that root-level tags with full package paths work correctly.
     """
     loader = DraconLoader()
-    
+
     loaded_obj = loader.loads(yaml_string_root_with_package_path)
     # the class might be reimported, so check by class name instead
     assert type(loaded_obj).__name__ == 'MyContextModel'
@@ -140,18 +140,19 @@ def test_package_path_resolution_with_context_override():
     """
     Verify that context can override package path resolution.
     """
+
     class MyOverrideModel(BaseModel):
         override_name: str
         override_value: int
-    
+
     yaml_with_override = """
 !pydantic.BaseModel
 override_name: OverrideTest
 override_value: 999
 """
-    
+
     loader = DraconLoader(context={'pydantic.BaseModel': MyOverrideModel})
-    
+
     loaded_obj = loader.loads(yaml_with_override)
     assert isinstance(loaded_obj, MyOverrideModel)
     assert loaded_obj.override_name == "OverrideTest"
@@ -171,9 +172,9 @@ other_data:
   - !pydantic.BaseModel {}
   - regular: data
 """
-    
+
     loader = DraconLoader()
-    
+
     loaded_obj = loader.loads(yaml_nested)
     # check by class name due to potential reimport issues
     assert type(loaded_obj.main_model).__name__ == 'MyContextModel'
@@ -188,11 +189,17 @@ def test_package_path_with_file_loading(tmp_path):
     """
     yaml_file = tmp_path / "package_path_test.yaml"
     yaml_file.write_text(yaml_string_root_with_package_path)
-    
+
     loader = DraconLoader()
-    
+
     loaded_obj = loader.load(yaml_file)
     # check by class name due to potential reimport issues
     assert type(loaded_obj).__name__ == 'MyContextModel'
     assert loaded_obj.name == "RootPackageModel"
     assert loaded_obj.value == 789
+
+    # using load directly should also work
+    loaded_obj_direct = load(yaml_file)
+    assert type(loaded_obj_direct).__name__ == 'MyContextModel'
+    assert loaded_obj_direct.name == "RootPackageModel"
+    assert loaded_obj_direct.value == 789
