@@ -14,7 +14,9 @@ from dracon.nodes import (
     DraconScalarNode,
     ContextNode,
     context_node_hash,
+    make_source_context,
 )
+from dracon.diagnostics import SourceContext, DraconError
 
 from dracon.keypath import KeyPath, ROOTPATH
 from dracon.merge import add_to_context, merged, MergeKey, reset_context
@@ -52,6 +54,7 @@ class DeferredNode(ContextNode, Generic[T]):
         loader: Optional['DraconLoader'] = None,
         context=None,
         comp=None,
+        creation_context: Optional[SourceContext] = None,
         **kwargs,
     ):
         from dracon.loader import DraconLoader as LoaderCls
@@ -61,6 +64,14 @@ class DeferredNode(ContextNode, Generic[T]):
             self._loader: Optional[LoaderCls] = LoaderCls()
         else:
             self._loader = loader
+
+        # capture the source context from the value node if available
+        if creation_context is None and isinstance(value, Node) and hasattr(value, 'source_context'):
+            creation_context = value.source_context
+        if creation_context is None and isinstance(value, Node) and hasattr(value, 'start_mark'):
+            creation_context = make_source_context(value.start_mark)
+
+        self._creation_context = creation_context
 
         if not isinstance(value, Node):
             try:
@@ -105,6 +116,7 @@ class DeferredNode(ContextNode, Generic[T]):
         state['_full_composition'] = self._full_composition
         state['_clear_ctx'] = self._clear_ctx
         state['_original_clear_ctx'] = self._original_clear_ctx
+        state['_creation_context'] = self._creation_context
         return state
 
     def __setstate__(self, state):
@@ -116,6 +128,7 @@ class DeferredNode(ContextNode, Generic[T]):
         self._clear_ctx = state['_clear_ctx']
         self._full_composition = state['_full_composition']
         self._original_clear_ctx = state.get('_original_clear_ctx')
+        self._creation_context = state.get('_creation_context')
 
     @ftrace(watch=[])
     def update_context(self, context):
@@ -176,8 +189,14 @@ class DeferredNode(ContextNode, Generic[T]):
 
     @ftrace(watch=[])
     def construct(self, **kwargs) -> T:  # type: ignore
-        composed_node = self.compose(**kwargs)
-        return self._loader.load_node(composed_node, target_type=self.obj_type)
+        try:
+            composed_node = self.compose(**kwargs)
+            return self._loader.load_node(composed_node, target_type=self.obj_type)
+        except DraconError:
+            raise
+        except Exception as e:
+            ctx_info = f" (defined at {self._creation_context})" if self._creation_context else ""
+            raise DraconError(f"Deferred node construction failed{ctx_info}: {e}", context=self._creation_context, cause=e) from e
 
     @property
     def keypath_passthrough(self):
@@ -200,6 +219,7 @@ class DeferredNode(ContextNode, Generic[T]):
             comment=self.comment,
             context=context,
             clear_ctx=self._original_clear_ctx,  # use original value for copy
+            creation_context=self._creation_context,
         )
         new_obj._loader = self._loader.copy() if self._loader else None
         if not reroot:

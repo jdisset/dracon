@@ -34,12 +34,19 @@ logger = logging.getLogger(__name__)
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
-class DraconError(Exception):
-    pass
+# import diagnostics for new error types (these are the authoritative versions)
+from dracon.diagnostics import (
+    DraconError,
+    EvaluationError,
+    SourceContext,
+)
 
 
-class InterpolationError(DraconError):
-    pass
+# keep InterpolationError as alias for backwards compatibility
+class InterpolationError(EvaluationError):
+    """Backwards compatibility alias for EvaluationError."""
+    def __init__(self, message, context=None, cause=None, expression=None):
+        super().__init__(message, context=context, cause=cause, expression=expression)
 
 
 BASE_DRACON_SYMBOLS: Dict[str, Any] = {}
@@ -145,34 +152,31 @@ def preprocess_expr(expr: str):
 
 
 @ftrace(watch=[], inputs=['expr'])
-def do_safe_eval(expr: str, engine: str, symbols: Optional[dict] = None) -> Any:
+def do_safe_eval(expr: str, engine: str, symbols: Optional[dict] = None, source_context: Optional[SourceContext] = None) -> Any:
+    original_expr = expr
     expr = preprocess_expr(expr)
+
     if engine == 'asteval':
         safe_eval = Interpreter(user_symbols=symbols or {}, max_string_length=1000)
-        res = safe_eval.eval(expr, raise_errors=True)
+        try:
+            res = safe_eval.eval(expr, raise_errors=True)
+        except Exception as e:
+            raise EvaluationError(f"Error evaluating expression: {e}", context=source_context, cause=e, expression=original_expr) from e
 
-        # errors = safe_eval.error
-        # if errors:
-        #     errors = [': '.join(e.get_error()) for e in errors]
-        #     errormsg = '\n'.join(errors)
-        #     raise InterpolationError(f"Error evaluating expression {expr}:\n{errormsg}")
-
+        errors = safe_eval.error
+        if errors:
+            errormsg = '\n'.join(': '.join(e.get_error()) for e in errors)
+            raise EvaluationError(f"Expression evaluation failed:\n{errormsg}", context=source_context, expression=original_expr)
         return res
-    elif engine == 'eval':
-        import traceback
 
+    elif engine == 'eval':
         try:
             eval_globals = {}
             eval_globals.update(__builtins__)  # type: ignore
             eval_globals.update(symbols or {})
             return eval(expr, eval_globals)
         except Exception as e:
-            import traceback
-
-            error_tb = '\n'.join(traceback.format_exception(type(e), e, e.__traceback__))
-            logger.error(f"Error evaluating expression {expr}:\n{error_tb}")
-            logger.exception(e)
-            raise InterpolationError(f"Error evaluating expression {expr}:\n{error_tb}") from e
+            raise EvaluationError(f"Error evaluating expression: {e}", context=source_context, cause=e, expression=original_expr) from e
     else:
         raise ValueError(f"Unknown interpolation engine: {engine}")
 
@@ -231,6 +235,7 @@ def evaluate_expression(
     engine: str = DEFAULT_EVAL_ENGINE,
     context: Optional[Dict[str, Any]] = None,
     enable_shorthand_vars: bool = True,
+    source_context: Optional[SourceContext] = None,
 ) -> Any:
     from dracon.merge import merged, MergeKey
 
@@ -274,8 +279,9 @@ def evaluate_expression(
             engine=engine,
             context=context,
             enable_shorthand_vars=enable_shorthand_vars,
+            source_context=source_context,
         )
-        evaluated_expr = do_safe_eval(str(resolved_expr), engine, symbols)
+        evaluated_expr = do_safe_eval(str(resolved_expr), engine, symbols, source_context)
         endexpr = recurse_lazy_resolve(evaluated_expr)
     else:
         # process and replace each interpolation within the expression
@@ -289,8 +295,9 @@ def evaluate_expression(
                 engine=engine,
                 context=context,
                 enable_shorthand_vars=enable_shorthand_vars,
+                source_context=source_context,
             )
-            evaluated_expr = do_safe_eval(str(resolved_expr), engine, symbols)
+            evaluated_expr = do_safe_eval(str(resolved_expr), engine, symbols, source_context)
             newexpr = str(recurse_lazy_resolve(evaluated_expr))
             expr = expr[: match.start + offset] + newexpr + expr[match.end + offset :]
             offset += len(newexpr) - (match.end - match.start)
@@ -305,6 +312,7 @@ def evaluate_expression(
             engine=engine,
             context=context,
             enable_shorthand_vars=enable_shorthand_vars,
+            source_context=source_context,
         )
     return endexpr
 
@@ -324,6 +332,7 @@ class InterpolableNode(ContextNode):
         comment=None,
         init_outermost_interpolations=None,
         context=None,
+        source_context=None,
     ):
         self.init_outermost_interpolations = init_outermost_interpolations
 
@@ -336,6 +345,7 @@ class InterpolableNode(ContextNode):
             comment=comment,
             anchor=anchor,
             context=context,
+            source_context=source_context,
         )
         self.referenced_nodes = NodeLookup()
 
@@ -359,6 +369,7 @@ class InterpolableNode(ContextNode):
             root_obj=root_obj,
             engine=engine,
             context=context,  # type: ignore
+            source_context=self.source_context,
         )
         return newval
 
@@ -456,6 +467,7 @@ class InterpolableNode(ContextNode):
             comment=self.comment,
             context=self.context.copy(),
             init_outermost_interpolations=self.init_outermost_interpolations,
+            source_context=self._source_context,
         )
         if hasattr(self, 'referenced_nodes') and self.referenced_nodes is not None:
             new_node.referenced_nodes = self.referenced_nodes

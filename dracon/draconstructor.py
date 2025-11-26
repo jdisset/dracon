@@ -353,9 +353,8 @@ class Draconstructor(Constructor):
             root_obj=self._root_node,
             engine=self.interpolation_engine,
             context=context,
-            enable_shorthand_vars=self.dracon_loader.enable_shorthand_vars
-            if self.dracon_loader
-            else True,
+            enable_shorthand_vars=self.dracon_loader.enable_shorthand_vars if self.dracon_loader else True,
+            source_context=getattr(node, 'source_context', None),
         )
 
         return lzy
