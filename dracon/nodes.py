@@ -5,7 +5,10 @@
 from ruamel.yaml.nodes import Node, MappingNode, SequenceNode, ScalarNode
 from ruamel.yaml.tag import Tag
 from dracon.utils import dict_like, list_like, node_repr, deepcopy, make_hashable, ShallowDict
-from typing import Any, Hashable, Optional
+from typing import Any, Hashable, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from dracon.diagnostics import SourceContext
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 ## {{{                           --     utils     --
@@ -28,6 +31,13 @@ def reset_tag(node):
         node.tag = DEFAULT_SCALAR_TAG
 
 
+def make_source_context(start_mark, include_trace=None, keypath=None) -> Optional["SourceContext"]:
+    from dracon.diagnostics import SourceContext
+    if start_mark is None:
+        return None
+    return SourceContext.from_mark(start_mark, include_trace or (), keypath=keypath)
+
+
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
@@ -39,18 +49,21 @@ def base_node_hash(node):
 
 class DraconScalarNode(ScalarNode):
     def __init__(
-        self,
-        tag,
-        value,
-        start_mark=None,
-        end_mark=None,
-        style=None,
-        comment=None,
-        anchor=None,
+        self, tag, value, start_mark=None, end_mark=None, style=None, comment=None,
+        anchor=None, source_context: Optional["SourceContext"] = None,
     ):
-        ScalarNode.__init__(
-            self, tag, value, start_mark, end_mark, style=style, comment=comment, anchor=anchor
-        )
+        ScalarNode.__init__(self, tag, value, start_mark, end_mark, style=style, comment=comment, anchor=anchor)
+        self._source_context = source_context
+
+    @property
+    def source_context(self) -> Optional["SourceContext"]:
+        if self._source_context is None and self.start_mark is not None:
+            self._source_context = make_source_context(self.start_mark)
+        return self._source_context
+
+    @source_context.setter
+    def source_context(self, value: Optional["SourceContext"]):
+        self._source_context = value
 
     def __str__(self):
         return node_repr(self)
@@ -67,6 +80,7 @@ class DraconScalarNode(ScalarNode):
             'style': self.style,
             'comment': self.comment,
             'anchor': self.anchor,
+            '_source_context': self._source_context,
         }
         return state
 
@@ -78,6 +92,7 @@ class DraconScalarNode(ScalarNode):
         self.style = state['style']
         self.comment = state['comment']
         self.anchor = state['anchor']
+        self._source_context = state.get('_source_context')
 
 
 class ContextNode(DraconScalarNode):
@@ -90,6 +105,7 @@ class ContextNode(DraconScalarNode):
         anchor=None,
         comment=None,
         context=None,
+        source_context: Optional["SourceContext"] = None,
     ):
         DraconScalarNode.__init__(
             self,
@@ -99,6 +115,7 @@ class ContextNode(DraconScalarNode):
             tag=tag,
             comment=comment,
             anchor=anchor,
+            source_context=source_context,
         )
         self.context = (
             ShallowDict(context or {}) if not isinstance(context, ShallowDict) else context
@@ -123,6 +140,7 @@ class ContextNode(DraconScalarNode):
             anchor=self.anchor,
             comment=self.comment,
             context=self.context.copy(),  # Shallow copy the context
+            source_context=self._source_context,
         )
 
 
@@ -193,17 +211,23 @@ class UnsetNode(DraconScalarNode):
 
 class DraconMappingNode(MappingNode):
     def __init__(
-        self,
-        tag: Any,
-        value: Any,
-        start_mark: Any = None,
-        end_mark: Any = None,
-        flow_style: Any = None,
-        comment: Any = None,
-        anchor: Any = None,
+        self, tag: Any, value: Any, start_mark: Any = None, end_mark: Any = None,
+        flow_style: Any = None, comment: Any = None, anchor: Any = None,
+        source_context: Optional["SourceContext"] = None,
     ) -> None:
         MappingNode.__init__(self, tag, value, start_mark, end_mark, flow_style, comment, anchor)
+        self._source_context = source_context
         self._recompute_map()
+
+    @property
+    def source_context(self) -> Optional["SourceContext"]:
+        if self._source_context is None and self.start_mark is not None:
+            self._source_context = make_source_context(self.start_mark)
+        return self._source_context
+
+    @source_context.setter
+    def source_context(self, value: Optional["SourceContext"]):
+        self._source_context = value
 
     def _recompute_map(self):
         self.map = {}  # key value -> index
@@ -281,6 +305,7 @@ class DraconMappingNode(MappingNode):
             flow_style=self.flow_style,
             comment=self.comment,
             anchor=self.anchor,
+            source_context=self._source_context,
         )
 
     def __deepcopy__(self, memo):
@@ -293,6 +318,7 @@ class DraconMappingNode(MappingNode):
             flow_style=self.flow_style,
             comment=self.comment,
             anchor=self.anchor,
+            source_context=self._source_context,
         )
         n.ctag = self.ctag
         n.id = self.id
@@ -326,6 +352,7 @@ class DraconMappingNode(MappingNode):
             'comment': self.comment,
             'anchor': self.anchor,
             'map': self.map,
+            '_source_context': self._source_context,
         }
         return state
 
@@ -338,6 +365,7 @@ class DraconMappingNode(MappingNode):
         self.comment = state['comment']
         self.anchor = state['anchor']
         self.map = state['map']
+        self._source_context = state.get('_source_context')
 
     @classmethod
     def make_empty(cls, tag: Any = DEFAULT_MAP_TAG, start_mark: Any = None, end_mark: Any = None):
@@ -357,6 +385,24 @@ class DraconMappingNode(MappingNode):
 
 ## {{{                       --     SequenceNode     --
 class DraconSequenceNode(SequenceNode):
+    def __init__(
+        self, tag: Any, value: Any, start_mark: Any = None, end_mark: Any = None,
+        flow_style: Any = None, comment: Any = None, anchor: Any = None,
+        source_context: Optional["SourceContext"] = None,
+    ) -> None:
+        SequenceNode.__init__(self, tag, value, start_mark, end_mark, flow_style, comment, anchor)
+        self._source_context = source_context
+
+    @property
+    def source_context(self) -> Optional["SourceContext"]:
+        if self._source_context is None and self.start_mark is not None:
+            self._source_context = make_source_context(self.start_mark)
+        return self._source_context
+
+    @source_context.setter
+    def source_context(self, value: Optional["SourceContext"]):
+        self._source_context = value
+
     def __getitem__(self, index: int) -> Node:
         return self.value[index]
 
@@ -375,6 +421,7 @@ class DraconSequenceNode(SequenceNode):
             flow_style=self.flow_style,
             comment=self.comment,
             anchor=self.anchor,
+            source_context=self._source_context,
         )
 
     def __len__(self) -> int:
@@ -407,6 +454,7 @@ class DraconSequenceNode(SequenceNode):
             'flow_style': self.flow_style,
             'comment': self.comment,
             'anchor': self.anchor,
+            '_source_context': self._source_context,
         }
         return state
 
@@ -418,6 +466,7 @@ class DraconSequenceNode(SequenceNode):
         self.flow_style = state['flow_style']
         self.comment = state['comment']
         self.anchor = state['anchor']
+        self._source_context = state.get('_source_context')
 
     @classmethod
     def from_mapping(cls, mapping: DraconMappingNode, empty=False, elt_tag=None):
@@ -432,6 +481,7 @@ class DraconSequenceNode(SequenceNode):
             flow_style=mapping.flow_style,
             comment=mapping.comment,
             anchor=mapping.anchor,
+            source_context=getattr(mapping, '_source_context', None),
         )
 
         if not empty:
@@ -460,6 +510,7 @@ class DraconSequenceNode(SequenceNode):
             flow_style=self.flow_style,
             comment=self.comment,
             anchor=self.anchor,
+            source_context=self._source_context,
         )
         n.ctag = self.ctag
         n.id = self.id

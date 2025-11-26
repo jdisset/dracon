@@ -93,6 +93,7 @@ class LazyInterpolable(Lazy[T]):
         engine: str = DEFAULT_EVAL_ENGINE,
         context: Optional[Dict[str, Any]] = None,
         enable_shorthand_vars=True,
+        source_context=None,
     ):
         super().__init__(value, validator, name)
 
@@ -103,13 +104,13 @@ class LazyInterpolable(Lazy[T]):
         self.permissive = permissive
         self.engine = engine
         self.enable_shorthand_vars = enable_shorthand_vars
+        self.source_context = source_context
         if not self.permissive:
             assert isinstance(value, (str, tuple)), (
                 f"LazyInterpolable expected string, got {type(value)}. Did you mean to contruct with permissive=True?"
             )
 
     def __getstate__(self):
-        """Get the object's state for pickling."""
         state = {
             'value': self.value,
             'name': self.name,
@@ -118,22 +119,13 @@ class LazyInterpolable(Lazy[T]):
             'context': self.context,
             'engine': self.engine,
             'enable_shorthand_vars': self.enable_shorthand_vars,
-            'init_outermost_interpolations': self.init_outermost_interpolations
-            if self.init_outermost_interpolations
-            else None,
+            'source_context': self.source_context,
+            'init_outermost_interpolations': self.init_outermost_interpolations or None,
         }
-
-        if hasattr(self.root_obj, '__getstate__'):
-            state['root_obj'] = self.root_obj
-        else:
-            state['root_obj'] = None  # Will be reattached after unpickling
-
-        # Don't pickle the validator function - it will be reattached by the owner
+        state['root_obj'] = self.root_obj if hasattr(self.root_obj, '__getstate__') else None
         return state
 
     def __setstate__(self, state):
-        """Restore the object's state after unpickling."""
-        # Initialize with default values
         self.__init__(
             value=state['value'],
             name=state['name'],
@@ -144,6 +136,7 @@ class LazyInterpolable(Lazy[T]):
             engine=state['engine'],
             context=state['context'],
             enable_shorthand_vars=state['enable_shorthand_vars'],
+            source_context=state.get('source_context'),
             validator=None,
         )
 
@@ -154,9 +147,7 @@ class LazyInterpolable(Lazy[T]):
         if isinstance(self.value, str):
             try:
                 ctx = self.context if self.context is not None else {}
-                logger.debug(
-                    f"Resolving lazy value: {self.value}, with context_override: {context_override} and context: {ctx}"
-                )
+                logger.debug(f"Resolving lazy value: {self.value}, context_override: {context_override}")
                 if context_override is not None:
                     ctx = {**ctx, **context_override}
                 resolved_value = evaluate_expression(
@@ -167,17 +158,16 @@ class LazyInterpolable(Lazy[T]):
                     engine=self.engine,
                     context=ctx,
                     enable_shorthand_vars=self.enable_shorthand_vars,
+                    source_context=self.source_context,
                 )
                 return self.validate(resolved_value)
+            except InterpolationError:
+                raise
             except Exception as e:
-                import traceback
-
-                logger.error(
-                    f"Error evaluating expression '{self.value}' at path {self.current_path}: {e}\n{traceback.format_exc()}"
-                )
                 raise InterpolationError(
-                    f"Error evaluating expression '{self.value}' at path {self.current_path}: {e}"
-                ) from None
+                    f"Error evaluating expression '{self.value}': {e}",
+                    context=self.source_context, cause=e, expression=self.value
+                ) from e
         return self.validate(self.value)
 
     def get(self, owner_instance, setval=False):
@@ -315,10 +305,8 @@ def resolve_single_key(path, key, root, context_override=None):
             return True, None  # indicate success but no transformation
 
     except Exception as e:
-        import traceback
-
-        logger.error(f"Error resolving key {key} at {path}: {e}\n{traceback.format_exc()}")
-        raise e
+        logger.debug(f"Error resolving key {key} at {path}: {e}")
+        raise
 
 
 def resolve_single_value(path, value, root, context_override=None):
@@ -327,22 +315,16 @@ def resolve_single_value(path, value, root, context_override=None):
         parent = path.parent.get_obj(root)
         value.root_obj = root
         value.current_path = path
-
         resolved_value = value.resolve(context_override=context_override)
-
         stem = path.stem
         if stem == '/' or stem == ROOTPATH:
-            logger.warning(f"Attempted to set value at root path {path}. This is likely an error.")
+            logger.warning(f"Attempted to set value at root path {path}.")
             return False
-
         set_val(parent, stem, resolved_value)
         return True
-
     except Exception as e:
-        import traceback
-
-        logger.error(f"error resolving value {value} at {path}: {e}\n{traceback.format_exc()}")
-        raise e
+        logger.debug(f"error resolving value {value} at {path}: {e}")
+        raise
 
 
 def set_val(parent: Any, key, value: Any) -> None:

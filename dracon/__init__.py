@@ -27,7 +27,16 @@ from dracon.composer import (
     CompositionResult,
     DraconComposer,
 )
-from dracon.lazy import DraconError
+from dracon.diagnostics import (
+    DraconError,
+    CompositionError,
+    EvaluationError,
+    SchemaError,
+    SourceContext,
+    SourceLocation,
+    format_error,
+    print_dracon_error,
+)
 from dracon.representer import DraconRepresenter
 from dracon.interpolation import evaluate_expression, InterpolableNode
 from dracon.nodes import DraconScalarNode, DraconMappingNode, DraconSequenceNode, ContextNode

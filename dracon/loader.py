@@ -198,10 +198,18 @@ class DraconLoader:
         return self.post_process_composed(composed_content)
 
     def load_node(self, node, target_type: Optional[Type] = None):  # add target_type
+        from pydantic import ValidationError
+
         try:
             self.yaml.constructor.referenced_nodes = self.referenced_nodes
             self.yaml.constructor.dracon_loader = self
             return self.yaml.constructor.construct_object(node, target_type=target_type)
+        except ValidationError:
+            # preserve Pydantic ValidationErrors for proper handling by consumers
+            raise
+        except DraconError:
+            # preserve DraconErrors that already have context
+            raise
         except Exception as e:
             raise DraconError(f"Error loading config node {str(node)[:200]}...") from e
 
@@ -398,16 +406,28 @@ class DraconLoader:
 
     @ftrace(watch=[])
     def process_includes(self, comp_res: CompositionResult) -> CompositionResult:
+        from dracon.diagnostics import SourceLocation
         comp_res.find_special_nodes('include', lambda n: isinstance(n, IncludeNode))
 
         if not comp_res.special_nodes['include']:
             return comp_res
 
-        # Process the current batch of includes
         comp_res.sort_special_nodes('include')
         for inode_path in comp_res.pop_all_special('include'):
             inode = inode_path.get_obj(comp_res.root)
             assert isinstance(inode, IncludeNode), f"Invalid node type: {type(inode)}"
+
+            # capture include location for trace - use file path from context if available
+            include_loc = None
+            if inode.start_mark:
+                include_file = None
+                if hasattr(inode, 'context'):
+                    include_file = inode.context.get('FILE_PATH') or inode.context.get('FILE')
+                loc = SourceLocation.from_mark(inode.start_mark, keypath=str(inode_path))
+                if include_file and loc.file_path in ('<unicode string>', '<unknown>'):
+                    include_loc = SourceLocation(file_path=include_file, line=loc.line, column=loc.column, keypath=loc.keypath)
+                else:
+                    include_loc = loc
 
             new_loader = self.copy()
             include_composed = compose_from_include_str(
@@ -418,10 +438,49 @@ class DraconLoader:
                 custom_loaders=self.custom_loaders,
                 node=inode,
             )
+
+            # propagate include trace to all nodes from the included file
+            if include_loc is not None:
+                # get file path from the root node's context if available
+                file_path = None
+                if hasattr(include_composed.root, 'context'):
+                    file_path = include_composed.root.context.get('FILE_PATH') or include_composed.root.context.get('FILE')
+                self._propagate_include_trace(include_composed.root, include_loc, file_path=file_path)
+
             comp_res.set_composition_at(inode_path, include_composed)
 
-        # Recursive call to process any new includes that were brought in
         return self.process_includes(comp_res)
+
+    def _propagate_include_trace(self, node, include_loc, file_path=None):
+        from dracon.composer import CompositionResult
+        from dracon.diagnostics import SourceContext
+        comp = CompositionResult(root=node)
+
+        def add_trace(n, path):
+            # determine file path - use provided or from node's context
+            fp = file_path
+            if not fp and hasattr(n, 'context'):
+                fp = n.context.get('FILE_PATH') or n.context.get('FILE')
+
+            if hasattr(n, '_source_context') and n._source_context is not None:
+                ctx = n._source_context
+                new_trace = (include_loc,) + ctx.include_trace
+                new_fp = fp if fp and ctx.file_path in ('<unicode string>', '<unknown>') else ctx.file_path
+                n._source_context = SourceContext(
+                    file_path=new_fp, line=ctx.line, column=ctx.column,
+                    keypath=str(path) if path else ctx.keypath,
+                    include_trace=new_trace, operation_context=ctx.operation_context,
+                )
+            elif hasattr(n, 'start_mark') and n.start_mark is not None:
+                from dracon.nodes import make_source_context
+                ctx = make_source_context(n.start_mark, include_trace=(include_loc,), keypath=str(path))
+                if ctx and fp and ctx.file_path in ('<unicode string>', '<unknown>'):
+                    ctx = SourceContext(file_path=fp, line=ctx.line, column=ctx.column,
+                                        keypath=ctx.keypath, include_trace=ctx.include_trace)
+                if hasattr(n, '_source_context'):
+                    n._source_context = ctx
+
+        comp.walk(add_trace)
 
     def dump(self, data, stream=None):
         if stream is None:
@@ -538,8 +597,7 @@ def load_config_to_dict(maybe_config: str | DictLike) -> DictLike:
 def compose_config_from_str(yaml, content):
     yaml.compose(content)
     assert isinstance(yaml.composer, DraconComposer)
-    res = yaml.composer.get_result()
-    return res
+    return yaml.composer.get_result()
 
 
 def cached_compose_config_from_str(yaml, content):
