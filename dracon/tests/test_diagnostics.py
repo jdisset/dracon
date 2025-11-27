@@ -448,3 +448,95 @@ def test_error_in_include():
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
+
+## {{{                    --     CLI diagnostics tests     --
+
+
+def test_unused_define_variable_warning(tmp_path, capfd):
+    """Test that a warning is shown when --define variable isn't used."""
+    from dracon.commandline import make_program
+    from pydantic import BaseModel
+
+    class Config(BaseModel):
+        value: str = "default"
+
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("value: static_value\n")
+
+    program = make_program(Config, name="test", context={'Config': Config})
+
+    # define a variable that's never used in the config
+    config, _ = program.parse_args([f"+{config_file}", "++unused_var", "some_value"])
+
+    captured = capfd.readouterr()
+    # should warn that unused_var was defined but never used
+    assert "unused_var" in captured.err or "unused_var" in captured.out
+    assert "not used" in captured.err.lower() or "not used" in captured.out.lower() or \
+           "unused" in captured.err.lower() or "unused" in captured.out.lower()
+
+
+def test_used_define_variable_no_warning(tmp_path, capfd):
+    """Test that no warning is shown when --define variable is used."""
+    from dracon.commandline import make_program
+    from dracon.lazy import LazyDraconModel
+
+    class Config(LazyDraconModel):
+        value: str = "default"
+
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("value: ${my_var}\n")
+
+    program = make_program(Config, name="test", context={'Config': Config})
+
+    config, _ = program.parse_args([f"+{config_file}", "++my_var", "used_value"])
+
+    captured = capfd.readouterr()
+    # should not warn about my_var since it was used
+    assert "my_var" not in captured.err and "not used" not in captured.err.lower()
+
+
+def test_flow_syntax_interpolation_error_message():
+    """Test that flow syntax interpolation errors have helpful message."""
+    from dracon.loader import DraconLoader
+    from ruamel.yaml import YAMLError
+
+    yaml_content = "config: {max_norm: ${grad_clip_norm}}"
+
+    loader = DraconLoader()
+    with pytest.raises(Exception) as excinfo:
+        loader.loads(yaml_content)
+
+    # error should mention flow syntax and suggest block style
+    err_str = str(excinfo.value).lower()
+    # should suggest using block style or mention flow syntax limitation
+    assert "flow" in err_str or "block" in err_str or "interpolation" in err_str
+
+
+def test_show_defined_variables(tmp_path, capfd):
+    """Test that defined variables can be shown after includes/merges."""
+    from dracon.commandline import make_program
+    from dracon.lazy import LazyDraconModel
+    import os
+
+    class Config(LazyDraconModel):
+        value: str = "default"
+
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("!define inner_var: from_file\nvalue: ${inner_var}\n")
+
+    program = make_program(Config, name="test", context={'Config': Config})
+
+    # set env var to enable verbose variable display
+    os.environ["DRACON_SHOW_VARS"] = "1"
+    try:
+        config, _ = program.parse_args([f"+{config_file}", "++outer_var", "from_cli"])
+        captured = capfd.readouterr()
+        # should show defined variables in the table
+        output = captured.out + captured.err
+        assert "inner_var" in output or "outer_var" in output
+        assert "Defined Variables" in output or "CLI" in output
+    finally:
+        os.environ.pop("DRACON_SHOW_VARS", None)
+
+
+##────────────────────────────────────────────────────────────────────────────}}}

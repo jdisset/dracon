@@ -595,7 +595,16 @@ def load_config_to_dict(maybe_config: str | DictLike) -> DictLike:
 
 
 def compose_config_from_str(yaml, content):
-    yaml.compose(content)
+    from ruamel.yaml import YAMLError
+    try:
+        yaml.compose(content)
+    except YAMLError as e:
+        err_str = str(e)
+        # detect flow syntax with interpolation pattern
+        if "flow" in err_str.lower() and "${" in content:
+            hint = '\n\nHint: Dracon\'s ${...} interpolation conflicts with YAML flow syntax ({key: value}).\nQuote the interpolation: {key: "${variable}"} or use block style:\n  key: ${variable}'
+            raise type(e)(str(e) + hint) from e
+        raise
     assert isinstance(yaml.composer, DraconComposer)
     return yaml.composer.get_result()
 
