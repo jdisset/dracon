@@ -8,12 +8,13 @@ Dracon extends the standard YAML merge key (`<<:`) to provide fine-grained contr
 The extended merge key follows the pattern:
 
 ```
-<<{dict_opts}[list_opts]@target_path: source_node
+<<{dict_opts}[list_opts](ctx_opts)@target_path: source_node
 ```
 
 - **`<<:`**: The merge key indicator.
 - **`{dict_opts}`** (Optional): Controls dictionary merging.
 - **`[list_opts]`** (Optional): Controls list merging.
+- **`(ctx_opts)`** (Optional): Controls context/variable propagation.
 - **`@target_path`** (Optional): [KeyPath](./keypaths.md) specifying a sub-key within the current mapping where the merge should apply (relative path). Defaults to the current mapping.
 - **`source_node`**: The node providing data to merge (e.g., `*anchor`, `!include ...`, inline mapping/list).
 
@@ -49,6 +50,34 @@ Placed inside `[]`. Combine one mode option with one priority option. Applies on
 !!! note default
 If `[]` is omitted or empty, it defaults to `[~>]` (Replace, **Existing** Wins).
 
+## Context Propagation Options (`(ctx_opts)`)
+
+Placed inside `()`. Controls whether `!define` variables from the included source are propagated to the including document's scope.
+
+- **`<`**: **Propagate context.** Variables defined via `!define` in the included file become available in the including file's interpolation scope.
+
+!!! note default
+If `()` is omitted, context propagation is disabled—variables defined in included files stay local to those files.
+
+**Use Case:** When including a file that defines shared variables (e.g., constants, reusable objects), use `<<(<):` to make those definitions available for interpolation in the including document.
+
+```yaml
+# common.yaml
+!define TIMEOUT: 30
+!define RETRY_COUNT: 3
+defaults:
+  timeout: ${TIMEOUT}
+
+# main.yaml
+<<(<): !include file:common.yaml  # propagate TIMEOUT and RETRY_COUNT
+
+service:
+  timeout: ${TIMEOUT}      # works because of (<)
+  retries: ${RETRY_COUNT}  # works because of (<)
+```
+
+Without `(<)`, the `${TIMEOUT}` interpolation in `main.yaml` would fail because the variable wouldn't be in scope.
+
 ## Combined Default (`<<:`)
 
 If only `<<:` is used without any `{}` or `[]` options and no `@target_path`, the effective default behavior is **`<<{+>}[~>]`**:
@@ -66,6 +95,7 @@ If only `<<:` is used without any `{}` or `[]` options and no `@target_path`, th
 | `<<[+<]:`     | Append/Recurse, Existing Wins (`{~>}`)   | Concatenate, **New** first          | Prepend new list items to existing list                   |
 | `<<{~<}[~>]:` | Replace, New Wins                        | Replace, Existing Wins              | Dict values fully replaced (new wins), list kept existing |
 | `<<@target:`  | Append/Recurse, **target Wins** (`{<+}`) | Replace, Existing Wins (`[~>]`)     | Default merge on specified target subkey                  |
+| `<<(<):`      | Append/Recurse, Existing Wins (`{+>}`)   | Replace, Existing Wins (`[~>]`)     | Default merge + propagate `!define` vars to parent scope  |
 
 !!! note
-The order of `{}` and `[]` does not matter (e.g., `<<{+<}[+>]` is the same as `<<[+>]{+<}`).
+The order of `{}`, `[]`, and `()` does not matter (e.g., `<<{+<}[+>](<)` is the same as `<<(<)[+>]{+<}`).
