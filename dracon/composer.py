@@ -56,12 +56,14 @@ class CompositionResult(BaseModel):
     special_nodes: dict[SpecialNodeCategory, list[KeyPath]] = {}
     anchor_paths: Optional[dict[str, KeyPath]] = None
     node_map: Optional[dict[KeyPath, Node]] = None
+    defined_vars: dict[str, Any] = {}
 
     def __deepcopy__(self, memo=None):
         cr = CompositionResult(
             root=deepcopy(self.root, memo),
             special_nodes={},
             anchor_paths=deepcopy(self.anchor_paths, memo),
+            defined_vars=deepcopy(self.defined_vars, memo),
         )
         cr.make_map()
         return cr
@@ -130,19 +132,24 @@ class CompositionResult(BaseModel):
     def set_composition_at(self, at_path: KeyPath, new_comp: 'CompositionResult'):
         new_node = new_comp.root
         self.set_at(at_path, new_node)
+        self.defined_vars.update(new_comp.defined_vars)
 
     def merged(self, other: Union['CompositionResult', Node], key: MergeKey):
         other_node = other
-        if isinstance(other_node, CompositionResult):
-            other_node = other_node.root
+        other_defined_vars = {}
+        if isinstance(other, CompositionResult):
+            other_node = other.root
+            other_defined_vars = other.defined_vars
         assert isinstance(other_node, Node), (
             f'Invalid node type: {type(other_node)} == {other_node}'
         )
         new_root = merged(self.root, other_node, key)
+        combined_vars = {**self.defined_vars, **other_defined_vars}
         return CompositionResult(
             root=new_root,
             special_nodes=self.special_nodes,
             anchor_paths=self.anchor_paths,
+            defined_vars=combined_vars,
         )
 
     def pop_all_special(self, category: SpecialNodeCategory, index=0):

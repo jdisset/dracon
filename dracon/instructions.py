@@ -134,6 +134,8 @@ class Define(Instruction):
             callback=partial(add_to_context, {var_name: value}),
         )
 
+        comp_res.defined_vars[var_name] = value
+
         return comp_res
 
 
