@@ -349,6 +349,41 @@ class ArgParseError(Exception):
     pass
 
 
+class TrackedContext(dict):
+    """a dict that tracks which keys are accessed during interpolation."""
+    def __init__(self, *args, defined_var_keys=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._defined_var_keys = set(defined_var_keys or [])
+        self._accessed_keys = set()
+
+    def __getitem__(self, key):
+        self._accessed_keys.add(key)
+        return super().__getitem__(key)
+
+    def get(self, key, default=None):
+        if key in self:
+            self._accessed_keys.add(key)
+        return super().get(key, default)
+
+    def __contains__(self, key):
+        result = super().__contains__(key)
+        if result:
+            self._accessed_keys.add(key)
+        return result
+
+    def get_unused_defined_vars(self):
+        """return defined_var_keys that were never accessed."""
+        return self._defined_var_keys - self._accessed_keys
+
+    def copy(self):
+        new = TrackedContext(super().copy(), defined_var_keys=self._defined_var_keys)
+        new._accessed_keys = self._accessed_keys.copy()
+        return new
+
+    def __deepcopy__(self, memo):
+        return self.copy()
+
+
 class Program(BaseModel, Generic[T]):
     conf_type: type[T]
 
@@ -763,10 +798,14 @@ class Program(BaseModel, Generic[T]):
 
         from dracon.composer import CompositionResult
 
+        # wrap context with tracking for unused variable warnings
+        tracked_context = TrackedContext(defined_var_keys=defined_vars.keys())
+        tracked_context.update(defined_vars)
+
         loader = DraconLoader(
             enable_interpolation=True, base_dict_type=dict, base_list_type=list, **kwargs
         )
-        loader.update_context(defined_vars)
+        loader.update_context(tracked_context)
         loader.yaml.representer.exclude_defaults = False
         pdump_str = loader.dump(self.conf_type.__new__(self.conf_type))
 
@@ -851,7 +890,55 @@ class Program(BaseModel, Generic[T]):
 
         if not isinstance(res, self.conf_type):
             raise ArgParseError(f"internal error: expected {self.conf_type} but got {type(res)}")
+
+        # warn about unused defined variables
+        unused_vars = tracked_context.get_unused_defined_vars()
+        if unused_vars:
+            console.print(
+                f"[yellow]Warning:[/yellow] The following --define/++ variables were not used: {', '.join(sorted(unused_vars))}",
+                style="yellow",
+            )
+
+        # show defined variables if DRACON_SHOW_VARS is set
+        import os
+        if os.environ.get("DRACON_SHOW_VARS", "").lower() in ("1", "true", "yes"):
+            self._print_defined_vars(defined_vars, loader.context)
+
         return res
+
+    def _print_defined_vars(self, cli_defined_vars: dict, loader_context: dict):
+        """print all defined variables for debugging."""
+        from rich.table import Table
+        from rich.text import Text
+
+        # exclude internal dracon context vars and system file vars
+        internal_prefixes = ('__DRACON', 'construct', 'getenv', 'getcwd', 'listdir', 'join', 'basename', 'dirname', 'expanduser')
+        system_vars = ('DIR', 'FILE', 'FILE_PATH', 'FILE_STEM', 'FILE_EXT', 'FILE_LOAD_TIME', 'FILE_LOAD_TIME_UNIX', 'FILE_LOAD_TIME_UNIX_MS', 'FILE_SIZE')
+
+        table = Table(title="Defined Variables", box=ROUNDED, border_style=COLOR_BRIGHT_BLACK)
+        table.add_column("Variable", style=COLOR_CYAN)
+        table.add_column("Value", style=COLOR_WHITE)
+        table.add_column("Source", style=COLOR_DIM)
+
+        # first, show CLI defined vars
+        for name, value in sorted(cli_defined_vars.items()):
+            val_repr = repr(value)[:50] + ('...' if len(repr(value)) > 50 else '')
+            table.add_row(name, val_repr, "CLI (++/--define)")
+
+        # then show context vars from includes/!define
+        for name, value in sorted(loader_context.items()):
+            if name in cli_defined_vars:
+                continue  # already shown
+            if any(name.startswith(p) for p in internal_prefixes):
+                continue  # skip internal vars
+            if name in system_vars:
+                continue  # skip system file vars
+            if callable(value):
+                continue  # skip functions
+            val_repr = repr(value)[:50] + ('...' if len(repr(value)) > 50 else '')
+            table.add_row(name, val_repr, "config (!define)")
+
+        console.print(table)
 
 
 def make_program(conf_type: type, **kwargs):
