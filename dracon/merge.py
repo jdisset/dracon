@@ -42,6 +42,8 @@ def process_merges(comp_res):
     Process all merge nodes in the composition result recursively until there are no more merges to process.
     Returns the modified composition result and whether any merges were performed.
     """
+    from dracon.composer import walk_node
+    from functools import partial
     any_merges = False
 
     while True:
@@ -98,6 +100,10 @@ def process_merges(comp_res):
             assert isinstance(new_parent, Node)
 
             comp_res.set_at(parent_path, new_parent)
+
+            # propagate defined_vars to all nodes in new_parent if context propagation enabled
+            if merge_key.context_propagation and comp_res.defined_vars:
+                walk_node(new_parent, partial(add_to_context, comp_res.defined_vars))
 
         comp_res.make_map()
 
