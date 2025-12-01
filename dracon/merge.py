@@ -274,7 +274,14 @@ def merged(existing: Any, new: Any, k: MergeKey = DEFAULT_ADD_TO_CONTEXT_MERGE_K
         if k.dict_depth is not None and depth > k.dict_depth:
             return pdict
 
-        result = pdict.copy()
+        # preserve special dict types (like TrackedContext) when they're in the non-priority position
+        # but only for non-node dicts (nodes have 'tag' attribute)
+        if hasattr(other, 'merged_with') and not hasattr(other, 'tag') and not hasattr(pdict, 'tag'):
+            # use other.copy() to preserve type, then update with pdict values
+            result = other.copy()
+            result.update(pdict)
+        else:
+            result = pdict.copy()
 
         if hasattr(pdict, 'tag') and hasattr(other, 'tag'):
             # we're dealing with nodes

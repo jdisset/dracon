@@ -350,11 +350,16 @@ class ArgParseError(Exception):
 
 
 class TrackedContext(dict):
-    """a dict that tracks which keys are accessed during interpolation."""
-    def __init__(self, *args, defined_var_keys=None, **kwargs):
+    """a dict that tracks which keys are accessed during interpolation.
+
+    When copied, the _accessed_keys set is shared between copies so that
+    variable accesses in included files propagate back to the parent context.
+    """
+    def __init__(self, *args, defined_var_keys=None, _shared_accessed_keys=None, **kwargs):
         super().__init__(*args, **kwargs)
         self._defined_var_keys = set(defined_var_keys or [])
-        self._accessed_keys = set()
+        # use shared set if provided, otherwise create new one
+        self._accessed_keys = _shared_accessed_keys if _shared_accessed_keys is not None else set()
 
     def __getitem__(self, key):
         self._accessed_keys.add(key)
@@ -366,22 +371,30 @@ class TrackedContext(dict):
         return super().get(key, default)
 
     def __contains__(self, key):
-        result = super().__contains__(key)
-        if result:
-            self._accessed_keys.add(key)
-        return result
+        # don't track __contains__ as access - only actual value retrieval counts
+        return super().__contains__(key)
 
     def get_unused_defined_vars(self):
         """return defined_var_keys that were never accessed."""
         return self._defined_var_keys - self._accessed_keys
 
     def copy(self):
-        new = TrackedContext(super().copy(), defined_var_keys=self._defined_var_keys)
-        new._accessed_keys = self._accessed_keys.copy()
+        # share the _accessed_keys set so accesses in copies propagate back
+        new = TrackedContext(
+            super().copy(),
+            defined_var_keys=self._defined_var_keys,
+            _shared_accessed_keys=self._accessed_keys,
+        )
         return new
 
     def __deepcopy__(self, memo):
         return self.copy()
+
+    def merged_with(self, other, *args, **kwargs):
+        """merge with another dict while preserving tracking behavior."""
+        result = self.copy()
+        result.update(other)
+        return result
 
 
 class Program(BaseModel, Generic[T]):

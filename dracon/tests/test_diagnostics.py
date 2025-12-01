@@ -512,6 +512,32 @@ def test_flow_syntax_interpolation_error_message():
     assert "flow" in err_str or "block" in err_str or "interpolation" in err_str
 
 
+def test_used_define_variable_in_included_file_no_warning(tmp_path, capfd):
+    """Test that no warning is shown when --define variable is used in an included file."""
+    from dracon.commandline import make_program
+    from dracon.lazy import LazyDraconModel
+
+    class Config(LazyDraconModel):
+        value: str = "default"
+
+    # create included file that uses the variable
+    included_file = tmp_path / "included.yaml"
+    included_file.write_text("value: ${my_var}\n")
+
+    # main config just includes the other file
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(f"!include file:{included_file}\n")
+
+    program = make_program(Config, name="test", context={'Config': Config})
+
+    config, _ = program.parse_args([f"+{config_file}", "++my_var", "used_in_include"])
+
+    captured = capfd.readouterr()
+    # should NOT warn about my_var since it was used in the included file
+    output = captured.err + captured.out
+    assert "my_var" not in output or "not used" not in output.lower()
+
+
 def test_show_defined_variables(tmp_path, capfd):
     """Test that defined variables can be shown after includes/merges."""
     from dracon.commandline import make_program
