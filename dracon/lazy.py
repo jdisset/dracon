@@ -149,7 +149,13 @@ class LazyInterpolable(Lazy[T]):
                 ctx = self.context if self.context is not None else {}
                 logger.debug(f"Resolving lazy value: {self.value}, context_override: {context_override}")
                 if context_override is not None:
-                    ctx = {**ctx, **context_override}
+                    # preserve context_override type (e.g. TrackedContext) for tracking
+                    if hasattr(context_override, 'copy'):
+                        merged_ctx = context_override.copy()
+                        merged_ctx.update(ctx)
+                        ctx = merged_ctx
+                    else:
+                        ctx = {**ctx, **context_override}
                 resolved_value = evaluate_expression(
                     self.value,
                     self.current_path,
@@ -420,20 +426,24 @@ def collect_lazy_by_depth(obj, path=ROOTPATH, seen=None):
 
         # Pydantic models
         elif isinstance(o, BaseModel):
-            # Iterate through model fields directly
-            for field_name in o.model_fields_set:
-                field_value = getattr(o, field_name)
+            # access __dict__ directly to avoid triggering LazyDraconModel.__getattr__
+            # which would resolve lazy values before we can collect them
+            model_dict = object.__getattribute__(o, '__dict__')
+            model_cls = type(o)
 
-                item_path = p.copy().down(field_name)
-                _collect(field_value, item_path, seen_set)
+            # iterate through all model fields
+            for field_name in model_cls.model_fields:
+                if field_name in model_dict:
+                    field_value = model_dict[field_name]
+                    item_path = p.copy().down(field_name)
+                    _collect(field_value, item_path, seen_set)
 
-            if hasattr(o, '__dict__'):
-                model_cls = type(o)
-                for attr_name, attr_value in o.__dict__.items():
-                    if attr_name.startswith('_') or attr_name in model_cls.model_fields:
-                        continue
-                    attr_path = p.copy().down(attr_name)
-                    _collect(attr_value, attr_path, seen_set)
+            # also check for extra attributes not in model_fields
+            for attr_name, attr_value in model_dict.items():
+                if attr_name.startswith('_') or attr_name in model_cls.model_fields:
+                    continue
+                attr_path = p.copy().down(attr_name)
+                _collect(attr_value, attr_path, seen_set)
 
         # handle other objects with attributes
         elif hasattr(o, '__dict__') and not isinstance(o, (str, int, float, bool, bytes, type)):

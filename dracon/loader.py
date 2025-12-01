@@ -172,8 +172,11 @@ class DraconLoader:
             base_list_type=self.base_list_type,
             enable_interpolation=self._enable_interpolation,
             enable_shorthand_vars=self.enable_shorthand_vars,
-            context=self.context.copy() if self.context else None,
+            context=None,  # set context separately to preserve type
         )
+        # preserve context type (e.g. TrackedContext) instead of wrapping in ShallowDict
+        if self.context is not None:
+            new_loader.context = self.context.copy()
         new_loader.referenced_nodes = self.referenced_nodes.copy()
         new_loader.yaml.constructor.yaml_constructors = (
             self.yaml.constructor.yaml_constructors.copy()

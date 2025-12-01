@@ -151,10 +151,26 @@ def preprocess_expr(expr: str):
     return expr
 
 
+def _extract_identifiers(expr: str) -> set:
+    """extract potential variable names from an expression using simple regex."""
+    import re
+    # match python identifiers but exclude keywords and numbers
+    pattern = r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+    return set(re.findall(pattern, expr))
+
+
 @ftrace(watch=[], inputs=['expr'])
 def do_safe_eval(expr: str, engine: str, symbols: Optional[dict] = None, source_context: Optional[SourceContext] = None) -> Any:
     original_expr = expr
     expr = preprocess_expr(expr)
+
+    # pre-access symbols that appear in the expression to trigger tracking
+    # this ensures accesses are recorded before copying to eval namespace
+    if symbols is not None:
+        identifiers = _extract_identifiers(expr)
+        for ident in identifiers:
+            if ident in symbols and not ident.startswith('__'):
+                _ = symbols.get(ident)
 
     if engine == 'asteval':
         safe_eval = Interpreter(user_symbols=symbols or {}, max_string_length=1000)
@@ -206,8 +222,15 @@ def dracon_resolve(obj, **ctx):
 
 
 def prepare_symbols(current_path, root_obj, context):
-    symbols = copy(BASE_DRACON_SYMBOLS)
-    symbols.update(
+    # if context has special behavior (e.g. TrackedContext), preserve it
+    if context is not None and hasattr(context, 'copy'):
+        symbols = context.copy()
+    else:
+        symbols = dict(context) if context else {}
+
+    # add base symbols and dracon-specific symbols
+    base_symbols = copy(BASE_DRACON_SYMBOLS)
+    base_symbols.update(
         {
             "__DRACON__CURRENT_PATH": current_path,
             "__DRACON__PARENT_PATH": current_path.parent,
@@ -216,7 +239,10 @@ def prepare_symbols(current_path, root_obj, context):
             "__dracon_KeyPath": KeyPath,
         }
     )
-    symbols.update(context or {})
+    # update symbols with base (context values take precedence for non-internal keys)
+    for k, v in base_symbols.items():
+        if k.startswith('__') or k not in symbols:
+            symbols[k] = v
     return symbols
 
 

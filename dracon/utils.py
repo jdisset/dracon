@@ -189,7 +189,13 @@ def clean_context_keys(context: DictLike) -> DictLike:
         else:
             cleaned[key] = value
 
-    if isinstance(context, MutableMapping):
+    # use copy() if available to preserve special behavior (e.g. TrackedContext)
+    if hasattr(context, 'copy'):
+        result = context.copy()
+        result.clear()
+        result.update(cleaned)
+        return result
+    elif isinstance(context, MutableMapping):
         try:
             return type(context)(cleaned)
         except TypeError:
