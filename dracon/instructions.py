@@ -17,7 +17,7 @@ from dracon.composer import (
 )
 from dracon.utils import ShallowDict
 from ruamel.yaml.nodes import Node
-from dracon.keypath import KeyPath, ROOTPATH
+from dracon.keypath import KeyPath, ROOTPATH, KeyPathToken, MAPPING_KEY
 from dracon.merge import merged, MergeKey, add_to_context
 from dracon.interpolation import evaluate_expression, InterpolableNode
 from dracon.deferred import DeferredNode, make_deferred
@@ -272,29 +272,92 @@ class Each(Instruction):
         # Handle mapping values
         elif isinstance(value_node, DraconMappingNode):
             logger.debug(f"Processing an each instruction with a dict node. {list_like=}")
-            for item in list_like:
-                item_ctx = merged(key_node.context, {self.var_name: item}, MergeKey(raw='{<~}'))
-                for knode, vnode in value_node.items():
-                    new_vnode = deepcopy(vnode)
-                    # can't add the knode directly to the new_parent, as that would result in duplicate keys
-                    # we need to evaluate the key node first
-                    assert isinstance(
-                        knode, InterpolableNode
-                    ), f"Keys inside an !each instruction must be interpolable (so that they're unique), but got {knode}"
-                    new_knode = deepcopy(knode)
-                    add_to_context(item_ctx, new_knode, mkey)
-                    scalar_knode = DraconScalarNode(
-                        tag=new_knode.tag,
-                        value=new_knode.evaluate(
-                            engine=loader.interpolation_engine,
-                            context=item_ctx,
-                        ),
-                    )
-                    new_parent.append((scalar_knode, new_vnode))
+
+            # check if the mapping contains exactly one key that is an instruction
+            # if so, we need to handle nesting specially by wrapping in a sequence
+            value_items = list(value_node.items())
+            has_single_instruction_child = (
+                len(value_items) == 1 and match_instruct(value_items[0][0].tag)
+            )
+
+            if has_single_instruction_child:
+                # the only child is an instruction - we need to process each iteration
+                # with proper context, then immediately process the nested instruction
+                inner_knode, inner_vnode = value_items[0]
+                inner_inst = match_instruct(inner_knode.tag)
+
+                # collect all results first, then determine the output type
+                all_results = []
+
+                for item in list_like:
+                    item_ctx = merged(key_node.context, {self.var_name: item}, MergeKey(raw='{<~}'))
+                    new_inner_vnode = deepcopy(inner_vnode)
+                    new_inner_knode = deepcopy(inner_knode)
+                    add_to_context(item_ctx, new_inner_knode, mkey)
                     walk_node(
-                        node=new_vnode,
+                        node=new_inner_vnode,
                         callback=partial(add_to_context, item_ctx, merge_key=mkey),
                     )
+                    # create a temporary composition with just this instruction
+                    # and process it immediately
+                    temp_mapping = DraconMappingNode(
+                        tag='tag:yaml.org,2002:map',
+                        value=[(new_inner_knode, new_inner_vnode)]
+                    )
+                    temp_comp = CompositionResult(root=temp_mapping)
+                    temp_path = KeyPath([KeyPathToken.ROOT, MAPPING_KEY, new_inner_knode.value])
+                    temp_comp = inner_inst.process(temp_comp, temp_path, loader)
+                    all_results.append(temp_comp.root)
+
+                # determine result type from first result and merge all
+                if all_results and isinstance(all_results[0], DraconSequenceNode):
+                    new_parent = DraconSequenceNode.from_mapping(parent_node, empty=True)
+                    for result in all_results:
+                        for elem in result.value:
+                            new_parent.append(elem)
+                else:
+                    new_parent = parent_node.copy()
+                    new_parent.value = []
+                    for result in all_results:
+                        for k, v in result.items():
+                            new_parent.append((k, v))
+            else:
+                for item in list_like:
+                    item_ctx = merged(key_node.context, {self.var_name: item}, MergeKey(raw='{<~}'))
+                    for knode, vnode in value_node.items():
+                        new_vnode = deepcopy(vnode)
+                        new_knode = deepcopy(knode)
+
+                        # check if this key is itself an instruction (e.g. nested !each)
+                        # if so, don't evaluate it - just propagate context and let the
+                        # instruction processor handle it in a subsequent pass
+                        if match_instruct(new_knode.tag):
+                            add_to_context(item_ctx, new_knode, mkey)
+                            walk_node(
+                                node=new_vnode,
+                                callback=partial(add_to_context, item_ctx, merge_key=mkey),
+                            )
+                            new_parent.append((new_knode, new_vnode))
+                            continue
+
+                        # can't add the knode directly to the new_parent, as that would result in duplicate keys
+                        # we need to evaluate the key node first
+                        assert isinstance(
+                            knode, InterpolableNode
+                        ), f"Keys inside an !each instruction must be interpolable (so that they're unique), but got {knode}"
+                        add_to_context(item_ctx, new_knode, mkey)
+                        scalar_knode = DraconScalarNode(
+                            tag=new_knode.tag,
+                            value=new_knode.evaluate(
+                                engine=loader.interpolation_engine,
+                                context=item_ctx,
+                            ),
+                        )
+                        new_parent.append((scalar_knode, new_vnode))
+                        walk_node(
+                            node=new_vnode,
+                            callback=partial(add_to_context, item_ctx, merge_key=mkey),
+                        )
 
         else:
             raise ValueError(

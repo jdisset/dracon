@@ -1022,3 +1022,78 @@ def test_each_instruction_with_complex_key_syntax():
 
     assert 'databases' in config
     assert config['databases'] == expected_databases
+
+
+def test_nested_each_direct_sequence():
+    """Nested !each where inner !each is direct child producing a sequence."""
+    yaml_content = '''
+!define D_train: [d1, d2]
+!define slice: [s1, s2]
+
+result:
+  !each(D) ${D_train}:
+    !each(s) ${slice}:
+      - something_${D}_${s}
+'''
+    config = dr.loads(yaml_content, raw_dict=True)
+    resolve_all_lazy(config)
+
+    expected = {
+        'result': [
+            'something_d1_s1',
+            'something_d1_s2',
+            'something_d2_s1',
+            'something_d2_s2',
+        ]
+    }
+    assert config == expected
+
+
+def test_nested_each_direct_mapping():
+    """Nested !each where inner !each is direct child producing a mapping."""
+    yaml_content = '''
+!define D_train: [d1, d2]
+!define slice: [s1, s2]
+
+result:
+  !each(D) ${D_train}:
+    !each(s) ${slice}:
+      ${D}_${s}: value_${D}_${s}
+'''
+    config = dr.loads(yaml_content, raw_dict=True)
+    resolve_all_lazy(config)
+
+    expected = {
+        'result': {
+            'd1_s1': 'value_d1_s1',
+            'd1_s2': 'value_d1_s2',
+            'd2_s1': 'value_d2_s1',
+            'd2_s2': 'value_d2_s2',
+        }
+    }
+    assert config == expected
+
+
+def test_triple_nested_each():
+    """Triple nested !each - all direct children."""
+    yaml_content = '''
+!define A: [a1, a2]
+!define B: [b1, b2]
+!define C: [c1, c2]
+
+result:
+  !each(a) ${A}:
+    !each(b) ${B}:
+      !each(c) ${C}:
+        - ${a}_${b}_${c}
+'''
+    config = dr.loads(yaml_content, raw_dict=True)
+    resolve_all_lazy(config)
+
+    expected_items = [
+        f'{a}_{b}_{c}'
+        for a in ['a1', 'a2']
+        for b in ['b1', 'b2']
+        for c in ['c1', 'c2']
+    ]
+    assert config['result'] == expected_items
