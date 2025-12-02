@@ -114,9 +114,44 @@ class CompositionError(DraconError):
 
 class EvaluationError(DraconError):
     def __init__(self, message: str, context: Optional[SourceContext] = None,
-                 cause: Optional[Exception] = None, expression: Optional[str] = None):
+                 cause: Optional[Exception] = None, expression: Optional[str] = None,
+                 available_symbols: Optional[dict[str, Any]] = None):
         super().__init__(message, context, cause)
         self.expression = expression
+        # store a filtered version of available symbols (exclude internal/large objects)
+        self.available_symbols = _filter_symbols_for_display(available_symbols) if available_symbols else None
+
+
+def _filter_symbols_for_display(symbols: Optional[dict[str, Any]], max_keys: int = 20) -> Optional[dict[str, str]]:
+    """Filter symbols dict for error display, keeping only user-relevant keys with type info."""
+    if not symbols:
+        return None
+    result = {}
+    for k, v in symbols.items():
+        if k.startswith('__') or k.startswith('_'):
+            continue
+        if callable(v) and not hasattr(v, '__self__'):  # skip standalone functions
+            continue
+        # format value with type info, truncating large representations
+        try:
+            type_name = type(v).__name__
+            if isinstance(v, (str, int, float, bool, type(None))):
+                val_repr = repr(v)
+                if len(val_repr) > 50:
+                    val_repr = val_repr[:47] + '...'
+                result[k] = f"{val_repr} ({type_name})"
+            elif isinstance(v, (list, tuple)):
+                result[k] = f"{type_name} with {len(v)} items"
+            elif isinstance(v, dict):
+                result[k] = f"{type_name} with {len(v)} keys"
+            else:
+                result[k] = f"<{type_name}>"
+        except Exception:
+            result[k] = f"<{type(v).__name__}>"
+        if len(result) >= max_keys:
+            result['...'] = f"(and {len(symbols) - max_keys} more)"
+            break
+    return result if result else None
 
 
 class SchemaError(DraconError):
@@ -211,8 +246,13 @@ def format_error(error: DraconError, source_lines: Optional[dict[str, Sequence[s
 
         lines.extend(_format_include_trace(ctx))
 
-    if isinstance(error, EvaluationError) and error.expression:
-        lines.append(f"  Expression: {error.expression}")
+    if isinstance(error, EvaluationError):
+        if error.expression:
+            lines.append(f"  Expression: {error.expression}")
+        if error.available_symbols:
+            lines.append("  Available variables:")
+            for k, v in error.available_symbols.items():
+                lines.append(f"    {k}: {v}")
 
     if isinstance(error, SchemaError):
         if error.field_path:
@@ -285,9 +325,16 @@ def format_error_rich(error: DraconError, source_lines: Optional[dict[str, Seque
                 t.append(f" ({ctx.keypath})", style="green")
             t.append(" <- error\n", style="red bold")
 
-    if isinstance(error, EvaluationError) and error.expression:
-        t.append("\nExpression: ", style="bold")
-        t.append(f"{error.expression}\n", style="magenta")
+    if isinstance(error, EvaluationError):
+        if error.expression:
+            t.append("\nExpression: ", style="bold")
+            t.append(f"{error.expression}\n", style="magenta")
+        if error.available_symbols:
+            t.append("\nAvailable variables:\n", style="bold")
+            for k, v in error.available_symbols.items():
+                t.append(f"  {k}", style="cyan")
+                t.append(": ", style="dim")
+                t.append(f"{v}\n", style="yellow")
 
     if isinstance(error, SchemaError):
         t.append("\n")
@@ -327,6 +374,48 @@ def print_dracon_error(error: DraconError, source_lines: Optional[dict[str, Sequ
         import traceback
         print("\nPython traceback:", file=sys.stderr)
         traceback.print_exception(type(error.__cause__), error.__cause__, error.__cause__.__traceback__)
+
+
+def load_source_lines(error: DraconError) -> dict[str, Sequence[str]]:
+    """Load source lines from files referenced in the error's context and include trace."""
+    result: dict[str, Sequence[str]] = {}
+    if error.context is None:
+        return result
+
+    ctx = error.context
+    files_to_load = set()
+    if ctx.file_path and not ctx.file_path.startswith('<'):
+        files_to_load.add(ctx.file_path)
+    for loc in ctx.include_trace:
+        if loc.file_path and not loc.file_path.startswith('<'):
+            files_to_load.add(loc.file_path)
+
+    for fp in files_to_load:
+        try:
+            with open(fp, 'r') as f:
+                result[fp] = f.readlines()
+        except Exception:
+            pass  # skip files we can't read
+
+    return result
+
+
+def handle_dracon_error(error: DraconError, exit_code: int = 1, use_rich: bool = True) -> None:
+    """Handle a DraconError by printing formatted output and optionally exiting.
+
+    This is the recommended way to handle DraconErrors at the CLI level.
+    It loads source lines for context and displays a nicely formatted error message.
+
+    Args:
+        error: The DraconError to handle
+        exit_code: If >= 0, call sys.exit with this code. If < 0, just print and return.
+        use_rich: Whether to use rich formatting if available
+    """
+    import sys
+    source_lines = load_source_lines(error)
+    print_dracon_error(error, source_lines=source_lines, use_rich=use_rich)
+    if exit_code >= 0:
+        sys.exit(exit_code)
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}

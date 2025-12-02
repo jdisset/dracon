@@ -159,6 +159,54 @@ def _extract_identifiers(expr: str) -> set:
     return set(re.findall(pattern, expr))
 
 
+def _analyze_eval_error(expr: str, error: Exception, symbols: Optional[dict]) -> str:
+    """Analyze an evaluation error and produce a helpful hint."""
+    import re
+    error_msg = str(error)
+    hints = []
+
+    # pattern: 'X' object has no attribute 'Y'
+    attr_match = re.search(r"'(\w+)' object has no attribute '(\w+)'", error_msg)
+    if attr_match:
+        obj_type, attr_name = attr_match.groups()
+        # find which variable in the expression has this type
+        if symbols:
+            for var_name, var_val in symbols.items():
+                if var_name.startswith('_'):
+                    continue
+                if type(var_val).__name__ == obj_type:
+                    # check if this variable is used with .attr_name in the expression
+                    if re.search(rf'\b{re.escape(var_name)}\.{re.escape(attr_name)}\b', expr):
+                        if isinstance(var_val, (list, tuple)):
+                            hints.append(f"'{var_name}' is a {obj_type} with {len(var_val)} item(s), not a single object")
+                            hints.append(f"Try: '{var_name}[0].{attr_name}' to access the first item, or use !each to iterate")
+                        else:
+                            hints.append(f"'{var_name}' is a {obj_type} which doesn't have attribute '{attr_name}'")
+                        break
+
+    # pattern: name 'X' is not defined
+    undef_match = re.search(r"name '(\w+)' is not defined", error_msg)
+    if undef_match:
+        var_name = undef_match.group(1)
+        hints.append(f"Variable '{var_name}' is not defined in this context")
+        if symbols:
+            # suggest similar names
+            similar = [k for k in symbols.keys() if not k.startswith('_') and (var_name.lower() in k.lower() or k.lower() in var_name.lower())]
+            if similar:
+                hints.append(f"Did you mean: {', '.join(similar[:3])}?")
+
+    # pattern: list indices must be integers or slices, not str
+    if "list indices must be integers" in error_msg and "not str" in error_msg:
+        hints.append("You're trying to use a string key on a list (which requires integer indices)")
+        hints.append("Check if you meant to access a dict or need to use an integer index")
+
+    # pattern: 'NoneType' object ...
+    if "'NoneType' object" in error_msg:
+        hints.append("A value in the expression is None - check if a variable failed to load or is missing")
+
+    return "\n".join(hints) if hints else ""
+
+
 @ftrace(watch=[], inputs=['expr'])
 def do_safe_eval(expr: str, engine: str, symbols: Optional[dict] = None, source_context: Optional[SourceContext] = None) -> Any:
     original_expr = expr
@@ -177,12 +225,27 @@ def do_safe_eval(expr: str, engine: str, symbols: Optional[dict] = None, source_
         try:
             res = safe_eval.eval(expr, raise_errors=True)
         except Exception as e:
-            raise EvaluationError(f"Error evaluating expression: {e}", context=source_context, cause=e, expression=original_expr) from e
+            hint = _analyze_eval_error(expr, e, symbols)
+            # asteval populates error list even when raising - extract location info
+            error_location = ""
+            if safe_eval.error:
+                err_holder = safe_eval.error[0]
+                if err_holder.node and hasattr(err_holder.node, 'col_offset'):
+                    col = err_holder.node.col_offset
+                    end_col = getattr(err_holder.node, 'end_col_offset', col + 1)
+                    # create a visual pointer to the error location
+                    error_location = f"\n  {expr}\n  {' ' * col}{'^' * (end_col - col)}"
+            msg = f"Error evaluating expression: {e}"
+            if error_location:
+                msg += error_location
+            if hint:
+                msg += f"\n\nHint:\n{hint}"
+            raise EvaluationError(msg, context=source_context, cause=e, expression=original_expr, available_symbols=symbols) from e
 
         errors = safe_eval.error
         if errors:
             errormsg = '\n'.join(': '.join(e.get_error()) for e in errors)
-            raise EvaluationError(f"Expression evaluation failed:\n{errormsg}", context=source_context, expression=original_expr)
+            raise EvaluationError(f"Expression evaluation failed:\n{errormsg}", context=source_context, expression=original_expr, available_symbols=symbols)
         return res
 
     elif engine == 'eval':
@@ -190,9 +253,40 @@ def do_safe_eval(expr: str, engine: str, symbols: Optional[dict] = None, source_
             eval_globals = {}
             eval_globals.update(__builtins__)  # type: ignore
             eval_globals.update(symbols or {})
-            return eval(expr, eval_globals)
+            # compile with meaningful identifier for better tracebacks
+            identifier = "<dracon expression>"
+            if source_context:
+                import os
+                # try to get a real filename (not <unicode string>)
+                file_path = source_context.file_path
+                if file_path and file_path.startswith('<') and source_context.include_trace:
+                    # use the last entry in include_trace that has a real path
+                    for loc in reversed(source_context.include_trace):
+                        if loc.file_path and not loc.file_path.startswith('<'):
+                            file_path = loc.file_path
+                            break
+                if file_path and not file_path.startswith('<'):
+                    filename = os.path.basename(file_path)
+                    identifier = f"<expr in {filename}:{source_context.line}>"
+                elif source_context.line:
+                    identifier = f"<expr at line {source_context.line}>"
+            code_obj = compile(expr, identifier, 'eval')
+            return eval(code_obj, eval_globals)
+        except SyntaxError as e:
+            # syntax errors have offset info
+            error_location = ""
+            if e.text and e.offset:
+                error_location = f"\n  {e.text.rstrip()}\n  {' ' * (e.offset - 1)}^"
+            msg = f"Syntax error in expression: {e.msg}"
+            if error_location:
+                msg += error_location
+            raise EvaluationError(msg, context=source_context, cause=e, expression=original_expr, available_symbols=symbols) from e
         except Exception as e:
-            raise EvaluationError(f"Error evaluating expression: {e}", context=source_context, cause=e, expression=original_expr) from e
+            hint = _analyze_eval_error(expr, e, symbols)
+            msg = f"Error evaluating expression: {e}"
+            if hint:
+                msg += f"\n\nHint:\n{hint}"
+            raise EvaluationError(msg, context=source_context, cause=e, expression=original_expr, available_symbols=symbols) from e
     else:
         raise ValueError(f"Unknown interpolation engine: {engine}")
 

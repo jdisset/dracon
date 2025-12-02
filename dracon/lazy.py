@@ -695,16 +695,22 @@ def recursive_update_lazy_container(obj, root_obj, current_path, seen=None):
             obj._dracon_root_obj = root_obj
         if hasattr(obj, '_dracon_current_path'):
             obj._dracon_current_path = current_path
-        # then recurse into fields
-        for field_name in obj.model_fields_set:  # Use model_fields_set
+        # then recurse into fields - some pydantic models (e.g. Generic subclasses)
+        # may not have model_fields_set properly initialized, so we handle that gracefully
+        try:
+            fields_set = obj.model_fields_set
+        except AttributeError:
+            fields_set = set(obj.model_fields.keys()) if hasattr(obj, 'model_fields') else set()
+        for field_name in fields_set:
             value = getattr(obj, field_name)
             new_path = current_path + field_name
             recursive_update_lazy_container(value, root_obj, new_path, seen)
         # also check __dict__ for non-field lazy attributes
         if hasattr(obj, '__dict__'):
             model_cls = type(obj)
+            model_fields = getattr(model_cls, 'model_fields', {})
             for attr_name, value in obj.__dict__.items():
-                if attr_name.startswith('_') or attr_name in model_cls.model_fields:
+                if attr_name.startswith('_') or attr_name in model_fields:
                     continue
                 new_path = current_path + attr_name
                 recursive_update_lazy_container(value, root_obj, new_path, seen)
