@@ -112,6 +112,7 @@ class Define(Instruction):
                 root_obj=comp_res.root,
                 engine=loader.interpolation_engine,
                 context=value_node.context,
+                source_context=value_node.source_context,
             )
         else:
             value = loader.load_composition_result(CompositionResult(root=value_node))
@@ -233,6 +234,7 @@ class Each(Instruction):
             root_obj=comp_res.root,
             engine=loader.interpolation_engine,
             context=key_node.context,
+            source_context=key_node.source_context,
         )
 
         logger.debug(

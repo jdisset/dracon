@@ -36,6 +36,8 @@ from dracon.diagnostics import (
     SourceLocation,
     format_error,
     print_dracon_error,
+    handle_dracon_error,
+    load_source_lines,
 )
 from dracon.representer import DraconRepresenter
 from dracon.interpolation import evaluate_expression, InterpolableNode

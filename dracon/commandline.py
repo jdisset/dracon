@@ -25,7 +25,7 @@ from typing import (
 
 from dracon.composer import CompositionResult
 from dracon.nodes import DraconMappingNode
-from dracon.diagnostics import DraconError, print_dracon_error
+from dracon.diagnostics import DraconError, handle_dracon_error
 from pydantic import BaseModel, ValidationError, ConfigDict
 from pydantic_core import PydanticUndefined
 from rich.box import ROUNDED
@@ -475,15 +475,13 @@ class Program(BaseModel, Generic[T]):
                     conf = action_result
         except DraconError as e:
             # print dracon errors with full context information
-            print_dracon_error(e)
-            sys.exit(1)
+            handle_dracon_error(e, exit_code=1)
         except ValidationError as e:
             self.print_validation_error(e)
         except Exception as e:  # catch other config generation errors
             root_exception = get_root_exception(e)
             if isinstance(root_exception, DraconError):
-                print_dracon_error(root_exception)
-                sys.exit(1)
+                handle_dracon_error(root_exception, exit_code=1)
             elif isinstance(root_exception, ValidationError):
                 self.print_validation_error(root_exception)
             else:
