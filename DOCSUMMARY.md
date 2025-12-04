@@ -1,434 +1,285 @@
-Dracon is a modular configuration system and command-line interface (CLI) generator for Python, built on top of YAML. It extends standard YAML with powerful features for composing complex configurations and seamlessly integrates with Pydantic for type safety and validation.
-Dracon is designed to hit a "powerful but transparent" sweet spot. It avoids being overly simplistic (requiring manual boilerplate) or overly magical (hiding configuration details). The goal is to provide explicit, composable tools to manage configuration layers from files, environment variables, and the CLI in a structured, type-safe, and predictable way.
+# Dracon: The Engineer's Manual
 
-# 1. Configuration Loading & Pydantic Integration
+**Dracon** is a configuration engine that strictly separates **Composition** (YAML graph manipulation) from **Construction** (Python object instantiation). It creates a programmable configuration layer before your application logic ever sees the data.
 
-Dracon loads YAML from files or strings, validates it against Pydantic models, and returns structured Python objects.
+## 1. The Core Lifecycle
 
-## Loading Functions
+1.  **Composition:** Raw text is parsed. Instructions (`!if`, `!define`) modify the tree. Includes are resolved recursively. Merges (`<<:`) are applied.
+2.  **Construction:** The final node tree is traversed. Python objects (Pydantic models, primitives) are instantiated.
+3.  **Resolution:** Interpolations (`${...}`) are wrapped in `LazyInterpolable`. They evaluate **only upon access**.
+
+## 2. Python API
+
+### 2.1. Loading
 
 ```python
-from dracon import load, loads, DraconLoader
-from pydantic import BaseModel
+from dracon import load, loads, dump, DraconLoader
 
-class DBConfig(BaseModel):
-    host: str = 'localhost'
-    port: int = 5432
+# 1. Simple Load
+cfg = load(["base.yaml", "override.yaml"], context={"MyModel": MyModel})
 
-class AppConfig(BaseModel):
-    database: DBConfig
+# 2. Advanced Loader
+loader = DraconLoader(
+    context={"func": my_func},          # Available in ${...} and !Tags
+    interpolation_engine='asteval',     # 'asteval' (safe) or 'eval' (unsafe)
+    deferred_paths=['/secrets/**'],     # Force paths to be DeferredNodes
+    enable_shorthand_vars=True          # Allow $VAR alongside ${VAR}
+)
+cfg = loader.load("config.yaml")
 
-# Load from file, validating against a Pydantic model
-config = load('config.yaml', context={'AppConfig': AppConfig})
-
-# Load from string
-config = loads("database: {host: 'db.prod', port: 5433}", context={'AppConfig': AppConfig})
-
-# Load and merge multiple files (later files override earlier ones)
-config = load(['base.yaml', 'prod.yaml'], context={'AppConfig': AppConfig})
-
-# For more control, use DraconLoader
-loader = DraconLoader(context={'AppConfig': AppConfig})
-config = loader.load('config.yaml')
+# 3. Composition Only (Inspect the graph before construction)
+comp_result = loader.compose("config.yaml") # Returns CompositionResult
 ```
 
-### Loading Lifecycle
+### 2.2. Return Types
 
-When `load()` is called, the process unfolds in distinct stages:
+- **Default:** `Dracontainer` (Smart `Mapping`/`Sequence`). Resolves lazy values on access (`cfg.key`).
+- **Raw:** `load(..., raw_dict=True)`. Returns standard `dict`. Lazy values remain `LazyInterpolable`. Use `dracon.resolve_all_lazy(obj)` to force evaluation.
 
-1.  **Composition:** The raw YAML is parsed. Instructions like `!define`, `!if`, and `!each` are executed immediately, manipulating the internal YAML structure and context _before_ anything else.
-2.  **Include Resolution:** `!include` directives are resolved recursively. The content from included sources is loaded, composed, and inserted into the main tree.
-3.  **Merging:** `<<:` keys are processed in the order they appear. The strategies you define (`{+<}`, `[+>]`, etc.) are applied to combine different parts of the configuration tree.
-4.  **Construction:** The final, composed YAML tree is traversed to build Python objects. Pydantic models are validated and instantiated at this stage. Values containing `${...}` are wrapped in `LazyInterpolable` objects.
-5.  **Lazy Interpolation Resolution:** `${...}` expressions are only evaluated when their corresponding values are accessed in your Python code (or when `resolve_all_lazy()` is called). This allows them to reference other fully constructed values in the configuration.
+### 2.3. Serialization (Dumping)
 
-## Pydantic Model Construction in YAML
-
-Use `!TagName` to map a YAML node to a Pydantic model provided in the `context`. Using `!module.TypeName` is also supported; Dracon will attempt to import the module and resolve the type.
-
-```yaml
-# config.yaml
-# Dracon uses the DBConfig model from the context to validate this section
-database: !DBConfig
-  host: db.example.com
-  port: 5433
-
-# If a section matches the structure but lacks a tag, Dracon still attempts construction.
-# Using tags is more explicit and robust.
-app: !AppConfig
-  database:
-    host: db.example.com
-```
-
-## Dracon Containers vs. `raw_dict`
-
-By default, `load()` returns `dracon.dracontainer.Mapping` and `Sequence` objects. These custom containers automatically resolve lazy `${...}` expressions upon attribute or item access (e.g., `config.my_key` or `config['my_key']`).
-
-For standard Python types, use `load(..., raw_dict=True)`. With this option, the return value will contain unresolved `LazyInterpolable` objects for any `${...}` expressions. You must then manually call `dracon.resolve_all_lazy(config)` to evaluate all interpolations before use.
-
-# 2. YAML Language Extensions
-
-Dracon enhances YAML with instructions, includes, advanced merging, and interpolation.
-
-## 2.1. Composition Instructions
-
-Instructions manipulate the YAML structure and context during the composition phase.
-
-### Variable Definition: `!define` & `!set_default`
-
-Define variables for reuse within the configuration.
-
-- `!define`: Sets or overwrites a variable.
-- `!set_default`: Sets a variable only if it's not already defined.
-
-```yaml
-!define app_name: my-service
-!set_default env: ${getenv('ENV', 'dev')} # Set env only if not inherited
-
-service_name: ${app_name}-${env} # "my-service-dev"
-```
-
-### Conditional Logic: `!if`
-
-Include configuration blocks based on a condition evaluated at composition time.
-
-```yaml
-!define is_prod: ${getenv('ENV') == 'production'}
-
-settings:
-  # This block is only included if is_prod is true
-  !if ${is_prod}:
-    monitoring: full
-    retries: 5
-  # An if/then/else structure is also supported
-  !if ${is_prod}:
-    then: { workers: 8 }
-    else: { workers: 2 }
-```
-
-### Loops: `!each`
-
-Generate configuration nodes by iterating over a list or dictionary.
-
-```yaml
-!define environments: [dev, staging, prod]
-!define services: { web: 80, api: 8080 }
-
-# Generate a dict of environment-specific databases (shorthand syntax)
-databases:
-  !each(env) ${environments}:
-    ${env}_db:
-      host: db.${env}.local
-
-# Generate a list of service objects
-service_list:
-  !each(name , port) ${services.items()}:
-    - name: ${name}
-      port: ${port}
-```
-
-!!! note "Formal Dictionary Syntax"
-Dracon's shorthand is common, so recommended, but if for some reason you want full YAML compliance, you can use the formal _complex key_ syntax (`? :`) to generate dictionaries:
-`yaml
-    databases:
-      ? !each(env) ${environments}
-      : ${env}_db: { host: db.${env}.local }
-    `
-
-### Construction Control: `!noconstruct` & `__dracon__`
-
-Define helper nodes or templates that are available during composition but are removed from the final output.
-
-```yaml
-# Define a template but hide it from the final config
-!noconstruct &service_defaults:
-  timeout: 60
-  retries: 3
-
-# Alternative using a namespaced key
-__dracon__templates:
-  db_defaults: &db_defaults
-    pool_size: 10
-
-# Use the templates
-http_service:
-  <<: *service_defaults
-database:
-  <<: *db_defaults
-```
-
-## 2.2. Includes (`!include`)
-
-Compose configurations by including content from various sources.
-
-### Include Sources
-
-```yaml
-# From a file (relative path is robust with $DIR)
-database: !include file:$DIR/database.yaml
-
-# From an installed Python package
-defaults: !include pkg:my_package:configs/defaults.yaml
-
-# From an environment variable
-api_key: !include env:API_KEY
-
-# From a defined variable
-!define config_name: advanced
-current_config: !include var:config_name
-
-# From a YAML anchor (performs a deep copy)
-base_config: &base { timeout: 30 }
-service:
-  <<: *base
-```
-
-### Sub-key Selection (`@`)
-
-Load only a specific part of a source using `@` followed by a [KeyPath](#41-keypaths).
-
-```yaml
-# Include only the database host from settings.yaml
-db_host: !include file:settings.yaml@database.host
-```
-
-### Automatic Context Variables
-
-When including files (`file:`, `pkg:`), Dracon provides context variables like `$DIR` (directory of current file), `$FILE`, and `$FILE_STEM`.
-
-## 2.3. Merging (`<<:`)
-
-Dracon extends the YAML merge key (`<<:`) with fine-grained control over dictionary and list merging.
-
-**Syntax**: `<<{dict_opts}[list_opts]@target_path: source_node`
-
-- **Dictionary Options `{}`**:
-  - **Mode**: `+` (recursive merge, default) or `~` (replace keys).
-  - **Priority**: `>` (existing value wins, default) or `<` (new value wins).
-  - **Depth**: `+N` limits recursion depth to N levels.
-- **List Options `[]`**:
-  - **Mode**: `+` (concatenate) or `~` (replace, default).
-  - **Priority**: `>` (existing first/wins, default) or `<` (new first/wins).
-- **Target Path `@`**: Optional relative [KeyPath](#41-keypaths) to merge into.
-
-**Default Behavior**: `<<:` alone is equivalent to `<<{+>}[~>]` (recursive dict merge, existing wins; list replace, existing wins).
-
-```yaml
-# base.yaml: { a: 1, b: { x: 10 }, c: [1, 2] }
-
-# Recursive merge, new/source values win for dicts
-# <<{+<}: !include base.yaml
-# With { a: 2, b: { y: 20 } } -> { a: 2, b: { x: 10, y: 20 }, c: [1, 2] }
-
-# Concatenate lists, new/source list prepended (<)
-# <<[+<]: !include base.yaml
-# With { c: [3, 4] } -> { a: 1, b: { x: 10 }, c: [3, 4, 1, 2] }
-
-# Replace dictionaries completely, new/source wins
-# <<{~<}: !include base.yaml
-# With { b: { y: 20 } } -> { a: 1, b: { y: 20 }, c: [1, 2] }
-```
-
-## 2.4. Interpolation
-
-Embed dynamic Python expressions in YAML strings. The default engine is `asteval` (safe); `eval` can be enabled.
-
-### Lazy (`${...}`) vs. Immediate (`$(...)`)
-
-- **`${...}` (Lazy)**: Evaluated when the value is accessed. Can reference other final config values. Most common.
-- **`$(...)` (Immediate)**: Evaluated during YAML parsing. Useful for dynamic tags. Cannot reference other values.
-
-```yaml
-# Lazy: evaluated on access
-runtime_value: ${time.time()}
-
-# Immediate: evaluated during parsing
-load_time: $(time.time())
-config: !$(my_type_var) { ... }
-```
-
-### Triggering Resolution: `resolve_all_lazy()`
-
-By default, Dracon's custom containers (`Mapping`, `Sequence`) resolve `${...}` expressions on access. When using standard types (`raw_dict=True`) or needing all values finalized for inspection (like in tests), use `resolve_all_lazy()` to walk the configuration and evaluate all pending interpolations.
+Dracon supports round-tripping, preserving tags and structure where possible.
 
 ```python
-from dracon import loads, resolve_all_lazy
-
-# config contains LazyInterpolable objects initially
-config = loads("value: ${1+1}", raw_dict=True)
-
-# Now, config['value'] will be the integer 2
-resolve_all_lazy(config)
-assert config['value'] == 2
+yaml_str = dump(config_object)
 ```
 
-### Value Referencing (`@` and `&`)
+Classes can implement the `DraconDumpable` protocol (`dracon_dump_to_node(self, representer)`) to customize their YAML representation.
 
-- **`@` (KeyPath Reference)**: References the _final, constructed value_ of another key.
-- **`&` (Anchor Node Copy)**: References the _raw YAML node_ at an anchor, performing a deep copy.
+## 3. Composition Instructions (`!tags`)
 
-```yaml
-environment: prod
-defaults: &defaults { timeout: 30 }
+Executed during Phase 1. Modifications apply to the YAML graph.
 
-# KeyPath reference to final 'environment' value
-db_host: "db.${@/environment}.local" # -> "db.prod.local"
+### 3.1. Variable Definition
 
-# Node copy of 'timeout' from anchor
-service_timeout: ${&defaults.timeout * 2} # -> 60
-```
+Defines variables in the current scope's context. These are removed from the final configuration tree.
 
-### Key Interpolation
+- **`!define key: value`**: Sets `key` in the context.
+- **`!set_default key: value`**: Sets `key` only if it doesn't exist in the context (useful in included files).
 
-Generate dynamic dictionary keys using `!each` to create a mapping.
+### 3.2. Conditionals (`!if`)
 
-```yaml
-# Generate top-level keys like dev_database_url, staging_database_url, etc.
-!define environments: [dev, staging, prod]
-!each(env) ${environments}:
-  ${env}_database_url: "postgres://db.${env}.local"
-```
+Conditionally includes or removes nodes based on an expression.
 
-# 3. CLI Generation
+- **Syntax A (Shorthand):** `!if ${expr}: { content }`. If true, content is merged/included. If false, node is removed.
+- **Syntax B (Block):** Explicit branches.
+  ```yaml
+  !if ${env == 'prod'}:
+    then: { retries: 5 }
+    else: { retries: 1 }
+  ```
 
-Generate a full-featured, type-safe CLI directly from a Pydantic model.
+### 3.3. Iteration (`!each`)
 
-## Automatic Generation and Customization (`Arg`)
+Generates nodes by iterating over a list or dictionary.
 
-Use `make_program` to create a CLI. Customize arguments with `typing.Annotated` and `dracon.Arg`.
+- **Syntax:** `!each(var_name) ${iterable}: <template>`
+- **Lists:** Duplicates the template for each item, appending to the parent list.
+- **Maps:** Merges the generated nodes into the parent map.
+  - _Critical:_ Keys _must_ be dynamic (interpolated) to avoid collision.
+  - _Tuple Unpacking:_ The regex captures one variable. If iterating `dict.items()`, `${var}` is a tuple `(k, v)`. Access via `${var[0]}` and `${var[1]}`.
+
+### 3.4. Construction Control
+
+- **`!noconstruct`**: The node is processed (anchors/defines are valid) but the node is removed before the Construction phase.
+- **`__dracon__` Prefix**: Any key starting with `__dracon__` is treated as `!noconstruct`.
+
+## 4. The Merge Operator (`<<:`)
+
+Dracon extends the standard YAML merge key (`<<:`) to provide precise control over combination logic.
+
+**Syntax:** `<<{DICT_OPTS}[LIST_OPTS]@TARGET_PATH: <source>`
+
+### 4.1. Dictionary Strategy `{MODE/PRIORITY}`
+
+- **Mode:**
+  - `+` (**Append/Recurse**): Default. Merges keys. If values are dicts, recurses.
+  - `~` (**Replace**): If key exists, overwrites value entirely (no recursion).
+- **Priority:**
+  - `>` (**Existing Wins**): Default. Current node keeps its value on conflict.
+  - `<` (**New Wins**): Source node overwrites current node on conflict.
+- **Depth:** e.g., `{+2}` limits recursion to 2 levels.
+
+### 4.2. List Strategy `[MODE/PRIORITY]`
+
+- **Mode:** `~` (**Replace**, Default) or `+` (**Concatenate**).
+- **Priority:** `>` (**Existing First**, Default) or `<` (**New First**).
+
+### 4.3. Examples
+
+| Syntax     | Semantics  | Use Case                                                     |
+| :--------- | :--------- | :----------------------------------------------------------- |
+| `<<: *ref` | `{+>}[~>]` | Standard YAML. Recurse dicts (keep existing), Replace lists. |
+| `<<{<+}:`  | `{<+}[~>]` | **Override**. Recurse dicts, new values overwrite old.       |
+| `<<[+]:`   | `{+>}[+>]` | **Append**. Add items to end of lists.                       |
+| `<<[+<]:`  | `{+>}[+<]` | **Prepend**. Add items to start of lists.                    |
+| `<<@db:`   | `{<+}`     | Merge source into the `db` sub-key.                          |
+
+## 5. Includes & Loaders
+
+Inject external content at the current node.
+**Syntax:** `!include <scheme>:<path>@<selector>`
+
+### 5.1. Schemes
+
+- **`file:`** (Default): Filesystem. Context adds `$DIR`, `$FILE`, `$FILE_STEM`.
+- **`pkg:`**: Python resources (`pkg:package_name:path/inside/package.yaml`).
+- **`env:`**: Environment variable string.
+- **`var:`**: Dracon context variable (in-memory node).
+- **Custom:** Register via `custom_loaders` in `DraconLoader`.
+
+### 5.2. Selectors (`@`)
+
+Select a specific subtree from the target. Uses KeyPath syntax.
+
+- `!include file:conf.yaml@database.connections.0`
+
+## 6. Interpolation & References
+
+Expressions are strings enclosed in `${...}` (Runtime/Lazy) or `$(...)` (Parse-time/Immediate).
+
+### 6.1. Reference Operators
+
+- **`@path` (Value Reference)**: Retrieves the **final constructed value** at the given KeyPath.
+  - Example: `url: "http://${@/server.host}"`.
+- **`&path` (Node Copy)**: Retrieves the **raw YAML node** at composition time. Performs a **deep copy**.
+  - Example: `new_obj: ${&/templates.base_obj}`.
+
+### 6.2. KeyPath Syntax
+
+Used in `@` references, `@` merges, include selectors, and API calls.
+
+- Separator: `.`. Root: `/`. Escape: `\.`. Wildcards: `*` (matching only).
+
+## 7. Tags & Type Resolution
+
+- **Context:** `!MyModel`. Checks `loader.context["MyModel"]`.
+- **Import:** `!my.module.Class`. Attempts dynamic import.
+- **Pydantic Integration:** Dracon constructs a dict/list from the YAML node, then passes it to `Model.model_validate()`.
+
+## 8. Deferred Execution
+
+Mechanisms for values unavailable at load time (runtime secrets, Python loop objects).
+
+### 8.1. `!deferred` / `DeferredNode`
+
+Pauses the construction of an entire branch.
+
+- **YAML:** `output: !deferred "/tmp/${run_id}"`
+- **Result:** `DeferredNode` object holding the raw node and context.
+- **Usage:** Manually call `dracon.construct(node, context={'run_id': 123})`.
+- **Options:** `!deferred::clear_ctx=True` optimizes memory by dropping load-time context.
+
+### 8.2. `Resolvable[T]`
+
+Wrapper type for Pydantic models.
+
+- **Definition:** `field: Resolvable[int]`
+- **Usage:** `obj.field.resolve(context={...})`.
+
+## 9. CLI Generation (`dracon.commandline`)
+
+Dracon auto-generates a CLI from a Pydantic model.
 
 ```python
-from typing import Annotated, Literal
-from pydantic import BaseModel
-from dracon import Arg, make_program
+from dracon import make_program, Arg
+class Config(BaseModel):
+    env: Annotated[str, Arg(short='e', help="Env")]
+    db: DatabaseConfig # Nested model
+    secrets: Annotated[dict, Arg(is_file=True)] # Auto-load file content
 
-class CliConfig(BaseModel):
-    # Required positional argument
-    input_file: Annotated[str, Arg(positional=True, help="Input data file.")]
-    # Optional argument with short flag
-    env: Annotated[Literal['dev', 'prod'], Arg(short='e', help="Environment.")]
-    # Boolean flag
-    debug: Annotated[bool, Arg(help="Enable debug mode.")] = False
-    # List argument (accepts space-separated values)
-    tags: Annotated[list[str], Arg(help="Tags to apply.")] = []
-    # Argument that loads a file's content
-    secrets: Annotated[dict, Arg(is_file=True, help="Path to secrets file.")]
-
-program = make_program(CliConfig, name="myapp")
+program = make_program(Config)
 config, raw_args = program.parse_args()
 ```
 
-## Usage Patterns and Precedence
+### 9.1. Argument Precedence (Last Wins)
 
-Configuration is applied in the following order (later steps override earlier ones):
+1.  **Model Defaults:** Defined in Pydantic.
+2.  **Config Files (`+path`):** Positional args starting with `+`. Loaded/merged sequentially.
+3.  **Context Vars (`++`):** Arguments starting with `++` (`++k=v`) define context variables.
+4.  **CLI Flags:** Direct overrides (`--env prod`, `--db.host localhost`).
 
-1.  Pydantic model defaults.
-2.  Configuration files loaded via `+file.yaml`.
-3.  Context variables defined via `++var=value` (or `--define.var value` or `++var value`).
-4.  CLI argument overrides (`--arg value`).
+### 9.2. Advanced CLI Syntax
 
-```bash
-# Show auto-generated help
-myapp --help
+- **Explicit File Load:** `--field +config.yaml`.
+- **Reference Load:** `--field +config.yaml@sub.key`.
+- **Collections:** `--tags a b c` (List), `--opts k=v a.b=c` (Dict).
 
-# Basic usage
-myapp /path/to/data -e prod --tags web api --debug
+## 10. Debugging & Tooling
 
-# Load config files (merged in order)
-myapp /path/to/data +base.yaml +prod.yaml
+- **`dracon-print <file>`**: Load and print composed configuration tree.
+- **`resolve_all_lazy(obj)`**: Recursively force evaluation.
+- **Env Vars:** `ENABLE_FTRACE=1` (trace), `ENABLE_SER_DEBUG=1` (pickle debug).
 
-# Override nested values
-myapp /path/to/data -e prod --database.host db.override --database.port 5433
+---
 
-# Load a file's content as an argument's value
-myapp /path/to/data -e prod --secrets +secrets.yaml
-# ...or for any argument by prefixing with +
-myapp /path/to/data -e prod --api-key +/path/to/key.txt
+## 11. Real-World Architecture Example: "The Dynamic Skeleton"
 
-# Define a context variable for use in YAML interpolation
-myapp /path/to/data -e prod ++region=us-west-2
-# Space-separated syntax also works
-myapp /path/to/data -e prod ++region us-west-2
-```
+_Based on `biocompiler/biocomp-jobs/train`._
 
-## Collection Arguments (Lists & Dictionaries)
+This pattern separates the **topology** of the experiment (what files are involved) from the **hyperparameters** (what values are used) and the **runtime execution** (loggers, deferred jobs). It relies heavily on **dynamic includes** and **context injection**.
 
-Dracon provides user-friendly syntaxes for passing collections via the command line for fields typed as `List`, `Tuple`, `Set`, or `Dict`.
+### 11.1. The Components
 
-### List Arguments
+1.  **The Skeleton (`start.yaml`)**: The entry point. It defines _logic_, not just data. It declares variables (`!set_default`) that the CLI is expected to fill, acting as an interface contract.
+2.  **The Payload (`training_sets/`)**: A library of composable configurations. Files here are often Unions or Differences of other files.
+3.  **The Logic (`training_configs/`)**: Hyperparameter presets (e.g., `regression-nolayerinfo.yaml`).
+4.  **The Python Bridge (`run_training.py`)**: The runtime environment that injects live objects (like `best_model`) into deferred nodes.
 
-List-like arguments accept multiple values in two ways:
+### 11.2. `start.yaml`: The Hub
 
-1.  **Space-Separated Values:** Provide items directly after the flag.
-    ```bash
-    # Results in tags=['web', 'api', 'backend']
-    myapp --tags web api backend
-    ```
-2.  **YAML/JSON String:** Pass a single, quoted string representing the list.
-    ```bash
-    myapp --tags "['web', 'api', 'backend']"
-    ```
-
-### Dictionary Arguments
-
-Dictionary arguments can also be provided in multiple ways:
-
-1.  **Key-Value Pairs:** Use a `key=value` format, including dot notation for nested dictionaries.
-    ```bash
-    # Results in settings={'debug': True, 'app': {'name': 'myapp'}}
-    myapp --settings debug=true app.name=myapp
-    ```
-2.  **YAML/JSON String:** Pass a single, quoted string representing the dictionary.
-    ```bash
-    myapp --settings '{"debug": true, "app": {"name": "myapp"}}'
-    ```
-
-!!! note "Positional Collections"
-When a list or dictionary argument is marked as `positional=True`, it consumes all remaining non-option arguments. Therefore, a command can have **at most one** positional argument that is a collection type.
-
-# 4. Advanced Topics
-
-## 4.1. KeyPaths
-
-Dracon uses dot-separated paths to reference specific locations in a configuration.
-
-- **Separator**: `.` (dot).
-- **Root**: `/` at the beginning of a path.
-- **Parent**: `..` navigates up one level.
-- **Wildcards**: `*` (single segment), `**` (zero or more segments) in matching patterns.
-- **Escaping**: `\.` to escape a literal dot in a key name.
-
-**Example**: `@/database.host`, `!include file.yaml@services.0.port`, `deferred_paths=['/users/*/profile']`.
-
-## 4.2. Deferred Execution
-
-Delay construction or evaluation of parts of the configuration until runtime. Useful for post-processing CLI args that depend on other values for example.
-
-- **`DeferredNode`**: Pauses the _entire construction_ of a YAML node branch. Created with `!deferred` tag or `deferred_paths`. Manually triggered with `construct(node, context={...})`. Use for late-binding of context or delaying resource-intensive object creation.
-
-  ```yaml
-  # In YAML
-  output_path: !deferred "/data/${runtime_id}/logs"
-
-  # In Python
-  final_path = construct(config.output_path, context={'runtime_id': 'job_123'})
-  ```
-
-- **`Resolvable[T]`**: Delays the _final processing_ of a _single field's value_. Used as a type hint, often with `Arg(resolvable=True)`. Manually triggered with `value.resolve(context={...})`. You usually want `DeferredNode`.
-
-## 4.3. Secret Management
-
-Combine Dracon features for secure secret handling.
+The skeleton uses interpolation _inside_ include paths. This allows the CLI to swap entire dataset definitions by changing a single string variable.
 
 ```yaml
-# secrets.yaml
-database:
-  # Load from environment variable (recommended for deployment)
-  password: !include env:DB_PASSWORD
+# 1. Define Interface (CLI Targets)
+!set_default training_set_file: "composite_sets/default.yaml"
+!set_default base_config: "regression"
+!set_default runname: "default_run"
 
-  # Load from a gitignored file (useful for local dev)
-  username: !include file:$DIR/secrets/db_user.txt
+# 2. Dynamic Logic
+# Construct a path dynamically based on CLI input.
+# Dracon resolves ${training_set_file}, then executes the include.
+training_set: !CleanupFilter
+  source_set: !include file:${training_set_file}
 
-# Load from a secrets manager via a custom loader (advanced)
-api_key: !include vault:secret/data/myapp#api_key
+# 3. Layered Configuration
+# Load the base config (e.g. regression hyperparameters).
+# Strategy {+>} ensures start.yaml defaults (if any) take precedence, but usually
+# this merges the specific config parameters onto the skeleton.
+<<{+>}[~>]: !include file:$DIR/training_configs/${base_config}.yaml
+
+# 4. Deferred Runtime Jobs
+loggers:
+  # Plots need access to python variables 'step' and 'model' which don't exist yet.
+  # They will be constructed inside the training loop.
+  - <<: !include file:$DIR/loggers/plot_inner_nodes
 ```
+
+### 11.3. Execution Example
+
+The CLI command injects the "flesh" onto the "skeleton".
+
+```bash
+biocomp-train \
+  +biocomp-jobs/train/start.yaml \
+  ++training_set_file biocomp-jobs/train/basic_sets/1_Pgu_extra.yaml \
+  ++base_config "regression-nolayerinfo" \
+  ++runname "1_Pgu_extra"
+```
+
+**What happens internally:**
+
+1.  **Load `start.yaml`**: Dracon sees the `+`.
+2.  **Context Injection**: `++training_set_file`, `++base_config`, etc., are added to the global context.
+3.  **Composition**:
+    - `!include file:${training_set_file}` evaluates to `!include file:.../1_Pgu_extra.yaml`. The specific dataset is loaded.
+    - `!include file:.../${base_config}.yaml` evaluates and loads the regression config.
+    - `<<{+>}` merges the regression config into the root.
+4.  **Construction**: The `TrainingProgram` model (from `run_training.py`) validates the final structure.
+5.  **Runtime**: The Python script loops. At specific steps, it calls `construct(logger_node, context={'model': current_model})`, activating the deferred plotters defined in `start.yaml`.
+
+### 11.4. Why this pattern?
+
+- **Combinatorial Power**: You can test $M$ datasets against $N$ hyperparameter sets with $M+N$ config files (plus one skeleton), rather than $M \times N$ files.
+- **Context Awareness**: Configs know where they live (`$DIR`). You can move the entire folder structure, and relative includes inside `basic_sets/*.yaml` still work.
+- **Runtime Injection**: The config defines _what_ to plot, but the Python code provides the _data_ to plot, bridging the gap between static config and dynamic runtime state without hardcoding logic in Python.
