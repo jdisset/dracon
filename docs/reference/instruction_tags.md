@@ -160,7 +160,63 @@ Iterate over sequences and mappings:
         replicas: ${1 if env == 'dev' else 3}
 ```
 
+### Inline Sequence Expansion (Auto-Splice)
 
+When `!each` appears as an item inside a sequence and produces a sequence, the generated items are **spliced inline** into the parent sequence. This enables mixing static and dynamic items without explicit concatenation:
+
+```yaml
+!define services: [auth, api, worker]
+
+deployment_steps:
+  - name: initialize
+    command: setup
+
+  # Dynamic items spliced directly into the sequence
+  - !each(svc) ${services}:
+      - name: deploy_${svc}
+        command: kubectl apply -f ${svc}.yaml
+
+  - name: verify
+    command: healthcheck
+
+  # Another dynamic section
+  - !each(svc) ${services}:
+      - name: test_${svc}
+        command: pytest tests/${svc}/
+
+  - name: cleanup
+    command: teardown
+```
+
+Result:
+```yaml
+deployment_steps:
+  - {name: initialize, command: setup}
+  - {name: deploy_auth, command: kubectl apply -f auth.yaml}
+  - {name: deploy_api, command: kubectl apply -f api.yaml}
+  - {name: deploy_worker, command: kubectl apply -f worker.yaml}
+  - {name: verify, command: healthcheck}
+  - {name: test_auth, command: pytest tests/auth/}
+  - {name: test_api, command: pytest tests/api/}
+  - {name: test_worker, command: pytest tests/worker/}
+  - {name: cleanup, command: teardown}
+```
+
+This also works with nested `!each`:
+
+```yaml
+!define envs: [dev, prod]
+!define regions: [us, eu]
+
+deployments:
+  - name: init
+  - !each(env) ${envs}:
+      !each(region) ${regions}:
+        - name: deploy_${env}_${region}
+  - name: finalize
+
+# Result: [init, deploy_dev_us, deploy_dev_eu, deploy_prod_us, deploy_prod_eu, finalize]
+```
 
 ## Construction Control
 
