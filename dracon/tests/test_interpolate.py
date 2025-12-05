@@ -1097,3 +1097,126 @@ result:
         for c in ['c1', 'c2']
     ]
     assert config['result'] == expected_items
+
+
+def test_each_inline_in_sequence():
+    """Test that !each auto-splices when it's an item in a sequence."""
+    yaml_content = '''
+!define services: [svc1, svc2]
+
+tasks:
+  - name: setup
+  - !each(s) ${services}:
+      - name: deploy_${s}
+  - name: cleanup
+'''
+    config = dr.loads(yaml_content, raw_dict=True)
+    resolve_all_lazy(config)
+    assert config['tasks'] == [
+        {'name': 'setup'},
+        {'name': 'deploy_svc1'},
+        {'name': 'deploy_svc2'},
+        {'name': 'cleanup'},
+    ]
+
+
+def test_each_inline_multiple():
+    """Multiple !each items in sequence, each auto-splices."""
+    yaml_content = '''
+!define list1: [a, b]
+!define list2: [x, y]
+
+result:
+  - start
+  - !each(i) ${list1}:
+      - ${i}
+  - middle
+  - !each(j) ${list2}:
+      - ${j}
+  - end
+'''
+    config = dr.loads(yaml_content, raw_dict=True)
+    resolve_all_lazy(config)
+    assert config['result'] == ['start', 'a', 'b', 'middle', 'x', 'y', 'end']
+
+
+def test_each_inline_empty():
+    """Empty list produces no items when auto-splicing."""
+    yaml_content = '''
+!define items: []
+
+result:
+  - first
+  - !each(i) ${items}:
+      - ${i}
+  - last
+'''
+    config = dr.loads(yaml_content, raw_dict=True)
+    resolve_all_lazy(config)
+    assert config['result'] == ['first', 'last']
+
+
+def test_each_inline_nested():
+    """Nested !each inside sequence item."""
+    yaml_content = '''
+!define envs: [dev, prod]
+!define regions: [us, eu]
+
+deployments:
+  - name: init
+  - !each(env) ${envs}:
+      !each(region) ${regions}:
+        - name: deploy_${env}_${region}
+  - name: finalize
+'''
+    config = dr.loads(yaml_content, raw_dict=True)
+    resolve_all_lazy(config)
+    assert config['deployments'] == [
+        {'name': 'init'},
+        {'name': 'deploy_dev_us'},
+        {'name': 'deploy_dev_eu'},
+        {'name': 'deploy_prod_us'},
+        {'name': 'deploy_prod_eu'},
+        {'name': 'finalize'},
+    ]
+
+
+def test_each_inline_complex_items():
+    """Complex items preserved when auto-splicing."""
+    yaml_content = '''
+!define services: [{name: web, port: 80}, {name: db, port: 5432}]
+
+config:
+  - name: header
+  - !each(s) ${services}:
+      - name: ${s['name']}
+        port: ${s['port']}
+        enabled: true
+  - name: footer
+'''
+    config = dr.loads(yaml_content, raw_dict=True)
+    resolve_all_lazy(config)
+    assert config['config'] == [
+        {'name': 'header'},
+        {'name': 'web', 'port': 80, 'enabled': True},
+        {'name': 'db', 'port': 5432, 'enabled': True},
+        {'name': 'footer'},
+    ]
+
+
+def test_each_inline_at_edges():
+    """!each at start and end of sequence."""
+    yaml_content = '''
+!define prefix: [a, b]
+!define suffix: [y, z]
+
+result:
+  - !each(p) ${prefix}:
+      - ${p}
+  - middle
+  - !each(s) ${suffix}:
+      - ${s}
+'''
+    config = dr.loads(yaml_content, raw_dict=True)
+    resolve_all_lazy(config)
+    assert config['result'] == ['a', 'b', 'middle', 'y', 'z']
