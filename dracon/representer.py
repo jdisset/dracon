@@ -23,6 +23,7 @@ from dracon.nodes import (
 from typing import Any
 from typing_extensions import runtime_checkable, Protocol
 import logging
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +114,9 @@ class DraconRepresenter(RoundTripRepresenter):
         return node
 
     # --- representers for multi types (protocols/subclasses) ---
+
+    def represent_ndarray(self, data: np.ndarray) -> Node:
+        return self.represent_sequence(DEFAULT_SEQ_TAG, data.tolist(), flow_style=True)
 
     def represent_dracon_dumpable(self, data: DraconDumpable) -> Node:
         return data.dracon_dump_to_node(self)
@@ -320,6 +324,7 @@ DraconRepresenter.add_representer(LazyInterpolable, DraconRepresenter.represent_
 DraconRepresenter.add_representer(Resolvable, DraconRepresenter.represent_resolvable)
 DraconRepresenter.add_representer(DeferredNode, DraconRepresenter.represent_deferred_node)
 DraconRepresenter.add_representer(InterpolableNode, DraconRepresenter.represent_interpolable_node)
+DraconRepresenter.add_representer(np.ndarray, DraconRepresenter.represent_ndarray)
 
 DraconRepresenter.add_multi_representer(DraconDumpable, DraconRepresenter.represent_dracon_dumpable)
 DraconRepresenter.add_multi_representer(BaseModel, DraconRepresenter.represent_pydantic_model)
