@@ -79,6 +79,24 @@ Generates nodes by iterating over a list or dictionary.
   - _Critical:_ Keys _must_ be dynamic (interpolated) to avoid collision.
   - _Tuple Unpacking:_ The regex captures one variable. If iterating `dict.items()`, `${var}` is a tuple `(k, v)`. Access via `${var[0]}` and `${var[1]}`.
 
+#### Inline Sequence Expansion (Auto-Splice)
+
+When `!each` appears as an item in a sequence and produces a sequence, items are **spliced inline** rather than nested:
+
+```yaml
+!define services: [svc1, svc2]
+
+tasks:
+  - name: setup                    # Static item
+  - !each(s) ${services}:          # Dynamic items spliced inline
+      - name: deploy_${s}
+  - name: cleanup                  # Static item
+
+# Result: [{name: setup}, {name: deploy_svc1}, {name: deploy_svc2}, {name: cleanup}]
+```
+
+This enables mixing static and dynamic items in a single sequence without explicit concatenation.
+
 ### 3.4. Construction Control
 
 - **`!noconstruct`**: The node is processed (anchors/defines are valid) but the node is removed before the Construction phase.
