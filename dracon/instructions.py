@@ -2,25 +2,21 @@
 # MIT License - see LICENSE file for details.
 
 ## {{{                          --     imports     --
-from typing import Optional, Any
+from typing import Optional
 import re
-import time
-from pydantic import BaseModel
-from enum import Enum
-from dracon.utils import dict_like, DictLike, ListLike, ftrace, deepcopy, node_repr, ser_debug
+from dracon.utils import ftrace, deepcopy
 from dracon.composer import (
     CompositionResult,
     walk_node,
     DraconMappingNode,
     DraconSequenceNode,
-    IncludeNode,
 )
 from dracon.utils import ShallowDict
 from ruamel.yaml.nodes import Node
-from dracon.keypath import KeyPath, ROOTPATH, KeyPathToken, MAPPING_KEY
+from dracon.keypath import KeyPath, KeyPathToken, MAPPING_KEY
 from dracon.merge import merged, MergeKey, add_to_context
 from dracon.interpolation import evaluate_expression, InterpolableNode
-from dracon.deferred import DeferredNode, make_deferred
+from dracon.deferred import DeferredNode
 from functools import partial
 from dracon.nodes import DraconScalarNode
 import logging
@@ -118,9 +114,9 @@ class Define(Instruction):
             value = loader.load_composition_result(CompositionResult(root=value_node))
 
         var_name = key_node.value
-        assert (
-            var_name.isidentifier()
-        ), f"Invalid variable name in {self.__class__.__name__} instruction: {var_name}"
+        assert var_name.isidentifier(), (
+            f"Invalid variable name in {self.__class__.__name__} instruction: {var_name}"
+        )
 
         del parent_node[var_name]
 
@@ -210,23 +206,51 @@ class Each(Instruction):
             return Each(var_name)
         return None
 
+    def _generate_sequence_items(self, list_like, value_node, key_node, mkey):
+        """Generate expanded sequence items from !each iteration."""
+        result = []
+        for item in list_like:
+            item_ctx = ShallowDict({self.var_name: item})
+            for node in value_node.value:
+                if isinstance(node, DeferredNode):
+                    new_value_node = node.copy(deepcopy_composition=False)
+                else:
+                    new_value_node = deepcopy(node)
+                walk_node(
+                    node=new_value_node,
+                    callback=partial(add_to_context, item_ctx, merge_key=mkey),
+                )
+                result.append(new_value_node)
+        return result
+
+    def _is_inside_sequence(self, comp_res, path):
+        """Check if this !each's parent mapping is an item inside a sequence."""
+        parent_path = path.parent
+        if len(parent_path) < 2:
+            return False, None, None
+        grandparent_path = parent_path.parent
+        try:
+            grandparent = grandparent_path.get_obj(comp_res.root)
+            if isinstance(grandparent, DraconSequenceNode):
+                idx = int(parent_path[-1])
+                return True, grandparent, idx
+        except (KeyError, ValueError, IndexError):
+            pass
+        return False, None, None
+
     @ftrace(inputs=False, watch=[])
     def process(self, comp_res: CompositionResult, path: KeyPath, loader):
         if not path.is_mapping_key():
             raise ValueError(f"instruction 'each' must be a mapping key, but got {path}")
 
-        base_key_node = path.get_obj(comp_res.root)
-        base_value_node = path.removed_mapping_key().get_obj(comp_res.root)
-
-        key_node = base_key_node
-        value_node = base_value_node
-
+        key_node = path.get_obj(comp_res.root)
+        value_node = path.removed_mapping_key().get_obj(comp_res.root)
         parent_node = path.parent.get_obj(comp_res.root)
 
         assert isinstance(parent_node, DraconMappingNode)
-        assert isinstance(
-            key_node, InterpolableNode
-        ), f"Expected an interpolable node for 'each' instruction, but got {key_node}, a {type(key_node)}"
+        assert isinstance(key_node, InterpolableNode), (
+            f"Expected an interpolable node for 'each' instruction, but got {key_node}, a {type(key_node)}"
+        )
 
         list_like = evaluate_expression(
             key_node.value,
@@ -237,58 +261,52 @@ class Each(Instruction):
             source_context=key_node.source_context,
         )
 
-        logger.debug(
-            f"Processing each instruction, key_node.context.{self.var_name}={key_node.context.get(self.var_name)}"
+        mkey = MergeKey(raw='{<~}[~<]')
+
+        # Check if we're a single-key mapping inside a sequence (auto-splice case)
+        in_sequence, grandparent, seq_idx = self._is_inside_sequence(comp_res, path)
+        should_splice = (
+            in_sequence and len(parent_node) == 1 and isinstance(value_node, DraconSequenceNode)
         )
 
-        # remove the original each instruction node
+        if should_splice:
+            # Auto-splice: expand items directly into grandparent sequence
+            expanded = self._generate_sequence_items(list_like, value_node, key_node, mkey)
+            new_value = grandparent.value[:seq_idx] + expanded + grandparent.value[seq_idx + 1 :]
+            new_grandparent = DraconSequenceNode(
+                tag=grandparent.tag,
+                value=new_value,
+                start_mark=grandparent.start_mark,
+                end_mark=grandparent.end_mark,
+                flow_style=grandparent.flow_style,
+                comment=grandparent.comment,
+                anchor=grandparent.anchor,
+            )
+            comp_res.set_at(path.parent.parent, new_grandparent)
+            return comp_res
+
+        # Standard case: remove original and build new parent
         new_parent = parent_node.copy()
         del new_parent[key_node.value]
 
-        mkey = MergeKey(raw='{<~}[~<]')
-        # Handle sequence values
         if isinstance(value_node, DraconSequenceNode):
-            assert len(parent_node) == 1, "Cannot use !each with a sequence node in a mapping"
+            # Must be sole key if producing sequence (replaces parent with sequence)
+            assert len(parent_node) == 1, (
+                "Cannot use !each with sequence value unless it's the only key"
+            )
             new_parent = DraconSequenceNode.from_mapping(parent_node, empty=True)
-            logger.debug(f"Processing an each instruction with a sequence node. {list_like=}")
+            for node in self._generate_sequence_items(list_like, value_node, key_node, mkey):
+                new_parent.append(node)
 
-            for item in list_like:
-                logger.debug(f"  each: {item=}")
-                item_ctx = ShallowDict({self.var_name: item})
-                logger.debug(
-                    f"  after merge into key_node.ctx, item_ctx.{self.var_name}={item_ctx.get(self.var_name)}"
-                )
-                for node in value_node.value:
-                    if isinstance(node, DeferredNode):
-                        new_value_node = node.copy(deepcopy_composition=False)
-                    else:
-                        new_value_node = deepcopy(node)
-
-                    walk_node(
-                        node=new_value_node,
-                        callback=partial(add_to_context, item_ctx, merge_key=mkey),
-                    )
-
-                    new_parent.append(new_value_node)
-
-        # Handle mapping values
         elif isinstance(value_node, DraconMappingNode):
-            logger.debug(f"Processing an each instruction with a dict node. {list_like=}")
-
-            # check if the mapping contains exactly one key that is an instruction
-            # if so, we need to handle nesting specially by wrapping in a sequence
             value_items = list(value_node.items())
-            has_single_instruction_child = (
-                len(value_items) == 1 and match_instruct(value_items[0][0].tag)
+            has_single_instruction_child = len(value_items) == 1 and match_instruct(
+                value_items[0][0].tag
             )
 
             if has_single_instruction_child:
-                # the only child is an instruction - we need to process each iteration
-                # with proper context, then immediately process the nested instruction
                 inner_knode, inner_vnode = value_items[0]
                 inner_inst = match_instruct(inner_knode.tag)
-
-                # collect all results first, then determine the output type
                 all_results = []
 
                 for item in list_like:
@@ -300,23 +318,39 @@ class Each(Instruction):
                         node=new_inner_vnode,
                         callback=partial(add_to_context, item_ctx, merge_key=mkey),
                     )
-                    # create a temporary composition with just this instruction
-                    # and process it immediately
                     temp_mapping = DraconMappingNode(
-                        tag='tag:yaml.org,2002:map',
-                        value=[(new_inner_knode, new_inner_vnode)]
+                        tag='tag:yaml.org,2002:map', value=[(new_inner_knode, new_inner_vnode)]
                     )
                     temp_comp = CompositionResult(root=temp_mapping)
                     temp_path = KeyPath([KeyPathToken.ROOT, MAPPING_KEY, new_inner_knode.value])
                     temp_comp = inner_inst.process(temp_comp, temp_path, loader)
                     all_results.append(temp_comp.root)
 
-                # determine result type from first result and merge all
                 if all_results and isinstance(all_results[0], DraconSequenceNode):
-                    new_parent = DraconSequenceNode.from_mapping(parent_node, empty=True)
+                    expanded = []
                     for result in all_results:
-                        for elem in result.value:
-                            new_parent.append(elem)
+                        expanded.extend(result.value)
+                    # Check for auto-splice (parent is single-key mapping inside sequence)
+                    if in_sequence and len(parent_node) == 1:
+                        new_value = (
+                            grandparent.value[:seq_idx]
+                            + expanded
+                            + grandparent.value[seq_idx + 1 :]
+                        )
+                        new_grandparent = DraconSequenceNode(
+                            tag=grandparent.tag,
+                            value=new_value,
+                            start_mark=grandparent.start_mark,
+                            end_mark=grandparent.end_mark,
+                            flow_style=grandparent.flow_style,
+                            comment=grandparent.comment,
+                            anchor=grandparent.anchor,
+                        )
+                        comp_res.set_at(path.parent.parent, new_grandparent)
+                        return comp_res
+                    new_parent = DraconSequenceNode.from_mapping(parent_node, empty=True)
+                    for elem in expanded:
+                        new_parent.append(elem)
                 else:
                     new_parent = parent_node.copy()
                     new_parent.value = []
@@ -330,9 +364,6 @@ class Each(Instruction):
                         new_vnode = deepcopy(vnode)
                         new_knode = deepcopy(knode)
 
-                        # check if this key is itself an instruction (e.g. nested !each)
-                        # if so, don't evaluate it - just propagate context and let the
-                        # instruction processor handle it in a subsequent pass
                         if match_instruct(new_knode.tag):
                             add_to_context(item_ctx, new_knode, mkey)
                             walk_node(
@@ -342,11 +373,9 @@ class Each(Instruction):
                             new_parent.append((new_knode, new_vnode))
                             continue
 
-                        # can't add the knode directly to the new_parent, as that would result in duplicate keys
-                        # we need to evaluate the key node first
-                        assert isinstance(
-                            knode, InterpolableNode
-                        ), f"Keys inside an !each instruction must be interpolable (so that they're unique), but got {knode}"
+                        assert isinstance(knode, InterpolableNode), (
+                            f"Keys inside an !each instruction must be interpolable (so that they're unique), but got {knode}"
+                        )
                         add_to_context(item_ctx, new_knode, mkey)
                         scalar_knode = DraconScalarNode(
                             tag=new_knode.tag,
@@ -360,15 +389,12 @@ class Each(Instruction):
                             node=new_vnode,
                             callback=partial(add_to_context, item_ctx, merge_key=mkey),
                         )
-
         else:
             raise ValueError(
                 f"Invalid value node for 'each' instruction: {value_node} of type {type(value_node)}"
             )
 
-        # del parent_node[key_node.value]
         comp_res.set_at(path.parent, new_parent)
-
         return comp_res
 
 
@@ -401,11 +427,11 @@ class If(Instruction):
       else: value_if_false`
 
     Evaluate the truthiness of expr (if it's an interpolation, it evaluates it).
-    
+
     If then/else keys are present:
     - If truthy, use the 'then' branch value
     - If falsy, use the 'else' branch value (or remove if no else)
-    
+
     If no then/else keys (shorthand):
     - If truthy, include the content
     - If falsy, remove the entire node
@@ -423,7 +449,7 @@ class If(Instruction):
         """Extract then/else nodes, returns (then_node, else_node, is_then_else_style)"""
         if not isinstance(value_node, DraconMappingNode):
             return None, None, False
-            
+
         keys = [k.value for k, _ in value_node.items()]
         if 'then' in keys or 'else' in keys:
             then_node = else_node = None
@@ -441,10 +467,12 @@ class If(Instruction):
             for key, node in content_node.items():
                 parent_node.append((key, node))
         elif isinstance(content_node, DraconSequenceNode):
-            raise NotImplementedError("if statement containing a sequence is not yet implemented")
+            comp_res.set_at(parent_path, content_node)
         else:
             # scalar node - replace parent entirely
-            assert isinstance(parent_node, DraconMappingNode), 'if statement with scalar-like must appear in a mapping'
+            assert isinstance(parent_node, DraconMappingNode), (
+                'if statement with scalar-like must appear in a mapping'
+            )
             comp_res.set_at(parent_path, content_node)
 
     @ftrace(watch=[])
@@ -464,9 +492,16 @@ class If(Instruction):
         # evaluate condition
         if isinstance(key_node, InterpolableNode):
             from dracon.merge import merged, MergeKey
-            eval_context = merged(key_node.context or {}, loader.context or {}, MergeKey(raw='{<+}'))
+
+            eval_context = merged(
+                key_node.context or {}, loader.context or {}, MergeKey(raw='{<+}')
+            )
             result = evaluate_expression(
-                key_node.value, path, comp_res.root, engine=loader.interpolation_engine, context=eval_context
+                key_node.value,
+                path,
+                comp_res.root,
+                engine=loader.interpolation_engine,
+                context=eval_context,
             )
             condition = bool(result)
         else:
@@ -474,7 +509,7 @@ class If(Instruction):
 
         # check for then/else pattern
         then_node, else_node, is_then_else = self._get_then_else_nodes(value_node)
-        
+
         if is_then_else:
             # then/else format
             selected_node = then_node if condition else else_node
