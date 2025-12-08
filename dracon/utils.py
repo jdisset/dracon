@@ -26,10 +26,8 @@ from typing import (
 
 import pickle
 import copy
-import sys
 from dracon.trace import ftrace as ftrace
 import os
-from dracon.trace import with_indent
 
 import logging
 from collections.abc import MutableMapping
@@ -164,11 +162,21 @@ def list_like(obj) -> bool:
 
 
 def dracontainer_aware_json(obj):
-
+    """JSON encoder for dracon containers and other non-standard types."""
     if list_like(obj):
-        return [obj for obj in obj]
+        return list(obj)
     elif dict_like(obj):
-        return {k: v for k, v in obj.items()}
+        # convert non-string keys to strings for JSON compatibility
+        return {
+            (str(k) if not isinstance(k, (str, int, float, bool, type(None))) else k): v
+            for k, v in obj.items()
+        }
+    elif isinstance(obj, tuple):
+        return list(obj)
+    elif hasattr(obj, '__dict__'):
+        return {k: v for k, v in obj.__dict__.items() if not k.startswith('_')}
+    else:
+        return str(obj)
 
 
 def clean_context_keys(context: DictLike) -> DictLike:
@@ -566,7 +574,11 @@ def node_repr(
         return f"<circular reference to {node.__class__.__name__}>"
 
     if max_depth is not None and _depth > max_depth:
-        return f"{prefix}└─<... truncated at depth {max_depth}>\n" if not is_root else "<... truncated>"
+        return (
+            f"{prefix}└─<... truncated at depth {max_depth}>\n"
+            if not is_root
+            else "<... truncated>"
+        )
 
     _seen.add(node_id)
 
