@@ -200,21 +200,33 @@ class DraconLoader:
             composed_content = compose_config_from_str(self.yaml, content)
         return self.post_process_composed(composed_content)
 
-    def load_node(self, node, target_type: Optional[Type] = None):  # add target_type
+    def load_node(self, node, target_type: Optional[Type] = None):
         from pydantic import ValidationError
+        from dracon.diagnostics import SourceContext
+        from dracon.utils import node_repr
 
         try:
             self.yaml.constructor.referenced_nodes = self.referenced_nodes
             self.yaml.constructor.dracon_loader = self
             return self.yaml.constructor.construct_object(node, target_type=target_type)
         except ValidationError:
-            # preserve Pydantic ValidationErrors for proper handling by consumers
             raise
         except DraconError:
-            # preserve DraconErrors that already have context
             raise
         except Exception as e:
-            raise DraconError(f"Error loading config node {str(node)[:200]}...") from e
+            ctx = getattr(node, 'source_context', None) or getattr(node, '_source_context', None)
+            if ctx is None and hasattr(node, 'start_mark'):
+                ctx = SourceContext.from_mark(node.start_mark)
+
+            tag_info = getattr(node, 'tag', '')
+            if tag_info and tag_info.startswith('!'):
+                tag_info = f" (tag: {tag_info})"
+            else:
+                tag_info = ""
+
+            node_str = node_repr(node, max_depth=3)
+            msg = f"Error loading config node{tag_info}: {type(e).__name__}: {e}\n{node_str}"
+            raise DraconError(msg, context=ctx, cause=e) from e
 
     def load_composition_result(self, compres: CompositionResult, post_process=True):
         if post_process:

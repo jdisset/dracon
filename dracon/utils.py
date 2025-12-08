@@ -553,8 +553,10 @@ def node_repr(
     enable_colors=False,
     context_paths=None,
     context_filter=None,
-    show_biggest_context=0,  # show n biggest variables in context
+    show_biggest_context=0,
+    max_depth=None,
     _seen=None,
+    _depth=0,
 ):
     if _seen is None:
         _seen = set()
@@ -562,6 +564,9 @@ def node_repr(
     node_id = id(node)
     if node_id in _seen:
         return f"<circular reference to {node.__class__.__name__}>"
+
+    if max_depth is not None and _depth > max_depth:
+        return f"{prefix}└─<... truncated at depth {max_depth}>\n" if not is_root else "<... truncated>"
 
     _seen.add(node_id)
 
@@ -751,7 +756,6 @@ def node_repr(
                     key_repr = f'noval(<{type(key)}>{key}) [KEY]'
                 output += key_line_prefix + key_repr + '\n'
 
-                # Recursively print the value
                 child_output = node_repr(
                     value,
                     prefix=child_prefix + (EMPTY if is_last_item else VERTICAL),
@@ -761,7 +765,9 @@ def node_repr(
                     context_paths=context_paths,
                     context_filter=context_filter,
                     show_biggest_context=show_biggest_context,
+                    max_depth=max_depth,
                     _seen=_seen,
+                    _depth=_depth + 1,
                 )
                 output += child_output
 
@@ -781,7 +787,9 @@ def node_repr(
                     context_paths=context_paths,
                     context_filter=context_filter,
                     show_biggest_context=show_biggest_context,
+                    max_depth=max_depth,
                     _seen=_seen,
+                    _depth=_depth + 1,
                 )
                 output += child_output
 

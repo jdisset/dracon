@@ -118,7 +118,7 @@ class EvaluationError(DraconError):
                  available_symbols: Optional[dict[str, Any]] = None):
         super().__init__(message, context, cause)
         self.expression = expression
-        # store a filtered version of available symbols (exclude internal/large objects)
+        self._raw_symbols = available_symbols
         self.available_symbols = _filter_symbols_for_display(available_symbols) if available_symbols else None
 
 
@@ -266,32 +266,93 @@ def format_error(error: DraconError, source_lines: Optional[dict[str, Sequence[s
     return "\n".join(lines)
 
 
-def format_error_rich(error: DraconError, source_lines: Optional[dict[str, Sequence[str]]] = None) -> "Panel":
+def _get_real_file_path(ctx: SourceContext, available_symbols: Optional[dict] = None) -> str:
+    """Get a real file path from context, falling back to include trace or available symbols."""
+    fp = ctx.file_path
+    if fp and not fp.startswith('<'):
+        return fp
+    if ctx.include_trace:
+        for loc in reversed(ctx.include_trace):
+            if loc.file_path and not loc.file_path.startswith('<'):
+                return loc.file_path
+    if available_symbols:
+        for key in ('FILE_PATH', 'FILE'):
+            val = available_symbols.get(key)
+            if val and isinstance(val, str) and not val.startswith('<'):
+                return val.split(' ')[0].strip("'\"")
+    return fp
+
+
+def _format_error_message(error: DraconError) -> str:
+    """Format nested error messages with indentation for readability."""
+    import re
+    msg = str(error)
+
+    # Pattern: "Error loading config node (tag: !Something): ExceptionType: message"
+    # We want to format this as:
+    #   Error loading config node (tag: !Something):
+    #     ExceptionType:
+    #       message
+
+    # First handle the "Error evaluating expression: Error loading config node" pattern
+    pattern = r'^(Error evaluating expression): (Error loading config node \(tag: [^)]+\)): ([A-Za-z]+Error): (.+)$'
+    match = re.match(pattern, msg, re.DOTALL)
+    if match:
+        outer_msg, inner_msg, exc_type, exc_detail = match.groups()
+        return f"{outer_msg}:\n  {inner_msg}:\n    {exc_type}:\n      {exc_detail.strip()}"
+
+    # Simpler pattern without the outer "Error evaluating expression"
+    pattern2 = r'^(Error loading config node \(tag: [^)]+\)): ([A-Za-z]+Error): (.+)$'
+    match2 = re.match(pattern2, msg, re.DOTALL)
+    if match2:
+        inner_msg, exc_type, exc_detail = match2.groups()
+        return f"{inner_msg}:\n  {exc_type}:\n    {exc_detail.strip()}"
+
+    # Generic pattern: split on common exception types
+    for exc in ['FileNotFoundError', 'TypeError', 'ValueError', 'AttributeError', 'KeyError', 'ImportError']:
+        pattern3 = rf'^(.+?): ({exc}): (.+)$'
+        match3 = re.match(pattern3, msg, re.DOTALL)
+        if match3:
+            prefix, exc_type, detail = match3.groups()
+            return f"{prefix}:\n  {exc_type}:\n    {detail.strip()}"
+
+    return msg
+
+
+def format_error_rich(error: DraconError, source_lines: Optional[dict[str, Sequence[str]]] = None):
     from rich.panel import Panel
     from rich.text import Text
     from rich.box import ROUNDED
 
     t = Text()
-    t.append(str(error), style="bold red")
+    formatted_msg = _format_error_message(error)
+    t.append(formatted_msg, style="bold red")
     t.append("\n\n")
+
+    raw_symbols = getattr(error, '_raw_symbols', None) if isinstance(error, EvaluationError) else None
 
     if error.context is not None:
         ctx = error.context
         base_dir = _get_base_dir(ctx)
         display_path = ctx.file_path
-        if base_dir and ctx.include_trace:
+        real_file_path = _get_real_file_path(ctx, raw_symbols)
+
+        if display_path.startswith('<') and real_file_path != display_path:
+            display_path = f"{real_file_path} (expression)"
+        elif base_dir and ctx.include_trace:
             display_path = _simplify_path(ctx.file_path, base_dir)
 
         t.append("Location: ", style="bold")
         t.append(display_path, style="cyan")
         t.append(f" line {ctx.line}", style="yellow")
         if ctx.keypath:
-            t.append(f" at ", style="dim")
+            t.append(" at ", style="dim")
             t.append(ctx.keypath, style="green")
         t.append("\n")
 
-        if source_lines and ctx.file_path in source_lines:
-            file_lines = source_lines[ctx.file_path]
+        source_file = ctx.file_path if ctx.file_path in (source_lines or {}) else real_file_path
+        if source_lines and source_file in source_lines:
+            file_lines = source_lines[source_file]
             if 0 < ctx.line <= len(file_lines):
                 t.append("\n")
                 for n in range(max(1, ctx.line - 1), min(len(file_lines), ctx.line + 1) + 1):
@@ -352,27 +413,53 @@ def format_error_rich(error: DraconError, source_lines: Optional[dict[str, Seque
     return Panel(t, title="[bold red]Configuration Error[/]", box=ROUNDED, border_style="red", expand=False, padding=(1, 2))
 
 
+def _is_construction_error(error: DraconError) -> bool:
+    """Check if this error is from Python object construction (not just config parsing)."""
+    if error.__cause__ is None:
+        return False
+    # Check if the error message or cause suggests object construction failure
+    error_msg = str(error).lower()
+    construction_indicators = [
+        'error loading config node',
+        'deferred node construction failed',
+        'error evaluating expression',
+        'failed to validate',
+        '__init__',
+        'construction',
+    ]
+    if any(ind in error_msg for ind in construction_indicators):
+        return True
+    # Also check cause type - common Python errors during construction
+    cause = error.__cause__
+    if isinstance(cause, (TypeError, ValueError, AttributeError, KeyError, ImportError)):
+        return True
+    return False
+
+
 def print_dracon_error(error: DraconError, source_lines: Optional[dict[str, Sequence[str]]] = None, use_rich: bool = True) -> None:
     import sys
     debug = os.environ.get("DRACON_DEBUG", "").lower() in ("1", "true", "yes")
+    # Always show traceback for construction errors that have real Python exceptions
+    show_traceback = debug or (error.__cause__ is not None and _is_construction_error(error))
 
     if use_rich:
         try:
             from rich.console import Console
             console = Console(stderr=True)
             console.print(format_error_rich(error, source_lines))
-            if debug and error.__cause__:
+            if show_traceback and error.__cause__:
                 import traceback
-                console.print("\n[dim]Python traceback:[/dim]")
-                console.print("".join(traceback.format_exception(type(error.__cause__), error.__cause__, error.__cause__.__traceback__)), style="dim")
+                console.print("\n[bold cyan]Python traceback (from underlying error):[/bold cyan]")
+                tb_lines = traceback.format_exception(type(error.__cause__), error.__cause__, error.__cause__.__traceback__)
+                console.print("".join(tb_lines))
             return
         except ImportError:
             pass
 
     print(format_error(error, source_lines), file=sys.stderr)
-    if debug and error.__cause__:
+    if show_traceback and error.__cause__:
         import traceback
-        print("\nPython traceback:", file=sys.stderr)
+        print("\nPython traceback (from underlying error):", file=sys.stderr)
         traceback.print_exception(type(error.__cause__), error.__cause__, error.__cause__.__traceback__)
 
 
@@ -390,12 +477,17 @@ def load_source_lines(error: DraconError) -> dict[str, Sequence[str]]:
         if loc.file_path and not loc.file_path.startswith('<'):
             files_to_load.add(loc.file_path)
 
+    raw_symbols = getattr(error, '_raw_symbols', None) if isinstance(error, EvaluationError) else None
+    real_fp = _get_real_file_path(ctx, raw_symbols)
+    if real_fp and not real_fp.startswith('<'):
+        files_to_load.add(real_fp)
+
     for fp in files_to_load:
         try:
             with open(fp, 'r') as f:
                 result[fp] = f.readlines()
         except Exception:
-            pass  # skip files we can't read
+            pass
 
     return result
 
