@@ -445,21 +445,28 @@ def print_dracon_error(error: DraconError, source_lines: Optional[dict[str, Sequ
     if use_rich:
         try:
             from rich.console import Console
-            console = Console(stderr=True)
+            console = Console(stderr=True, width=120)  # wider for better readability
             console.print(format_error_rich(error, source_lines))
+            # always show cause summary if present
+            if error.__cause__:
+                console.print(f"\n[bold yellow]Caused by:[/] {type(error.__cause__).__name__}: {error.__cause__}")
+            # show full traceback for construction errors or in debug mode
             if show_traceback and error.__cause__:
                 import traceback
-                console.print("\n[bold cyan]Python traceback (from underlying error):[/bold cyan]")
-                tb_lines = traceback.format_exception(type(error.__cause__), error.__cause__, error.__cause__.__traceback__)
-                console.print("".join(tb_lines))
+                console.print("\n[bold cyan]Python traceback:[/bold cyan]")
+                console.print("".join(traceback.format_exception(type(error.__cause__), error.__cause__, error.__cause__.__traceback__)))
             return
         except ImportError:
             pass
 
     print(format_error(error, source_lines), file=sys.stderr)
+    # always show cause summary if present
+    if error.__cause__:
+        print(f"\nCaused by: {type(error.__cause__).__name__}: {error.__cause__}", file=sys.stderr)
+    # show full traceback for construction errors or in debug mode
     if show_traceback and error.__cause__:
         import traceback
-        print("\nPython traceback (from underlying error):", file=sys.stderr)
+        print("\nPython traceback:", file=sys.stderr)
         traceback.print_exception(type(error.__cause__), error.__cause__, error.__cause__.__traceback__)
 
 
