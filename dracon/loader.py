@@ -64,6 +64,8 @@ DEFAULT_CONTEXT = {
     'basename': os.path.basename,
     'dirname': os.path.dirname,
     'expanduser': os.path.expanduser,
+    # datetime
+    'now': lambda fmt='%Y-%m-%d %H:%M:%S': __import__('datetime').datetime.now().strftime(fmt),
 }
 
 

@@ -96,6 +96,19 @@ script_name: ${basename(__file__)}
 script_dir: ${dirname(__file__)}
 ```
 
+### Date/Time Functions
+
+```yaml
+# Current datetime (default format: YYYY-MM-DD HH:MM:SS)
+timestamp: ${now()}
+
+# Custom format using strftime codes
+date_only: ${now('%Y-%m-%d')}
+time_only: ${now('%H:%M:%S')}
+iso_format: ${now('%Y-%m-%dT%H:%M:%S')}
+filename_safe: ${now('%Y%m%d_%H%M%S')}
+```
+
 ### Dracon Functions
 
 ```yaml
