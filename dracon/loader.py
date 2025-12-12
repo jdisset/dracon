@@ -55,6 +55,11 @@ logger = logging.getLogger(__name__)
 ## {{{                       --     DraconLoader     --
 
 
+def _now_func(fmt='%Y-%m-%d %H:%M:%S'):
+    from datetime import datetime
+    return datetime.now().strftime(fmt)
+
+
 DEFAULT_CONTEXT = {
     # some relatively safe os functions (not all of them are safe)
     'getenv': os.getenv,
@@ -65,7 +70,7 @@ DEFAULT_CONTEXT = {
     'dirname': os.path.dirname,
     'expanduser': os.path.expanduser,
     # datetime
-    'now': lambda fmt='%Y-%m-%d %H:%M:%S': __import__('datetime').datetime.now().strftime(fmt),
+    'now': _now_func,
 }
 
 
@@ -652,3 +657,63 @@ def serialize_loaded_config(c: DictLike) -> str | DictLike:
         if origin is not None:
             return origin
     return c
+
+
+def make_callable(
+    path_or_node,
+    context: Optional[Dict[str, Any]] = None,
+    context_types: Optional[List[type]] = None,
+    auto_context: bool = False,
+    **loader_kwargs,
+):
+    """
+    Turn a YAML config or DeferredNode into a callable function.
+
+    Args:
+        path_or_node: File path or existing DeferredNode
+        context: Base context dict (types, functions, values)
+        context_types: List of types to add as {name: type}
+        auto_context: If True, capture types from caller's namespace
+        **loader_kwargs: Passed to DraconLoader (deferred_paths, etc.)
+
+    Returns:
+        Callable that accepts **kwargs, injects them as context, and
+        returns the constructed config.
+    """
+    from dracon.deferred import DeferredNode
+    from dracon.utils import extract_types_from_caller
+
+    full_context = {}
+
+    if auto_context:
+        full_context.update(extract_types_from_caller(depth=2))
+
+    if context_types:
+        for t in context_types:
+            if hasattr(t, '__name__'):
+                full_context[t.__name__] = t
+
+    if context:
+        full_context.update(context)
+
+    if isinstance(path_or_node, DeferredNode):
+        base_node = path_or_node
+        if full_context:
+            base_node.update_context(full_context)
+    elif isinstance(path_or_node, (str, Path)):
+        loader_kwargs.setdefault('deferred_paths', ['/'])
+        loader = DraconLoader(context=full_context, **loader_kwargs)
+        base_node = loader.load(str(path_or_node))
+        if not isinstance(base_node, DeferredNode):
+            raise ValueError(
+                f"Expected loading with deferred_paths=['/'] to return DeferredNode, got {type(base_node)}"
+            )
+    else:
+        raise TypeError(f"Expected path or DeferredNode, got {type(path_or_node)}")
+
+    def call(**kwargs):
+        node_copy = base_node.copy()
+        return node_copy.construct(context=kwargs)
+
+    call.__doc__ = f"Callable config from: {path_or_node}"
+    return call

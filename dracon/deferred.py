@@ -189,9 +189,19 @@ class DeferredNode(ContextNode, Generic[T]):
 
     @ftrace(watch=[])
     def construct(self, **kwargs) -> T:  # type: ignore
+        from dracon.lazy import resolve_all_lazy
+        from dracon.dracontainer import Dracontainer
         try:
+            context = kwargs.get('context')
             composed_node = self.compose(**kwargs)
-            return self._loader.load_node(composed_node, target_type=self.obj_type)
+            if context:
+                self._loader.update_context(context)
+            result = self._loader.load_node(composed_node, target_type=self.obj_type)
+            # resolve lazy values for non-Dracontainer types (like plain dict/list)
+            # Dracontainer handles lazy resolution on access, but plain types don't
+            if not isinstance(result, Dracontainer):
+                result = resolve_all_lazy(result, context_override=context)
+            return result
         except DraconError:
             raise
         except Exception as e:

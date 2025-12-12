@@ -197,33 +197,112 @@ Wrapper type for Pydantic models.
 
 ## 9. CLI Generation (`dracon.commandline`)
 
-Dracon auto-generates a CLI from a Pydantic model.
+Dracon auto-generates CLIs from Pydantic models. The recommended approach is the `@dracon_program` decorator.
+
+### 9.1. The `@dracon_program` Decorator (Recommended)
+
+Turn any Pydantic model into a CLI program with a single decorator:
+
+```python
+from dracon import dracon_program, Arg, DeferredNode
+from pydantic import BaseModel
+from typing import Annotated, List
+
+@dracon_program(
+    name="my-app",
+    description="My application",
+    context_types=[DatabaseConfig],  # Types available for !Tags
+    deferred_paths=["/secrets/**"],  # Paths to keep as DeferredNode
+)
+class AppConfig(BaseModel):
+    env: Annotated[str, Arg(short='e', help="Environment")]
+    db: DatabaseConfig
+    workers: int = 4
+
+    def run(self):
+        """Optional: called by .invoke() after config is loaded."""
+        print(f"Running in {self.env} with {self.workers} workers")
+        return self.workers
+
+# Usage patterns:
+AppConfig.cli()                              # Run as CLI (parses sys.argv)
+result = AppConfig.invoke("+config.yaml")    # Load config, call run(), return result
+instance = AppConfig.from_config("cfg.yaml") # Load config, return instance
+config = AppConfig.load("config.yaml")       # Load as dict (before validation)
+```
+
+### 9.2. Decorator Options
+
+| Option | Description |
+|--------|-------------|
+| `name` | CLI program name |
+| `description` | Help text description |
+| `context` | Dict of context variables for `${...}` |
+| `context_types` | List of types to add to context |
+| `deferred_paths` | Paths to keep as `DeferredNode` |
+| `auto_context` | Capture types from caller's namespace |
+
+### 9.3. Alternative: `make_program`
+
+For more control, use `make_program` directly:
 
 ```python
 from dracon import make_program, Arg
-class Config(BaseModel):
-    env: Annotated[str, Arg(short='e', help="Env")]
-    db: DatabaseConfig # Nested model
-    secrets: Annotated[dict, Arg(is_file=True)] # Auto-load file content
 
-program = make_program(Config)
+program = make_program(Config, name="my-app")
 config, raw_args = program.parse_args()
 ```
 
-### 9.1. Argument Precedence (Last Wins)
+### 9.4. Argument Precedence (Last Wins)
 
 1.  **Model Defaults:** Defined in Pydantic.
 2.  **Config Files (`+path`):** Positional args starting with `+`. Loaded/merged sequentially.
 3.  **Context Vars (`++`):** Arguments starting with `++` (`++k=v`) define context variables.
 4.  **CLI Flags:** Direct overrides (`--env prod`, `--db.host localhost`).
 
-### 9.2. Advanced CLI Syntax
+### 9.5. Advanced CLI Syntax
 
 - **Explicit File Load:** `--field +config.yaml`.
 - **Reference Load:** `--field +config.yaml@sub.key`.
 - **Collections:** `--tags a b c` (List), `--opts k=v a.b=c` (Dict).
 
-## 10. Debugging & Tooling
+## 10. Callable Configs (`make_callable`)
+
+Turn a YAML config into a reusable callable function:
+
+```python
+from dracon import make_callable
+
+# Create a callable from a config file
+create_model = make_callable(
+    "model_config.yaml",
+    context_types=[ModelConfig, OptimizerConfig],
+)
+
+# Call with runtime parameters
+model1 = create_model(learning_rate=0.01, layers=3)
+model2 = create_model(learning_rate=0.001, layers=5)
+```
+
+### 10.1. Options
+
+| Option | Description |
+|--------|-------------|
+| `context` | Dict of context variables |
+| `context_types` | List of types to add to context |
+| `auto_context` | Capture types from caller's namespace |
+
+### 10.2. From DeferredNode
+
+You can also create a callable from an existing `DeferredNode`:
+
+```python
+cfg = load("config.yaml", deferred_paths=["/model"])
+create_model = make_callable(cfg["model"])
+model = create_model(name="custom")
+```
+
+## 11. Debugging & Tooling
 
 - **`dracon-print <file>`**: Load and print composed configuration tree.
 - **`resolve_all_lazy(obj)`**: Recursively force evaluation.
@@ -231,20 +310,20 @@ config, raw_args = program.parse_args()
 
 ---
 
-## 11. Real-World Architecture Example: "The Dynamic Skeleton"
+## 12. Real-World Architecture Example: "The Dynamic Skeleton"
 
 _Based on `biocompiler/biocomp-jobs/train`._
 
 This pattern separates the **topology** of the experiment (what files are involved) from the **hyperparameters** (what values are used) and the **runtime execution** (loggers, deferred jobs). It relies heavily on **dynamic includes** and **context injection**.
 
-### 11.1. The Components
+### 12.1. The Components
 
 1.  **The Skeleton (`start.yaml`)**: The entry point. It defines _logic_, not just data. It declares variables (`!set_default`) that the CLI is expected to fill, acting as an interface contract.
 2.  **The Payload (`training_sets/`)**: A library of composable configurations. Files here are often Unions or Differences of other files.
 3.  **The Logic (`training_configs/`)**: Hyperparameter presets (e.g., `regression-nolayerinfo.yaml`).
 4.  **The Python Bridge (`run_training.py`)**: The runtime environment that injects live objects (like `best_model`) into deferred nodes.
 
-### 11.2. `start.yaml`: The Hub
+### 12.2. `start.yaml`: The Hub
 
 The skeleton uses interpolation _inside_ include paths. This allows the CLI to swap entire dataset definitions by changing a single string variable.
 
@@ -273,7 +352,7 @@ loggers:
   - <<: !include file:$DIR/loggers/plot_inner_nodes
 ```
 
-### 11.3. Execution Example
+### 12.3. Execution Example
 
 The CLI command injects the "flesh" onto the "skeleton".
 
@@ -296,7 +375,7 @@ biocomp-train \
 4.  **Construction**: The `TrainingProgram` model (from `run_training.py`) validates the final structure.
 5.  **Runtime**: The Python script loops. At specific steps, it calls `construct(logger_node, context={'model': current_model})`, activating the deferred plotters defined in `start.yaml`.
 
-### 11.4. Why this pattern?
+### 12.4. Why this pattern?
 
 - **Combinatorial Power**: You can test $M$ datasets against $N$ hyperparameter sets with $M+N$ config files (plus one skeleton), rather than $M \times N$ files.
 - **Context Awareness**: Configs know where they live (`$DIR`). You can move the entire folder structure, and relative includes inside `basic_sets/*.yaml` still work.

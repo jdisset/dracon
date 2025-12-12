@@ -844,3 +844,26 @@ DEFAULT_EVAL_ENGINE: Literal['asteval', 'eval'] = 'asteval'
 if 'DRACON_EVAL_ENGINE' in os.environ:
     DEFAULT_EVAL_ENGINE = os.environ['DRACON_EVAL_ENGINE']
     logger.debug(f"Using eval engine from env: {DEFAULT_EVAL_ENGINE}")
+
+
+def extract_types_from_caller(depth=2):
+    """Capture types and callables from caller's namespace."""
+    import inspect
+
+    frame = inspect.currentframe()
+    for _ in range(depth):
+        if frame is not None:
+            frame = frame.f_back
+    if frame is None:
+        return {}
+
+    context = {}
+    for ns in [frame.f_locals, frame.f_globals]:
+        for name, obj in ns.items():
+            if name.startswith('_'):
+                continue
+            if isinstance(obj, type):
+                context[name] = obj
+            elif callable(obj) and hasattr(obj, '__name__') and not inspect.isbuiltin(obj):
+                context[obj.__name__] = obj
+    return context

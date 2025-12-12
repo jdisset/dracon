@@ -818,6 +818,11 @@ class Program(BaseModel, Generic[T]):
         )
         loader.update_context(tracked_context)
         loader.yaml.representer.exclude_defaults = False
+
+        # ensure conf_type is available in context with full tag name for nested classes
+        full_tag = f"{self.conf_type.__module__}.{self.conf_type.__name__}"
+        loader.update_context({full_tag: self.conf_type, self.conf_type.__name__: self.conf_type})
+
         pdump_str = loader.dump(self.conf_type.__new__(self.conf_type))
 
         logger.debug(f"pdump_str: {pdump_str}")
@@ -956,3 +961,109 @@ def make_program(conf_type: type, **kwargs):
     if not issubclass(conf_type, BaseModel):
         raise ValueError("make_program requires a BaseModel subclass")
     return Program[conf_type](conf_type=conf_type, **kwargs)
+
+
+def dracon_program(
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+    version: Optional[str] = None,
+    deferred_paths: Optional[List[str]] = None,
+    context_types: Optional[List[type]] = None,
+    context: Optional[Dict[str, Any]] = None,
+    auto_context: bool = False,
+):
+    """
+    Decorator to turn a Pydantic BaseModel into a dracon CLI program.
+
+    Adds class methods:
+        .cli(argv=None)              - Parse CLI args and run
+        .invoke(*configs, **context) - Run with configs and injected context
+        .from_config(*configs, **context) - Load without running
+        .load(path, context=None)    - Low-level single-file load
+
+    Args:
+        name: Program name (default: class name)
+        description: Help text (default: class docstring)
+        version: Version string
+        deferred_paths: Paths to defer during loading
+        context_types: Types to add to context as {name: type}
+        context: Additional context dict
+        auto_context: Capture types from decorator call site
+    """
+    from dracon.utils import extract_types_from_caller
+
+    captured_context = {}
+    if auto_context:
+        captured_context.update(extract_types_from_caller(depth=2))
+
+    def decorator(cls):
+        full_context = dict(captured_context)
+
+        if context_types:
+            for t in context_types:
+                if hasattr(t, '__name__'):
+                    full_context[t.__name__] = t
+
+        if context:
+            full_context.update(context)
+
+        cls._dracon_program_config = {
+            'name': name or cls.__name__,
+            'description': description or cls.__doc__,
+            'version': version,
+            'deferred_paths': deferred_paths or [],
+            'context': full_context,
+        }
+
+        @classmethod
+        def cli(cls, argv=None):
+            cfg = cls._dracon_program_config
+            prog = make_program(cls, name=cfg['name'], description=cfg['description'])
+            instance, _ = prog.parse_args(
+                argv if argv is not None else sys.argv[1:],
+                deferred_paths=cfg['deferred_paths'],
+                context=cfg['context'],
+            )
+            if hasattr(instance, 'run'):
+                return instance.run()
+            return instance
+
+        @classmethod
+        def invoke(cls, *config_files, **context_kwargs):
+            instance = cls.from_config(*config_files, **context_kwargs)
+            if hasattr(instance, 'run'):
+                return instance.run()
+            return instance
+
+        @classmethod
+        def from_config(cls, *config_files, **context_kwargs):
+            cfg = cls._dracon_program_config
+            merged_context = {**cfg['context'], **context_kwargs}
+            prog = make_program(cls, name=cfg['name'], description=cfg['description'])
+            argv = [c if c.startswith('+') else f'+{c}' for c in config_files]
+            instance, _ = prog.parse_args(
+                argv,
+                deferred_paths=cfg['deferred_paths'],
+                context=merged_context,
+            )
+            return instance
+
+        @classmethod
+        def load(cls, config_path, context=None):
+            cfg = cls._dracon_program_config
+            merged_context = {**cfg['context'], **(context or {})}
+            loader = DraconLoader(
+                context=merged_context,
+                deferred_paths=cfg['deferred_paths'],
+            )
+            data = loader.load(config_path)
+            return cls.model_validate(data)
+
+        cls.cli = cli
+        cls.invoke = invoke
+        cls.from_config = from_config
+        cls.load = load
+
+        return cls
+
+    return decorator
