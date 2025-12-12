@@ -23,11 +23,41 @@ parsing. Dracon gives you simple tools to catch all of these moving pieces and
 turn them into a structured, type safe, highly configurable system.
 Minimal ceremony, maximum efficiency.
 
+### Seamless Python Integration
+
+A single decorator turns any Pydantic model into a complete CLI application:
+
+```python
+@dracon_program(name="my-app")
+class Config(BaseModel):
+    learning_rate: float = 0.001
+    epochs: int = 100
+
+    def run(self):
+        train(self.learning_rate, self.epochs)
+
+# That's it. Now you have:
+Config.cli()                    # Full CLI with --help, config files, overrides
+Config.invoke("+config.yaml")   # Load config and run
+Config.from_config("cfg.yaml")  # Load config as validated instance
+```
+
+Turn YAML configs into reusable factory functions:
+
+```python
+create_model = make_callable("model.yaml", context_types=[ModelConfig])
+model1 = create_model(layers=3)
+model2 = create_model(layers=5)
+```
+
 ### Key Features
 
+- **`@dracon_program` decorator**: Turn any Pydantic model into a CLI app with one line
+- **`make_callable`**: Transform YAML configs into reusable factory functions
 - **Layered config**: YAML with environment/CLI overrides, includes, variables, and Python expressions
 - **Pydantic integration**: Type safety and validation out of the box
-- **Auto CLI generation**: Every field in your app's main class becomes a CLI flag, including nested ones, and can be overlayed with entire files or environment variables
+- **Auto CLI generation**: Every field becomes a CLI flag, including nested ones
+- **Deferred execution**: Runtime injection of values not available at load time
 - **Composability**: Mix and match configs for experiments, environments, model variants
 
 #### Compose Your Configurations
@@ -53,137 +83,106 @@ Embed Python expressions (`${...}`), reference other keys (`@path`), or compute 
 
 Use Pydantic models for type-safe configs (`!MyModel`). Dracon handles YAML <-> Pydantic conversion seamlessly.
 
-## Quick Start: CLI
+## Quick Start: CLI with `@dracon_program`
 
-Let's build a simple application configured via YAML and CLI arguments.
-
-**1. Define Models (`models.py`):**
+The `@dracon_program` decorator is the easiest way to turn a Pydantic model into a full CLI application:
 
 ```python
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import Annotated, Literal
-from dracon import Arg, DeferredNode, construct
+from dracon import dracon_program, Arg, DeferredNode
 
 class DatabaseConfig(BaseModel):
     host: str = 'localhost'
     port: int = 5432
-    username: str
-    password: str
+    username: str = "admin"
+    password: str = ""
 
+@dracon_program(
+    name="my-app",
+    description="My application with database support",
+    context_types=[DatabaseConfig],  # Make DatabaseConfig available for !Tags
+)
 class AppConfig(BaseModel):
+    database: DatabaseConfig
+    environment: Annotated[Literal['dev', 'prod'], Arg(short='e', help="Deployment env")]
+    workers: Annotated[int, Arg(help="Number of workers")] = 4
+    output_path: DeferredNode[str] = "/tmp/output"  # Resolved at runtime
 
-    input_path: Annotated[str, Arg(help="Example of positional argument.", positional=True)] = './'
-    database: Annotated[DatabaseConfig, Arg(help="Database conf.")] = Field(default_factory=DatabaseConfig) # Use default_factory for nested models
-    environment: Annotated[Literal['dev','prod','test'], Arg(short='e', help="Deployment env.")] # required arg since no default
-    log_level: Annotated[Literal["DEBUG", "INFO", "WARNING", "ERROR"], Arg(help="Logging level")] = "INFO"
-    workers: Annotated[int, Arg(help="Number of worker processes.")] = 1
-    output_path: Annotated[DeferredNode[str], Arg(help="Path for output files.")] # Output path depends on runtime context (e.g., based on other config)
-
-    def process_data(self):
-        # Example method using the config
-        print(f"Processing for environment: {self.environment}")
-        print(f"  DB: {self.database.username}@{self.database.host}:{self.database.port}")
-        print(f"  Workers: {self.workers}, Log Level: {self.log_level}")
-
-        # Provide needed context for the deferred output_path field.
-        # 'construct' takes the DeferredNode and context to produce the final value.
-        final_output = construct(
-            self.output_path,
-            context={'computed_runtime_value': self.generate_unique_id()}
+    def run(self):
+        """Called by .invoke() after config is loaded."""
+        print(f"Running in {self.environment} with {self.workers} workers")
+        # Construct deferred value with runtime context
+        final_output = self.output_path.construct(
+            context={'run_id': f"{self.environment}_{self.workers}"}
         )
-        print(f"  Output Path: {final_output}")
+        print(f"Output: {final_output}")
+        return self.workers
 
-    def generate_unique_id(self):
-        # Example helper function to generate a value based on config
-        from time import time
-        return f"{self.environment}_{self.database.host}_{self.workers}_{int(time())}"
-```
-
-**2. Base Configuration (`config/base.yaml`):**
-
-```yaml title="config/base.yaml"
-log_level: ${getenv('LOG_LEVEL', 'INFO')} # Use env var or default INFO
-
-database:
-  host: "db.${@/environment}.local" # Dynamically set host based on 'environment' key in the final config
-  port: 5432
-  username: !include file:$DIR/db_user.secret # $DIR contains the path to the current file's directory
-  password: !include env:DB_PASS # Load from environment variable DB_PASS
-
-output_path: "/data/${computed_runtime_value}/output" # Output path uses interpolation needing runtime context
-```
-
-**3. Production Overrides (`config/prod.yaml`):**
-
-```yaml title="config/prod.yaml"
-environment: prod # Set environment directly
-log_level: WARNING
-workers: 4
-
-database: # Only override specific DB fields for prod
-  host: "db.prod.svc.cluster.local"
-  username: prod_db_user
-
-<<{>+}: !include file:base.yaml # merge base, existing values (from prod.yaml) win
-```
-
-**4. Secret File (`config/db_user.secret`):**
-
-```text title="config/db_user.secret"
-base_user
-```
-
-**5. Main CLI Script (`main.py`):**
-
-```python title="main.py"
-import sys
-from dracon import make_program
-
-program = make_program(AppConfig, name="my-cool-app", description="My cool application using Dracon.")
-
+# Multiple ways to use:
 if __name__ == "__main__":
-    cli_config, raw_args = program.parse_args(sys.argv[1:])
-    # cli_config is now a fully populated and validated AppConfig instance
-    cli_config.process_data() # Use the final config object
+    AppConfig.cli()  # Run as CLI (parses sys.argv)
 ```
 
-**6. Running the CLI:**
+**Config file (`config.yaml`):**
+
+```yaml
+database:
+  host: "db.${@/environment}.local"
+  port: 5432
+  username: !include env:DB_USER
+  password: !include env:DB_PASS
+
+environment: prod
+workers: 8
+output_path: "/data/${run_id}/output"
+```
+
+**Running:**
 
 ```bash
-$ python main.py --help # Show help
+# Run with config file
+$ python main.py +config.yaml
 
-# Run with development environment (required arg). Needs DB_PASS env var.
-$ export DB_PASS="dev_secret"
-$ python main.py +config/base.yaml -e dev
-# Output uses defaults from base.yaml and Pydantic, env var for password.
-# DB Host will be db.dev.local
+# Override specific values
+$ python main.py +config.yaml -e dev --workers 2
 
-# Set LOG_LEVEL env var and run for prod using prod.yaml overrides
-$ export LOG_LEVEL=DEBUG
-$ export DB_PASS="prod_secret"
-$ python main.py +config/prod.yaml --workers 8 # Load prod config, override workers
-# Output uses values from prod.yaml (merged onto base.yaml),
-# DB_PASS=prod_secret, LOG_LEVEL=DEBUG (from env var), workers=8 (from CLI override).
-# DB Host will be db.prod.svc.cluster.local
+# Pass context variables for interpolation
+$ python main.py +config.yaml ++run_id my_experiment
 
-# Define a context variable (only useful if YAML used ${my_var})
-$ python main.py -e prod ++my_var=some_value
-# Or with space-separated syntax
-$ python main.py -e prod ++my_var some_value
+# Load config programmatically
+result = AppConfig.invoke("+config.yaml")           # Load, validate, run()
+instance = AppConfig.from_config("config.yaml")     # Load and validate only
+```
 
-# Pass a file path as a value for an argument marked with is_file=True
-# (or use '+' prefix to force loading even without is_file)
-$ echo "cli_user" > local_user.secret
-$ python main.py -e prod --database.username +local_user.secret
+## Alternative: `make_program`
 
-# Use the prod config but override the entire database block with a different file
-$ python main.py +config/prod --database +config/staging_db.yaml
+For more control over the CLI program, use `make_program` directly:
 
-# Use default settings but pass some manual overrides
-$ python main.py -e test --database.port 4567
+```python
+from dracon import make_program
 
-# Override a nested value using a value from *another* file's nested path
-$ python main.py +config/prod --database.port +config/base@database.port
+program = make_program(AppConfig, name="my-app")
+config, raw_args = program.parse_args()
+config.run()
+```
+
+## Reusable Config Functions: `make_callable`
+
+Turn a YAML config into a reusable callable:
+
+```python
+from dracon import make_callable
+
+# Create a callable from a config file
+create_model = make_callable(
+    "model_config.yaml",
+    context_types=[ModelConfig],
+)
+
+# Call with different parameters
+model1 = create_model(learning_rate=0.01)
+model2 = create_model(learning_rate=0.001)
 ```
 
 ## Quick Start: YAML Loader + Dump

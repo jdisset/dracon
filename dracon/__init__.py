@@ -15,10 +15,11 @@ from dracon.loader import (
     dump,
     dump_to_node,
     construct,
+    make_callable,
 )
 
 from dracon.lazy import resolve_all_lazy
-from dracon.commandline import Arg, Program, make_program
+from dracon.commandline import Arg, Program, make_program, dracon_program
 from dracon.resolvable import Resolvable
 from dracon.merge import MergeKey
 from dracon.draconstructor import Draconstructor
