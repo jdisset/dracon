@@ -37,6 +37,19 @@ nested:
 interpolated.keys.${suffix}:
   value: interpolated_value
 
+# Test nested dict key interpolation in !each loops
+# This tests that keys in nested mappings are correctly evaluated
+!define key_prefix: mykey
+!define nested_items:
+  first: {val: 100}
+  second: {val: 200}
+each_with_nested_keys:
+  !each(item) "${nested_items.items()}":
+    top_${item[0]}:
+      # These nested keys should be interpolated, not left as literals
+      ${key_prefix}_${item[0]}: ${item[1]['val']}
+      other_${item[0]}: other_value
+
 # # Merge operations with dotted keys
 # base.with.dots:
 #   key1: base_value1

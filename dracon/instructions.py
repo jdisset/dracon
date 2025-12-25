@@ -28,6 +28,26 @@ logger = logging.getLogger(__name__)
 ## {{{                      --     instruct utils     --
 
 
+def evaluate_nested_mapping_keys(node, engine, context):
+    if isinstance(node, DraconMappingNode):
+        new_items = []
+        for k_node, v_node in node.value:
+            # Evaluate the key if it's an InterpolableNode
+            if isinstance(k_node, InterpolableNode):
+                scalar_key = DraconScalarNode(
+                    tag=k_node.tag,
+                    value=k_node.evaluate(engine=engine, context=context),
+                )
+                new_items.append((scalar_key, v_node))
+            else:
+                new_items.append((k_node, v_node))
+            evaluate_nested_mapping_keys(v_node, engine, context)
+        node.value = new_items
+    elif isinstance(node, DraconSequenceNode):
+        for item in node.value:
+            evaluate_nested_mapping_keys(item, engine, context)
+
+
 class Instruction:
     @staticmethod
     def match(value: Optional[str]) -> Optional['Instruction']:
@@ -389,6 +409,7 @@ class Each(Instruction):
                             node=new_vnode,
                             callback=partial(add_to_context, item_ctx, merge_key=mkey),
                         )
+                        evaluate_nested_mapping_keys(new_vnode, loader.interpolation_engine, item_ctx)
         else:
             raise ValueError(
                 f"Invalid value node for 'each' instruction: {value_node} of type {type(value_node)}"
