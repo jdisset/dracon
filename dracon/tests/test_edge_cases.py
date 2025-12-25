@@ -29,6 +29,29 @@ def test_edge_cases():
 
     assert config["interpolated.keys.dynamic"].value == "interpolated_value"
 
+    # Test nested dict key interpolation in !each loops
+    # This regression test ensures that keys in nested mappings within !each loops
+    # are properly evaluated, not left as literal interpolation strings
+    nested_keys_result = config.each_with_nested_keys
+    assert "top_first" in nested_keys_result, f"Expected 'top_first' key, got: {nested_keys_result.keys()}"
+    assert "top_second" in nested_keys_result, f"Expected 'top_second' key, got: {nested_keys_result.keys()}"
+
+    # Verify nested keys are resolved (not literal ${...} strings)
+    first_dict = nested_keys_result["top_first"]
+    first_keys = list(first_dict.keys())
+    assert "mykey_first" in first_keys, f"Expected 'mykey_first' key in nested dict, got: {first_keys}"
+    assert "other_first" in first_keys, f"Expected 'other_first' key in nested dict, got: {first_keys}"
+    # Verify no unresolved interpolation strings in keys
+    assert not any("${" in str(k) for k in first_keys), f"Found unresolved interpolation in keys: {first_keys}"
+
+    second_dict = nested_keys_result["top_second"]
+    second_keys = list(second_dict.keys())
+    assert "mykey_second" in second_keys, f"Expected 'mykey_second' key in nested dict, got: {second_keys}"
+    assert "other_second" in second_keys, f"Expected 'other_second' key in nested dict, got: {second_keys}"
+    # Verify values are also resolved
+    assert first_dict["mykey_first"] == 100
+    assert second_dict["mykey_second"] == 200
+
     # assert config.reference_test.simple_ref == "simple_value"
     # assert config.reference_test.nested_ref == "deep_value"
 
