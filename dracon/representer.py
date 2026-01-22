@@ -125,7 +125,7 @@ class DraconRepresenter(RoundTripRepresenter):
         tag = self._get_pydantic_tag(data)
 
         # get serialized values to respect serializers and exclusion rules
-        dump_dict = data.model_dump(mode='python', exclude_unset=self.exclude_defaults)
+        dump_dict = data.model_dump(mode='python', exclude_defaults=self.exclude_defaults)
 
         mapping_value_pairs = []
         for field_name, serialized_value in dump_dict.items():

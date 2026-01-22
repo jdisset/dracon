@@ -347,3 +347,32 @@ def test_round_trip_dracon_core(representer_default):
     assert isinstance(reconstructed_data['deferred'], DeferredNode)
     reconstructed_data['deferred']._loader = reconstructed_loader
     assert reconstructed_data['deferred'].construct() == {'x': 10}
+
+
+def test_represent_pydantic_model_inplace_mutation():
+    """Test that in-place mutations to list fields are properly serialized."""
+
+    class Item(BaseModel):
+        name: str
+        value: int = 0
+
+    class Container(BaseModel):
+        items: list[Item] = Field(default_factory=list)
+
+    # in-place mutation
+    container = Container()
+    container.items.append(Item(name="test", value=42))
+
+    loader = DraconLoader(context={'Container': Container, 'Item': Item})
+    loader.yaml.representer.full_module_path = False
+    yaml_output = dump(container, loader=loader)
+
+    # verify the items field is serialized
+    assert "items:" in yaml_output
+    assert "name: test" in yaml_output
+    assert "value: 42" in yaml_output
+
+    # verify round-trip
+    reconstructed = loads(yaml_output, loader=loader)
+    assert isinstance(reconstructed, Container)
+    assert reconstructed.items == container.items
