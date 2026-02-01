@@ -16,6 +16,8 @@ from dracon.deferred import DeferredNode, make_deferred
 from dracon.interpolation import InterpolableNode
 from pydantic import BaseModel, Field
 from typing import List, Optional
+from enum import Enum, IntEnum, Flag, auto
+import sys
 
 
 # --- Models and Custom Types ---
@@ -45,6 +47,39 @@ class CustomDump(DraconDumpable):
         if isinstance(other, CustomDump):
             return self.data == other.data
         return False
+
+
+# --- Enum Types ---
+
+
+class StringValueEnum(Enum):
+    NONE = "none"
+    DIRECT = "direct"
+
+
+class IntValueEnum(Enum):
+    ONE = 1
+    TWO = 2
+
+
+class AutoValueEnum(Enum):
+    X = auto()
+    Y = auto()
+
+
+class SampleIntEnum(IntEnum):
+    FIRST = 1
+    SECOND = 2
+
+
+class SampleFlag(Flag):
+    A = auto()
+    B = auto()
+    AB = A | B
+
+
+class ConfigWithEnum(BaseModel):
+    mode: StringValueEnum = StringValueEnum.NONE
 
 
 # --- Fixtures ---
@@ -376,3 +411,106 @@ def test_represent_pydantic_model_inplace_mutation():
     reconstructed = loads(yaml_output, loader=loader)
     assert isinstance(reconstructed, Container)
     assert reconstructed.items == container.items
+
+
+# --- Enum Tests ---
+
+
+def test_represent_enum_string_value(representer_default):
+    """Plain Enum with string values serializes to YAML string."""
+    node = representer_default.represent_data(StringValueEnum.DIRECT)
+    assert isinstance(node, DraconScalarNode)
+    assert node.value == "direct"
+    assert node.tag == DEFAULT_SCALAR_TAG
+
+
+def test_represent_enum_int_value(representer_default):
+    """Plain Enum with int values serializes to YAML int."""
+    node = representer_default.represent_data(IntValueEnum.ONE)
+    assert isinstance(node, DraconScalarNode)
+    assert node.value == "1"
+    assert node.tag == "tag:yaml.org,2002:int"
+
+
+def test_represent_enum_auto_value(representer_default):
+    """Enum with auto() values serializes to YAML int."""
+    node = representer_default.represent_data(AutoValueEnum.X)
+    assert isinstance(node, DraconScalarNode)
+    assert node.value == "1"
+    assert node.tag == "tag:yaml.org,2002:int"
+
+
+def test_represent_int_enum(representer_default):
+    """IntEnum serializes to YAML int."""
+    node = representer_default.represent_data(SampleIntEnum.FIRST)
+    assert isinstance(node, DraconScalarNode)
+    assert node.value == "1"
+    assert node.tag == "tag:yaml.org,2002:int"
+
+
+def test_represent_flag_enum(representer_default):
+    """Flag enum serializes to YAML int."""
+    node = representer_default.represent_data(SampleFlag.A)
+    assert isinstance(node, DraconScalarNode)
+    assert node.value == "1"
+    assert node.tag == "tag:yaml.org,2002:int"
+
+
+def test_represent_flag_enum_composite(representer_default):
+    """Composite Flag (A|B) serializes to combined int value."""
+    node = representer_default.represent_data(SampleFlag.AB)
+    assert isinstance(node, DraconScalarNode)
+    assert node.value == "3"  # A=1, B=2, A|B=3
+    assert node.tag == "tag:yaml.org,2002:int"
+
+
+def test_represent_enum_in_dict(representer_default):
+    """Enum values inside dicts serialize correctly."""
+    data = {"mode": StringValueEnum.DIRECT, "count": IntValueEnum.TWO}
+    node = representer_default.represent_data(data)
+    assert isinstance(node, DraconMappingNode)
+    items = {k.value: v for k, v in node.value}
+    assert items["mode"].value == "direct"
+    assert items["count"].value == "2"
+
+
+def test_represent_enum_in_list(representer_default):
+    """Enum values inside lists serialize correctly."""
+    data = [StringValueEnum.NONE, StringValueEnum.DIRECT]
+    node = representer_default.represent_data(data)
+    assert isinstance(node, DraconSequenceNode)
+    assert node.value[0].value == "none"
+    assert node.value[1].value == "direct"
+
+
+def test_represent_pydantic_with_enum(representer_default):
+    """Pydantic model with Enum field serializes correctly."""
+    model = ConfigWithEnum(mode=StringValueEnum.DIRECT)
+    node = representer_default.represent_data(model)
+    assert isinstance(node, DraconMappingNode)
+    items = {k.value: v for k, v in node.value}
+    assert items["mode"].value == "direct"
+
+
+def test_round_trip_enum(representer_default):
+    """Enums round-trip through YAML (value is preserved, enum type is not)."""
+    data = {"mode": StringValueEnum.DIRECT, "count": IntValueEnum.TWO}
+    loader = DraconLoader()
+    yaml_string = dump(data, loader=loader)
+    reconstructed = loads(yaml_string, loader=loader, raw_dict=True)
+    # enum values become their primitive types
+    assert reconstructed["mode"] == "direct"
+    assert reconstructed["count"] == 2
+
+
+@pytest.mark.skipif(sys.version_info < (3, 11), reason="StrEnum requires Python 3.11+")
+def test_represent_str_enum(representer_default):
+    """StrEnum serializes to YAML string."""
+    from enum import StrEnum
+
+    class TestStrEnum(StrEnum):
+        FOO = "foo"
+
+    node = representer_default.represent_data(TestStrEnum.FOO)
+    assert isinstance(node, DraconScalarNode)
+    assert node.value == "foo"

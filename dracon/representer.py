@@ -22,6 +22,7 @@ from dracon.nodes import (
 )
 from typing import Any
 from typing_extensions import runtime_checkable, Protocol
+from enum import Enum
 import logging
 import numpy as np
 
@@ -117,6 +118,10 @@ class DraconRepresenter(RoundTripRepresenter):
 
     def represent_ndarray(self, data: np.ndarray) -> Node:
         return self.represent_sequence(DEFAULT_SEQ_TAG, data.tolist(), flow_style=True)
+
+    def represent_enum(self, data: Enum) -> Node:
+        """Represent Enum values by their underlying value."""
+        return self.represent_data(data.value)
 
     def represent_dracon_dumpable(self, data: DraconDumpable) -> Node:
         return data.dracon_dump_to_node(self)
@@ -328,3 +333,4 @@ DraconRepresenter.add_representer(np.ndarray, DraconRepresenter.represent_ndarra
 
 DraconRepresenter.add_multi_representer(DraconDumpable, DraconRepresenter.represent_dracon_dumpable)
 DraconRepresenter.add_multi_representer(BaseModel, DraconRepresenter.represent_pydantic_model)
+DraconRepresenter.add_multi_representer(Enum, DraconRepresenter.represent_enum)
