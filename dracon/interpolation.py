@@ -214,11 +214,14 @@ def do_safe_eval(expr: str, engine: str, symbols: Optional[dict] = None, source_
 
     # pre-access symbols that appear in the expression to trigger tracking
     # this ensures accesses are recorded before copying to eval namespace
+    # also resolve any lazy symbols so the eval engine gets concrete values
     if symbols is not None:
         identifiers = _extract_identifiers(expr)
         for ident in identifiers:
             if ident in symbols and not ident.startswith('__'):
-                _ = symbols.get(ident)
+                val = symbols.get(ident)  # triggers TrackedContext tracking
+                if isinstance(val, LazyProtocol):
+                    symbols[ident] = val.resolve()
 
     if engine == 'asteval':
         safe_eval = Interpreter(user_symbols=symbols or {}, max_string_length=1000)

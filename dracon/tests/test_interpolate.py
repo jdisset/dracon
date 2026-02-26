@@ -1220,3 +1220,24 @@ result:
     config = dr.loads(yaml_content, raw_dict=True)
     resolve_all_lazy(config)
     assert config['result'] == ['a', 'b', 'middle', 'y', 'z']
+
+
+def test_lazy_symbol_resolved_in_expression(tmp_path):
+    """LazyInterpolable symbols should be auto-resolved when used in expressions."""
+    # Simulate the bug: an included file whose extracted key is an interpolation.
+    # The @items selector returns a LazyInterpolable, which then must be resolved
+    # before it can be iterated in another expression.
+    included = tmp_path / "included.yaml"
+    included.write_text(
+        "!define a: ${[1, 2, 3]}\n"
+        "!define b: ${[4, 5]}\n"
+        "items: '${a + b}'\n"
+    )
+    main = tmp_path / "main.yaml"
+    main.write_text(
+        f"!define mylist: !include file:{included}@items\n"
+        "result: '${[x * 2 for x in mylist]}'\n"
+    )
+    config = dr.load(f"file:{main}", raw_dict=True)
+    resolve_all_lazy(config)
+    assert config['result'] == [2, 4, 6, 8, 10]
