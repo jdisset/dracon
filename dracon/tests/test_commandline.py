@@ -1718,3 +1718,59 @@ name: val_${variable}
     assert isinstance(config2, ConfigWithFileArg)
     assert isinstance(config2.data, ClassA)
     assert config2.data.name == 'val_1'
+
+
+# --- YAML parsing of ++/--define values ---
+
+
+def test_plusplus_yaml_list_parsing(anythingprogram, config_files):
+    """++var=[[5,60]] should produce a list, not the string '[[5,60]]'"""
+    cfg_file = config_files / "yaml_parse_test.yaml"
+    cfg_file.write_text("value: ${my_var}\n")
+
+    config, _ = anythingprogram.parse_args([f"+{cfg_file}", "++my_var=[[5,60]]"])
+    assert config.value == [[5, 60]]
+
+
+def test_plusplus_yaml_nested_list_parsing(anythingprogram, config_files):
+    cfg_file = config_files / "yaml_parse_test2.yaml"
+    cfg_file.write_text("value: ${my_var}\n")
+
+    config, _ = anythingprogram.parse_args([f"+{cfg_file}", "++my_var=[[0,5],[10,20],[30,40]]"])
+    assert config.value == [[0, 5], [10, 20], [30, 40]]
+
+
+def test_plusplus_yaml_dict_parsing(anythingprogram, config_files):
+    cfg_file = config_files / "yaml_parse_dict.yaml"
+    cfg_file.write_text("value: ${my_var}\n")
+
+    config, _ = anythingprogram.parse_args([f"+{cfg_file}", "++my_var={a: 1, b: 2}"])
+    assert config.value == {"a": 1, "b": 2}
+
+
+def test_plusplus_yaml_scalar_parsing(anythingprogram, config_files):
+    """++var=42 should produce int 42, not string '42'"""
+    cfg_file = config_files / "yaml_parse_scalar.yaml"
+    cfg_file.write_text("value: ${my_var}\n")
+
+    config, _ = anythingprogram.parse_args([f"+{cfg_file}", "++my_var=42"])
+    assert config.value == 42
+    assert isinstance(config.value, int)
+
+
+def test_plusplus_yaml_preserves_interpolation(anythingprogram, config_files):
+    """++var=${[42, 1]} should still work (dracon interpolation, not plain YAML)"""
+    cfg_file = config_files / "yaml_parse_interp.yaml"
+    cfg_file.write_text("value:\n    itsadict: hehe\n    var: ${my_var}\n")
+
+    config, _ = anythingprogram.parse_args([f"+{cfg_file}", "++my_var", "${[42, 1]}"])
+    assert config.value == {'itsadict': 'hehe', 'var': [42, 1]}
+
+
+def test_define_yaml_list_parsing(anythingprogram, config_files):
+    """--define.var=[[5,60]] should also parse as list"""
+    cfg_file = config_files / "yaml_parse_define.yaml"
+    cfg_file.write_text("value: ${my_var}\n")
+
+    config, _ = anythingprogram.parse_args([f"+{cfg_file}", "--define.my_var=[[5,60]]"])
+    assert config.value == [[5, 60]]

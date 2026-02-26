@@ -809,9 +809,23 @@ class Program(BaseModel, Generic[T]):
 
         from dracon.composer import CompositionResult
 
+        # parse defined_vars values as YAML so e.g. "[[5,60]]" becomes list, not string
+        from io import StringIO
+        from ruamel.yaml import YAML as _YAML
+        _yaml_parser = _YAML()
+        parsed_defined_vars = {}
+        for k, v in defined_vars.items():
+            if isinstance(v, str):
+                try:
+                    parsed_defined_vars[k] = _yaml_parser.load(StringIO(v))
+                except Exception:
+                    parsed_defined_vars[k] = v
+            else:
+                parsed_defined_vars[k] = v
+
         # wrap context with tracking for unused variable warnings
-        tracked_context = TrackedContext(defined_var_keys=defined_vars.keys())
-        tracked_context.update(defined_vars)
+        tracked_context = TrackedContext(defined_var_keys=parsed_defined_vars.keys())
+        tracked_context.update(parsed_defined_vars)
 
         loader = DraconLoader(
             enable_interpolation=True, base_dict_type=dict, base_list_type=list, **kwargs
@@ -918,7 +932,7 @@ class Program(BaseModel, Generic[T]):
         # show defined variables if DRACON_SHOW_VARS is set
         import os
         if os.environ.get("DRACON_SHOW_VARS", "").lower() in ("1", "true", "yes"):
-            self._print_defined_vars(defined_vars, loader.context)
+            self._print_defined_vars(parsed_defined_vars, loader.context)
 
         return res
 
