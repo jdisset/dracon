@@ -1,0 +1,3 @@
+<<(<): !include file:$DIR/test_setdefault_propagation.yaml
+result: !deferred::reroot=true
+  value: ${MYVAR}

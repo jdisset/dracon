@@ -184,6 +184,8 @@ class SetDefault(Define):
             ),
         )
 
+        comp_res.defined_vars.setdefault(var_name, value)
+
         return comp_res
 
 

@@ -1,0 +1,2 @@
+!set_default MYVAR: 42
+greeting: hello
