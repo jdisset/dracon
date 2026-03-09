@@ -1241,3 +1241,21 @@ def test_lazy_symbol_resolved_in_expression(tmp_path):
     config = dr.load(f"file:{main}", raw_dict=True)
     resolve_all_lazy(config)
     assert config['result'] == [2, 4, 6, 8, 10]
+
+
+def test_numpy_available_in_interpolation():
+    """numpy should be available by default in interpolation expressions."""
+    yaml_content = """
+    array_sum: ${np.sum([1, 2, 3, 4, 5])}
+    array_mean: ${np.mean([1, 2, 3, 4, 5])}
+    linspace_len: ${len(np.linspace(0, 1, 5))}
+    zeros_shape: ${list(np.zeros((2, 3)).shape)}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+    config.resolve_all_lazy()
+
+    assert config.array_sum == 15
+    assert config.array_mean == 3.0
+    assert config.linspace_len == 5
+    assert config.zeros_shape == [2, 3]

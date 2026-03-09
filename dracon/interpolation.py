@@ -49,7 +49,14 @@ class InterpolationError(EvaluationError):
         super().__init__(message, context=context, cause=cause, expression=expression)
 
 
+# base symbols available in all interpolation expressions
 BASE_DRACON_SYMBOLS: Dict[str, Any] = {}
+
+try:
+    import numpy as np
+    BASE_DRACON_SYMBOLS['np'] = np
+except ImportError:
+    pass  # numpy not installed
 
 
 def debug_string_state(label: str, s: str):
