@@ -1702,6 +1702,80 @@ name: val_${variable}
     assert config1.data.name == 'val_1'
 
 
+def test_equals_syntax_long_option(config_files):
+    """--workers=4 should work like --workers 4"""
+    program = make_program(AppConfig, name="test-eq")
+    cfg, _ = program.parse_args([
+        f"+{config_files / 'localconf.yaml'}",
+        "--workers=8",
+    ])
+    assert cfg.workers == 8
+
+
+def test_equals_syntax_short_option(config_files):
+    """-e=staging should work like -e staging"""
+    program = make_program(AppConfig, name="test-eq")
+    cfg, _ = program.parse_args([
+        f"+{config_files / 'localconf.yaml'}",
+        "-e=staging",
+    ])
+    assert cfg.environment == "staging"
+
+
+def test_equals_syntax_nested_dotted_arg(config_files):
+    """--database.port=9999 should set nested value"""
+    program = make_program(AppConfig, name="test-eq")
+    cfg, _ = program.parse_args([
+        f"+{config_files / 'localconf.yaml'}",
+        "--database.port=9999",
+    ])
+    assert cfg.database.port == 9999
+
+
+def test_equals_syntax_value_containing_equals(config_files):
+    """--log-level=A=B=C should preserve = in the value"""
+    program = make_program(AppConfig, name="test-eq")
+    cfg, _ = program.parse_args([
+        f"+{config_files / 'localconf.yaml'}",
+        "--log-level=A=B=C",
+    ])
+    assert cfg.log_level == "A=B=C"
+
+
+def test_equals_syntax_is_file_arg(tmp_path):
+    """--nested_conf=/path should work with is_file=True"""
+    nested_file = tmp_path / "nested.yaml"
+    nested_file.write_text("value_from_file: 42\n")
+
+    db_file = tmp_path / "db.yaml"
+    db_file.write_text("host: h\nport: 1\nusername: u\npassword: p\n")
+
+    program = make_program(FileArgConfig, name="test-eq-file")
+    cfg, _ = program.parse_args([
+        f"--nested-conf={nested_file}",
+        f"--deferred-nested={nested_file}",
+        f"--deferred-db-explicit=+{db_file}",
+        f"--deferred-db-implicit={db_file}",
+        "--required-field=yes",
+    ])
+    assert cfg.nested_conf.value_from_file == 42
+    assert cfg.required_field == "yes"
+
+
+def test_equals_syntax_mixed_with_space(config_files):
+    """mix of --opt=val and --opt val in same invocation"""
+    program = make_program(AppConfig, name="test-eq")
+    cfg, _ = program.parse_args([
+        f"+{config_files / 'localconf.yaml'}",
+        "--workers=16",
+        "--log-level", "ERROR",
+        "-e=production",
+    ])
+    assert cfg.workers == 16
+    assert cfg.log_level == "ERROR"
+    assert cfg.environment == "production"
+
+
 def test_define_context_cli_file_loading_is_file(tmp_path):
     config_file = tmp_path / "test_define.yaml"
     config_file.write_text("""!ClassA
