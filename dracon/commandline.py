@@ -660,6 +660,11 @@ class Program(BaseModel, Generic[T]):
                 raw_args[arg_obj.real_name] = argstr
 
         else:  # handle options (-s, --long, --nested.key)
+            # support --option=value equals syntax
+            provided_value = None
+            if '=' in argstr:
+                argstr, provided_value = argstr.split('=', 1)
+
             arg_obj = self._arg_map.get(argstr)
             if arg_obj:  # known top-level option
                 logger.debug(f"arg_obj: {arg_obj}")
@@ -677,7 +682,10 @@ class Program(BaseModel, Generic[T]):
                 target_dict[real_name] = True
 
             else:  # option requires a value
-                v, i = self._read_value(argv, i, arg_obj)
+                if provided_value is not None:
+                    v = provided_value
+                else:
+                    v, i = self._read_value(argv, i, arg_obj)
                 # if is_file=true, prepend '+' to trigger loading, ensure 'file:' scheme
                 if arg_obj and arg_obj.is_file and not v.startswith('+'):
                     v = f"+{v}"  # allow pkg:path etc. with is_file
