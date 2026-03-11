@@ -67,6 +67,13 @@ def get_root_exception(e):
 
 
 @dataclass(frozen=True)
+class HelpSection:
+    """a named section of extra content in CLI help output."""
+    title: str
+    body: str
+
+
+@dataclass(frozen=True)
 class Arg:
     """maps a pydantic field to cli arguments."""
 
@@ -333,6 +340,17 @@ def print_help(prg: "Program", _) -> None:
         if help_arg:  # ensure help is always last
             _append_arg_details(content, help_arg, None, is_positional=False)
 
+    if prg.sections:
+        for section in prg.sections:
+            content.append(f"{section.title}:\n", style=COLOR_BOLD_CYAN)
+            for line in section.body.splitlines():
+                content.append(f"  {line}\n")
+            content.append("\n")
+
+    if prg.epilog:
+        content.append("─" * min(console.width - 4, 80) + "\n", style=COLOR_BRIGHT_BLACK)
+        content.append(f"{prg.epilog}\n", style=COLOR_DIM)
+
     title = Text(prg.name or "Command", style=COLOR_BOLD_CYAN)
     if prg.version:
         title.append(f" (v{prg.version})", style=COLOR_CYAN)
@@ -403,6 +421,8 @@ class Program(BaseModel, Generic[T]):
     name: Optional[str] = None
     version: Optional[str] = None
     description: Optional[str] = None
+    sections: Optional[List[HelpSection]] = None
+    epilog: Optional[str] = None
     default_auto_dash_alias: bool = True
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
@@ -993,6 +1013,8 @@ def dracon_program(
     context_types: Optional[List[type]] = None,
     context: Optional[Dict[str, Any]] = None,
     auto_context: bool = False,
+    sections: Optional[List[HelpSection]] = None,
+    epilog: Optional[str] = None,
 ):
     """
     Decorator to turn a Pydantic BaseModel into a dracon CLI program.
@@ -1035,12 +1057,17 @@ def dracon_program(
             'version': version,
             'deferred_paths': deferred_paths or [],
             'context': full_context,
+            'sections': sections,
+            'epilog': epilog,
         }
 
         @classmethod
         def cli(cls, argv=None):
             cfg = cls._dracon_program_config
-            prog = make_program(cls, name=cfg['name'], description=cfg['description'])
+            prog = make_program(
+                cls, name=cfg['name'], description=cfg['description'],
+                sections=cfg['sections'], epilog=cfg['epilog'],
+            )
             instance, _ = prog.parse_args(
                 argv if argv is not None else sys.argv[1:],
                 deferred_paths=cfg['deferred_paths'],
@@ -1061,7 +1088,10 @@ def dracon_program(
         def from_config(cls, *config_files, **context_kwargs):
             cfg = cls._dracon_program_config
             merged_context = {**cfg['context'], **context_kwargs}
-            prog = make_program(cls, name=cfg['name'], description=cfg['description'])
+            prog = make_program(
+                cls, name=cfg['name'], description=cfg['description'],
+                sections=cfg['sections'], epilog=cfg['epilog'],
+            )
             argv = [c if c.startswith('+') else f'+{c}' for c in config_files]
             instance, _ = prog.parse_args(
                 argv,

@@ -19,7 +19,7 @@ from dracon.loader import (
 )
 
 from dracon.lazy import resolve_all_lazy
-from dracon.commandline import Arg, Program, make_program, dracon_program
+from dracon.commandline import Arg, HelpSection, Program, make_program, dracon_program
 from dracon.resolvable import Resolvable
 from dracon.merge import MergeKey
 from dracon.draconstructor import Draconstructor

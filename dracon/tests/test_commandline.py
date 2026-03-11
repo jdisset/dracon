@@ -1848,3 +1848,67 @@ def test_define_yaml_list_parsing(anythingprogram, config_files):
 
     config, _ = anythingprogram.parse_args([f"+{cfg_file}", "--define.my_var=[[5,60]]"])
     assert config.value == [[5, 60]]
+
+
+# ── HelpSection / epilog tests ─────────────────────────────────────────────
+
+from dracon.commandline import HelpSection
+
+
+def test_cli_help_sections(capsys):
+    """sections appear with title and body in help output."""
+    sections = [
+        HelpSection(title="Keybindings", body="j  next\nk  prev"),
+        HelpSection(title="Examples", body="myapp --foo bar"),
+    ]
+    prog = make_program(AppConfig, name="test-app", sections=sections)
+    with pytest.raises(SystemExit):
+        prog.parse_args(["--help", "-e", "x", "--database.host", "h",
+                          "--database.username", "u", "--database.password", "p"])
+    out = capsys.readouterr().out
+    assert "Keybindings:" in out
+    assert "j  next" in out
+    assert "k  prev" in out
+    assert "Examples:" in out
+    assert "myapp --foo bar" in out
+
+
+def test_cli_help_epilog(capsys):
+    """epilog text appears in help output."""
+    prog = make_program(AppConfig, name="test-app", epilog="See docs for more info.")
+    with pytest.raises(SystemExit):
+        prog.parse_args(["--help", "-e", "x", "--database.host", "h",
+                          "--database.username", "u", "--database.password", "p"])
+    out = capsys.readouterr().out
+    assert "See docs for more info." in out
+
+
+def test_cli_help_no_sections_unchanged(capsys):
+    """no sections = no extra content (backward compat)."""
+    prog = make_program(AppConfig, name="test-app")
+    with pytest.raises(SystemExit):
+        prog.parse_args(["--help", "-e", "x", "--database.host", "h",
+                          "--database.username", "u", "--database.password", "p"])
+    out = capsys.readouterr().out
+    assert "Options:" in out
+    # sections/epilog markers should not appear
+    assert "Keybindings:" not in out
+    assert "See docs" not in out
+
+
+def test_dracon_program_sections_epilog(capsys):
+    """@dracon_program threads sections/epilog through to help."""
+    from dracon import dracon_program
+
+    sections = [HelpSection(title="Custom", body="custom content")]
+
+    @dracon_program(name="decorated-app", sections=sections, epilog="footer text")
+    class DecConfig(BaseModel):
+        name: str = "default"
+
+    with pytest.raises(SystemExit):
+        DecConfig.cli(["--help"])
+    out = capsys.readouterr().out
+    assert "Custom:" in out
+    assert "custom content" in out
+    assert "footer text" in out
