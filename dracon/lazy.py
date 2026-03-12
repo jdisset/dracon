@@ -5,6 +5,7 @@ from typing import (
     Any,
     Dict,
     Callable,
+    Literal,
     Optional,
     List,
     TypeVar,
@@ -14,6 +15,7 @@ from typing import (
     runtime_checkable,
     Type,
     get_args,
+    get_origin,
 )
 from dracon.keypath import KeyPath, ROOTPATH, MAPPING_KEY
 from pydantic import (
@@ -752,6 +754,27 @@ LazyVal = Annotated[
 ]
 
 
+def _ignore_lazy_impl(cls, v, handler, info):
+    """wrap validator that preserves Lazy objects, bypassing field type validation."""
+    if isinstance(v, Lazy):
+        if v.validator is None:
+            v.validator = handler
+        return v
+    elif list_like(v):
+        # handle list-like objects that may contain Lazy objects
+        processed_items = []
+        for item in v:
+            if isinstance(item, Lazy):
+                # preserve Lazy objects in lists without validation
+                processed_items.append(item)
+            else:
+                processed_items.append(item)
+        # convert back to original type and let normal validation handle the container
+        converted = type(v)(processed_items)
+        return converted
+    return handler(v, info)
+
+
 class LazyDraconModel(BaseModel):
     _dracon_root_obj: Optional[Any] = None
     _dracon_current_path: KeyPath = ROOTPATH
@@ -770,26 +793,41 @@ class LazyDraconModel(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True, validate_default=True)
 
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # pydantic rejects mode="wrap" validators on discriminator (Literal) fields,
+        # so re-register ignore_lazy excluding them to allow discriminated unions
+        all_annotations = {}
+        for base in reversed(cls.__mro__):
+            if base is object:
+                continue
+            all_annotations.update(getattr(base, '__annotations__', {}))
+        has_literal = any(
+            get_origin(ann) is Literal
+            for name, ann in all_annotations.items()
+            if not name.startswith('_')
+        )
+        if not has_literal:
+            return
+        target_fields = tuple(
+            name for name, ann in all_annotations.items()
+            if not name.startswith('_') and get_origin(ann) is not Literal
+        )
+        if target_fields:
+            cls.ignore_lazy = field_validator(*target_fields, mode="wrap")(
+                classmethod(_ignore_lazy_impl)
+            )
+        else:
+            # no non-Literal fields — shadow the inherited "*" validator with a
+            # no-op targeting a non-existent field so pydantic ignores it
+            cls.ignore_lazy = field_validator(
+                '__dracon_noop__', mode="wrap", check_fields=False
+            )(classmethod(_ignore_lazy_impl))
+
     @field_validator("*", mode="wrap")
     @classmethod
     def ignore_lazy(cls, v, handler, info):
-        if isinstance(v, Lazy):
-            if v.validator is None:
-                v.validator = handler
-            return v
-        elif list_like(v):
-            # handle list-like objects that may contain Lazy objects
-            processed_items = []
-            for item in v:
-                if isinstance(item, Lazy):
-                    # preserve Lazy objects in lists without validation
-                    processed_items.append(item)
-                else:
-                    processed_items.append(item)
-            # convert back to original type and let normal validation handle the container
-            converted = type(v)(processed_items)
-            return converted
-        return handler(v, info)
+        return _ignore_lazy_impl(cls, v, handler, info)
 
     def __getattribute__(self, name):
         attr = super().__getattribute__(name)

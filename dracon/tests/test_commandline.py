@@ -2282,3 +2282,80 @@ def test_decorator_subcommand_in_union():
     assert isinstance(conf.command, StartCmd)
     assert conf.command.port == 3000
     assert conf.command.action == 'start'
+
+
+# -- test LazyDraconModel as subcommand base --
+
+def test_lazy_subcommand_model_with_interpolation():
+    """LazyDraconModel subcommands resolve ${...} interpolations."""
+
+    class LazyTrainCmd(LazyDraconModel):
+        action: Literal['train'] = 'train'
+        output_dir: Annotated[str, Arg(help="Output directory")] = "${BASE_DIR}/training"
+        epochs: Annotated[int, Arg(help="Number of epochs")] = 10
+
+        def run(self, ctx):
+            return {'output_dir': self.output_dir, 'epochs': self.epochs, 'verbose': ctx.verbose}
+
+    class LazyEvalCmd(LazyDraconModel):
+        action: Literal['eval'] = 'eval'
+        output_dir: Annotated[str, Arg(help="Output directory")] = "${BASE_DIR}/evaluation"
+
+    @dracon_program(name="lazy-tool", context={
+        'BASE_DIR': '/tmp/results',
+        'LazyTrainCmd': LazyTrainCmd,
+        'LazyEvalCmd': LazyEvalCmd,
+    })
+    class LazyCLI(BaseModel):
+        verbose: Annotated[bool, Arg(short='v')] = False
+        command: Subcommand(LazyTrainCmd, LazyEvalCmd)
+
+    # interpolation resolves default
+    result = LazyCLI.cli(["--verbose", "train", "--epochs", "5"])
+    assert result == {'output_dir': '/tmp/results/training', 'epochs': 5, 'verbose': True}
+
+    # CLI override replaces interpolated default
+    conf = LazyCLI.cli(["train", "--output-dir", "/custom/path"])
+    assert conf == {'output_dir': '/custom/path', 'epochs': 10, 'verbose': False}
+
+
+def test_lazy_subcommand_model_eval_branch():
+    """second union member also resolves lazy defaults."""
+
+    class LTrainCmd(LazyDraconModel):
+        action: Literal['train'] = 'train'
+
+    class LEvalCmd(LazyDraconModel):
+        action: Literal['eval'] = 'eval'
+        dataset: Annotated[str, Arg(help="Dataset")] = "${DS_ROOT}/test.csv"
+
+    @dracon_program(name="lazy-tool2", context={
+        'DS_ROOT': '/data',
+        'LTrainCmd': LTrainCmd,
+        'LEvalCmd': LEvalCmd,
+    })
+    class LazyCLI2(BaseModel):
+        command: Subcommand(LTrainCmd, LEvalCmd)
+
+    conf = LazyCLI2.cli(["eval"])
+    assert conf.command.dataset == '/data/test.csv'
+
+
+def test_lazy_root_and_subcommand():
+    """both root and subcommand can be LazyDraconModel."""
+
+    class LzCmd(LazyDraconModel):
+        action: Literal['go'] = 'go'
+        path: Annotated[str, Arg()] = "${OUT}/sub"
+
+    @dracon_program(name="all-lazy", context={
+        'OUT': '/out',
+        'LzCmd': LzCmd,
+    })
+    class AllLazyCLI(LazyDraconModel):
+        base: Annotated[str, Arg()] = "${OUT}/root"
+        command: Subcommand(LzCmd)
+
+    conf = AllLazyCLI.cli(["go"])
+    assert conf.base == '/out/root'
+    assert conf.command.path == '/out/sub'
