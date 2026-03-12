@@ -6,18 +6,55 @@ Dracon's command-line interface (CLI) generation bridges the gap between configu
 
 Instead of manually writing argument parsing logic using libraries like `argparse` or `click`, Dracon generates the CLI directly from a Pydantic `BaseModel`.
 
-1.  **Define Configuration:** You define your application's configuration parameters, their types, defaults, and help text using a Pydantic model.
-2.  **Annotate for CLI:** You use `typing.Annotated` and `dracon.Arg` to customize how specific fields map to CLI arguments (e.g., short flags, positional arguments).
-3.  **Generate Program:** You call `dracon.make_program(YourModel, ...)` to create a `Program` instance.
-4.  **Parse Arguments:** You call `program.parse_args()` which handles:
-    - Parsing standard CLI flags (`--option value`, `-o val`) and positional arguments.
+### Using `@dracon_program` (Recommended)
+
+The simplest way to create a CLI program:
+
+```python
+from dracon import dracon_program, Arg
+from pydantic import BaseModel
+from typing import Annotated
+
+@dracon_program(name="my-app", description="My application")
+class Config(BaseModel):
+    environment: Annotated[str, Arg(short='e', help="Deployment env")]
+    workers: int = 4
+
+    def run(self):
+        print(f"Running in {self.environment} with {self.workers} workers")
+
+Config.cli()  # parses sys.argv, loads config, calls .run()
+```
+
+The decorator adds `.cli()`, `.invoke()`, `.from_config()`, and `.load()` methods to your model class. See the [CLI reference](../reference/cli_arg.md) for all decorator options.
+
+### Using `make_program` (Low-Level)
+
+For more control, use `make_program` directly:
+
+1.  **Define Configuration:** Define your application's configuration parameters, their types, defaults, and help text using a Pydantic model.
+2.  **Annotate for CLI:** Use `typing.Annotated` and `dracon.Arg` to customize how specific fields map to CLI arguments (e.g., short flags, positional arguments).
+3.  **Generate Program:** Call `dracon.make_program(YourModel, ...)` to create a `Program` instance.
+4.  **Parse Arguments:** Call `program.parse_args()` which handles:
+    - Parsing standard CLI flags (`--option value`, `--option=value`, `-o val`) and positional arguments.
     - Generating a `--help` message automatically.
     - Handling special Dracon arguments:
       - `+config/file.yaml`: Loads and merges specified YAML configuration files.
+      - `+config.yaml@sub.key`: Loads a file and extracts a subtree.
       - `++VAR=value` or `++VAR value`: Sets context variables for interpolation (shorthand for `--define.VAR=value`).
     - Applying overrides from the CLI onto the defaults and loaded files.
     - Validating the final configuration against your Pydantic model.
     - Returning the validated Pydantic model instance.
+
+## Free Ordering
+
+All argument types can be **freely mixed in any order** on the command line:
+
+```bash
+my-app action +base.yaml --workers 4 +overrides.yaml ++runname test -e prod
+```
+
+Dracon classifies each token by its prefix (`+`, `++`, `--`, `-`, or none) and processes them accordingly, regardless of position.
 
 ## Configuration Loading and Precedence
 
@@ -37,9 +74,10 @@ This is where Dracon's CLI integrates seamlessly with its configuration loading 
 
 ## Argument Mapping
 
-- **Field Names:** `my_field_name` becomes `--my-field-name` by default (can be customized with `Arg(long=...)`).
-- **Types:** Pydantic types determine expected input (str, int, float, bool). `bool` fields typically become flags (`--verbose`).
-- **Nested Models:** Fields that are Pydantic models allow nested overrides using dot notation (`--database.port 5433`). Dracon handles constructing the nested dictionary. If the nested argument itself is marked with `Arg(is_file=True)`, passing a file path will load that file's content _into_ that nested structure.
+- **Field Names:** `my_field_name` becomes both `--my_field_name` and `--my-field-name` by default (auto dash aliasing). Customizable with `Arg(long=...)` or disabled per-field with `Arg(auto_dash_alias=False)`.
+- **Types:** Pydantic types determine expected input (str, int, float, bool). `bool` fields become flags (`--verbose`, no value needed).
+- **Equals Syntax:** All non-flag options support `--option=value` in addition to `--option value`.
+- **Nested Models:** Fields that are Pydantic models allow nested overrides using dot notation (`--database.port 5433` or `--database.port=5433`). This works for _any_ nested key, even if the developer didn't define an explicit `Arg` for it. Dracon handles constructing the nested dictionary. If the nested argument itself is marked with `Arg(is_file=True)`, passing a file path will load that file's content _into_ that nested structure.
 
 ## Collection Argument Support
 
@@ -53,3 +91,8 @@ Dracon automatically detects and handles collection types (lists, tuples, sets, 
 When a positional argument is a collection type, it consumes all remaining non-option arguments, so only one collection positional argument is allowed per command.
 
 This integration means your CLI automatically respects your defined configuration structure, types, defaults, and validation rules, while also benefiting from Dracon's powerful file loading, merging, and interpolation features.
+
+## Debugging
+
+- **`DRACON_SHOW_VARS=1`**: Set this environment variable to print a table of all defined variables (CLI `++` vars, config `!define` vars) and their sources when running a CLI program.
+- **Unused variable warnings**: If a `++VAR` is defined but never referenced in any `${VAR}` expression, a warning is printed to help catch typos.

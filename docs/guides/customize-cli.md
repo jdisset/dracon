@@ -108,29 +108,29 @@ print(f"Final output path: {final_output}")
 
 See the [Deferred Execution Guide](use-deferred.md) for more on `Resolvable`.
 
-## Side Effects During Parsing (`action`)
+## Post-Parse Actions (`action`)
 
-Execute a function immediately after a specific argument is parsed. Useful for setup tasks like logging.
+Execute a function **after** the full config is generated. The action receives the `Program` instance and the validated config object. If it returns a non-`None` value, that value replaces the config.
 
 ```python
-import logging
+import json, sys
 
-def setup_logging(program, value):
-  """Action function to configure logging level."""
-  level = getattr(logging, value.upper(), logging.INFO)
-  logging.basicConfig(level=level)
-  print(f"Logging configured to: {value.upper()}")
-  # Action functions don't typically modify the config object directly
+def export_json(program, config):
+    """Export the final config as JSON and exit."""
+    print(json.dumps(config.model_dump(), indent=2))
+    sys.exit(0)
 
-class LoggingConfig(BaseModel):
-    log_level: Annotated[str, Arg(
-        short='l',
-        action=setup_logging, # Call this function when --log-level is parsed
-        help="Set logging level (DEBUG, INFO, WARNING)."
-    )] = "INFO"
+class AppConfig(BaseModel):
+    export: Annotated[bool, Arg(
+        short='x',
+        action=export_json,
+        help="Export final config as JSON and exit."
+    )] = False
+    log_level: str = "INFO"
+    workers: int = 4
 ```
 
-The `action` function receives the `Program` instance and the parsed value for that argument.
+Actions are collected during parsing and executed after config generation, so they have access to the fully merged and validated config.
 
 ## Collection Arguments (Lists and Dictionaries)
 

@@ -56,12 +56,34 @@ config: Annotated[dict, Arg(is_file=True, help="Configuration file")]
 # --config myfile.yaml becomes +myfile.yaml internally
 ```
 
-### `action: str`
-Custom argument action (passed to argparse).
+### `long: str`
+Explicit long flag name (overrides auto-derived name).
 
 ```python
-verbose: Annotated[int, Arg(action='count', help="Verbosity level")]
-# Creates: -v, -vv, -vvv for increasing verbosity
+output_dir: Annotated[str, Arg(long='output-directory', help="Output directory")]
+# Creates: --output-directory (instead of auto-derived --output-dir)
+```
+
+### `is_flag: bool = None`
+Whether the argument is a boolean flag (no value required). `None` means auto-detect (`True` for `bool` fields).
+
+```python
+verbose: Annotated[bool, Arg(is_flag=True, help="Verbose output")]
+# Usage: --verbose (no value needed, presence sets True)
+```
+
+### `action: Callable`
+Callback executed **after** config generation: `(program, config) -> Any`. If the return value is not `None`, it replaces the config.
+
+```python
+def export_config(program, config):
+    """Export the final config as JSON and exit."""
+    import json, sys
+    print(json.dumps(config.model_dump(), indent=2))
+    sys.exit(0)
+
+class Config(BaseModel):
+    export: Annotated[bool, Arg(action=export_config, help="Export config as JSON")] = False
 ```
 
 ### `default_str: str`
@@ -74,12 +96,15 @@ workers: Annotated[int, Arg(
 )] = None  # Actual default computed later
 ```
 
-### `auto_dash_alias: bool = True`
-Automatically create dash-separated aliases for underscore fields.
+### `auto_dash_alias: bool = None`
+Controls `_` to `-` alias generation. `None` inherits from the program's `default_auto_dash_alias` setting (which defaults to `True`). Set to `False` to disable for a specific field.
 
 ```python
 max_connections: Annotated[int, Arg(help="Maximum connections")]
-# Creates both --max_connections and --max-connections
+# Creates both --max_connections and --max-connections (default behavior)
+
+raw_name: Annotated[str, Arg(auto_dash_alias=False, help="No dash alias")]
+# Creates only --raw_name (no --raw-name alias)
 ```
 
 ## Automatic CLI Generation
@@ -232,13 +257,14 @@ Help automatically includes:
 ### Standard Arguments
 
 ```bash
-# Boolean flags
+# Boolean flags (presence sets True)
 myapp --debug                    # Sets debug=True
-myapp --no-debug                 # Sets debug=False
 
-# Value arguments
+# Value arguments (space or equals syntax)
 myapp --port 9090
+myapp --port=9090
 myapp --environment prod
+myapp --environment=prod
 
 # Short flags
 myapp -e prod -p 9090
@@ -247,13 +273,16 @@ myapp -e prod -p 9090
 ### File Loading
 
 ```bash
-# Explicit file loading (+ prefix)
-myapp +config.yaml
+# Config file layering (+ prefix, merged left to right)
+myapp +base.yaml +overrides.yaml
+
+# File loading on a specific field
 myapp --database +db-config.yaml
 myapp --secrets +secrets.json
 
-# File loading with keypath
+# File loading with keypath selector (@)
 myapp --database +config.yaml@database.production
+myapp +full_config.yaml@database           # extract subtree from layered file
 ```
 
 ### Nested Arguments
@@ -272,16 +301,15 @@ myapp --app.logging.level DEBUG
 ### Variable Definition
 
 ```bash
-# Define context variables (preferred shorthand)
-myapp ++environment production
-myapp ++version 1.2.3
+# Define context variables (all equivalent)
+myapp ++environment production           # shorthand, space-separated
+myapp ++environment=production           # shorthand, equals syntax
+myapp --define.environment production    # long form, space-separated
+myapp --define.environment=production    # long form, equals syntax
 
-# Also supports equals syntax
-myapp ++environment=production ++version=1.2.3
-
-# Legacy longer form (still supported)
-myapp --define.environment production
-myapp --define.version=1.2.3
+# Values are parsed as YAML
+myapp ++count=5                         # int
+myapp ++layers="[1, 2, 3]"             # list
 
 # Use in configuration files as ${environment}, ${version}
 ```
