@@ -152,7 +152,7 @@ This is where Dracon's CLI integrates seamlessly with its configuration loading 
 
 1.  **Pydantic Model Defaults:** Initial values defined in your `BaseModel` (`field: int = 10`).
 2.  **`+file1.yaml`:** The first configuration file specified with `+` is loaded and composed (including its own includes, merges, etc.). Its values override the Pydantic defaults.
-3.  **`+file2.yaml`:** The second `+` file is loaded and _merged onto the result_ of step 2 (using Dracon's default merge strategy `<<{<+}[<~]` unless customized globally, though CLI merging isn't typically customized).
+3.  **`+file2.yaml`:** The second `+` file is loaded and _merged onto the result_ of step 2 (using Dracon's CLI merge strategy `<<{<~}[<~]` — replace mode, new wins for both dicts and lists).
 4.  **... Subsequent `+fileN.yaml` files:** Each is merged sequentially.
 5.  **`++VAR=value` Context:** Variables defined via `++` (or the longer form `--define.VAR=value`) are added to the context, potentially influencing subsequent interpolations within CLI argument values or during final resolution.
 6.  **CLI Argument Overrides (`--key value`, positional args):** Values provided directly on the command line override any values from previous steps.
@@ -164,7 +164,7 @@ This is where Dracon's CLI integrates seamlessly with its configuration loading 
 
 ## Argument Mapping
 
-- **Field Names:** `my_field_name` becomes both `--my_field_name` and `--my-field-name` by default (auto dash aliasing). Customizable with `Arg(long=...)` or disabled per-field with `Arg(auto_dash_alias=False)`.
+- **Field Names:** `my_field_name` becomes `--my-field-name` by default (underscores are replaced with dashes). Customizable with `Arg(long=...)` or disabled per-field with `Arg(auto_dash_alias=False)` to keep underscores.
 - **Types:** Pydantic types determine expected input (str, int, float, bool). `bool` fields become flags (`--verbose`, no value needed).
 - **Equals Syntax:** All non-flag options support `--option=value` in addition to `--option value`.
 - **Nested Models:** Fields that are Pydantic models allow nested overrides using dot notation (`--database.port 5433` or `--database.port=5433`). This works for _any_ nested key, even if the developer didn't define an explicit `Arg` for it. Dracon handles constructing the nested dictionary. If the nested argument itself is marked with `Arg(is_file=True)`, passing a file path will load that file's content _into_ that nested structure.

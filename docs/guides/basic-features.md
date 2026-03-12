@@ -51,7 +51,7 @@ log_level: ${getenv('LOG_LEVEL', 'INFO')}
 api_url: ${getenv('API_URL', 'http://localhost:8080')}
 
 # Mathematical expressions
-max_workers: ${os.cpu_count() * 2}
+max_workers: ${int(getenv('NUM_CPUS', '4')) * 2}
 timeout: ${30 + 10}
 
 # String operations
@@ -359,7 +359,7 @@ log_files: ${listdir('/var/log/myapp')}
 
 # Path operations
 data_path: ${join(expanduser('~'), 'data', 'myapp')}
-script_name: ${basename(__file__)}
+script_name: ${basename(FILE)}
 ```
 
 ### File Context Variables

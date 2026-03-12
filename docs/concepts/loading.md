@@ -26,7 +26,7 @@ When you call `dracon.load("file.yaml")` or `loader.load("file.yaml")`, several 
 Context is a dictionary (`dracon.utils.ShallowDict` internally) that holds variables and functions accessible during the loading process.
 
 - **Initial Context:** Provided via `DraconLoader(context=...)`. This is the primary way to make Pydantic models, custom types, or helper functions available.
-- **Default Context:** Dracon automatically adds `getenv`, `getcwd`, and `construct`.
+- **Default Context:** Dracon automatically adds `getenv`, `getcwd`, `listdir`, `join`, `basename`, `dirname`, `expanduser`, `now`, and `construct`. When `numpy` is installed, `np` is also available.
 - **Instruction Context (`!define`, `!set_default`):** Instructions modify the context available to subsequent nodes _within the same scope_ or child scopes during composition.
 - **Include Context (`$DIR`, etc.):** File/package loaders inject variables like `$DIR` into the context of the _included_ file's nodes.
 - **Interpolation Context (`${...}`):** Lazy interpolation expressions have access to the context captured _at the time the LazyInterpolable object was created_. This includes initial context, definitions, and include-specific variables. Context provided later via `.resolve(context=...)` or `.construct(context=...)` is merged with the captured context.

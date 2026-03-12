@@ -56,10 +56,10 @@ This file overrides specific settings for the production environment and merges 
 ```
 
 - It explicitly sets `environment`, `log_level`, `workers`, `database.host`, and `database.username`.
-- The `<<{<+}: !include file:base.yaml` line is crucial:
+- The `<<{>+}: !include file:$DIR/base.yaml` line is crucial:
   - `<<:` indicates a merge operation.
-  - `!include file:base.yaml` specifies the source to merge (our base config).
-  - `{<+}` defines the merge strategy: recursively merge dictionaries (`+`), letting values from the _new_ source (base.yaml in this case) win conflicts (`<`). This means defaults from `base.yaml` will be used if not defined in `prod.yaml`. If we wanted `prod.yaml` values to always take precedence, we would use `{>+}`.
+  - `!include file:$DIR/base.yaml` specifies the source to merge (our base config).
+  - `{>+}` defines the merge strategy: recursively merge dictionaries (`+`), letting values from the _existing_ mapping (prod.yaml) win conflicts (`>`). This means prod.yaml's overrides take precedence, and base.yaml fills in any missing defaults.
 
 ## Step 5: Create Secret File (`config/db_user.secret`)
 
@@ -135,7 +135,7 @@ Now, let's run it with different configurations:
     _Expected Output Snippets:_
 
     ```text
-    Processing for environment: production
+    Processing for environment: prod
     Using Database:
       Host: db.prod.svc.cluster.local
       User: prod_db_user

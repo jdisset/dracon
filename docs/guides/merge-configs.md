@@ -65,7 +65,7 @@ Dracon extends `<<:` with options to control dictionary and list merging precise
 
 **Examples:**
 
-1.  **Recursive Dict Merge, New Wins:**
+1.  **Recursive Dict Merge, Existing (local) Wins:**
 
     ```yaml
     base: &base
@@ -73,7 +73,7 @@ Dracon extends `<<:` with options to control dictionary and list merging precise
       settings: { theme: light }
 
     prod:
-      <<{+<}: *base # Merge recursively (+), new wins (<)
+      <<{+>}: *base # Merge recursively (+), existing wins (>)
       db:
         host: prod.db # Overrides base host
         # port inherited from base

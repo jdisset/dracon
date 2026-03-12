@@ -13,11 +13,10 @@ database:
 output_path: "/data/prod/${computed_runtime_value}/output"
 
 # Include and merge base.yaml *after* defining overrides.
-# Merge strategy <<{<+}:
-# {<+}: Dictionary merge: recursive ({+}), new values (from base.yaml here) win (<).
-# This means if a key exists in both prod.yaml and base.yaml, the one from base.yaml
-# will be kept during the merge, *unless* it's a nested dictionary, in which case
-# the dictionaries are merged recursively following the same rule.
-# Lists are replaced by default (new wins). See Merging docs for details.
+# Merge strategy <<{>+}:
+# {>+}: Dictionary merge: recursive (+), existing values (from prod.yaml) win (>).
+# This means prod.yaml values take precedence over base.yaml values.
+# Base.yaml provides defaults for any keys not overridden here.
+# Lists are replaced by default (existing wins). See Merging docs for details.
 
-<<{>+}: !include file:$DIR/base.yaml # Note: EXISTING values (from prod.yaml) win over new values (from base.yaml)
+<<{>+}: !include file:$DIR/base.yaml

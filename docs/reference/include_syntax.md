@@ -79,9 +79,11 @@ config: !include var:user_type
 ### Conditional Includes
 
 ```yaml
-database: !if ${getenv('ENVIRONMENT') == 'prod'}
-  then: !include file:config/prod-db.yaml
-  else: !include file:config/dev-db.yaml
+!if ${getenv('ENVIRONMENT') == 'prod'}:
+  then:
+    database: !include file:config/prod-db.yaml
+  else:
+    database: !include file:config/dev-db.yaml
 ```
 
 ### Includes in Loops
@@ -137,25 +139,16 @@ user_config: !include file:config/${username}.yaml
 
 ### Optional Includes
 
-While not directly supported, you can use conditionals:
+Use environment variables or `!if` to conditionally include files:
 
 ```yaml
-optional_config: !if ${file_exists('optional.yaml')}
-  then: !include file:optional.yaml
-  else: {}
-```
+# conditionally include based on an environment variable
+!if ${getenv('USE_LOCAL_CONFIG', 'false') == 'true'}:
+  then:
+    local_config: !include file:local.yaml
 
-### Include with Fallbacks
-
-```yaml
-config: !include file:local.yaml
-fallback: !include file:default.yaml
-
-# Or use variables with conditionals
-!define config_file: !if ${file_exists('local.yaml')}
-  then: local.yaml
-  else: default.yaml
-
+# or use a variable to select the config file
+!define config_file: ${getenv('CONFIG_FILE', 'default.yaml')}
 final_config: !include file:${config_file}
 ```
 

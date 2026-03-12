@@ -1,25 +1,21 @@
 # Concepts: Interpolation Engine
 
-Dracon's interpolation feature (`${...}` and `$(...)`) allows embedding dynamic Python expressions within YAML strings. Understanding how this works, especially regarding lazy evaluation and security, is important.
+Dracon's interpolation feature (`${...}`) allows embedding dynamic Python expressions within YAML strings. Understanding how this works, especially regarding lazy evaluation and security, is important.
 
-## Lazy (`${...}`) vs. Immediate (`$(...)`)
+## How Interpolation Works
 
-- **Lazy Interpolation (`${...}`):**
+Expressions written as `${...}` (or `$(...)` — both syntaxes are identical in behavior) are evaluated **lazily** at construction time, when the value is accessed in Python after the configuration is loaded and composed.
 
-  - **Evaluation:** Deferred until the value is accessed in Python _after_ the entire configuration is loaded and composed.
-  - **Mechanism:** Dracon creates internal `LazyInterpolable` placeholder objects during construction. When you access `config.my_key`, if `my_key` holds a `LazyInterpolable`, its expression is evaluated at that moment using the captured context and references. If using Dracon's default containers (`Mapping`, `Sequence`), this happens automatically. If using standard `dict`/`list`, resolution might require manual triggering (e.g., `resolve_all_lazy(config)`).
-  - **References:** Can use `@` to reference _final_ constructed values of other keys and `&` to reference _nodes_ during composition (primarily for templating).
-  - **Use Case:** Most common. Ideal for values depending on other config keys, runtime context, or environment variables needed _after_ loading.
+**Mechanism:** During YAML composition, Dracon detects interpolation patterns and creates internal `LazyInterpolable` placeholder objects. When you access `config.my_key`, if `my_key` holds a `LazyInterpolable`, its expression is evaluated at that moment using the captured context and references. If using Dracon's default containers (`Mapping`, `Sequence`), this happens automatically. If using standard `dict`/`list`, resolution might require manual triggering (e.g., `resolve_all_lazy(config)`).
 
-- **Immediate Interpolation (`$(...)`):**
-  - **Evaluation:** Executed _during_ the initial YAML parsing and composition phase. The result replaces the `$(...)` token immediately.
-  - **Mechanism:** The expression is evaluated by the configured engine as soon as the token is encountered by the parser/composer.
-  - **References:** Cannot use `@` or `&` reliably, as the target values/nodes likely haven't been fully composed or constructed yet.
-  - **Use Case:** Less common. Primarily for dynamically generating YAML tags (`!$(type_var)`) or simple scalar values needed _during_ parsing itself.
+**References:** Expressions can use `@` to reference _final_ constructed values of other keys and `&` to reference _nodes_ during composition (primarily for templating).
+
+!!! note
+    Both `${...}` and `$(...)` behave identically — they are both lazy. There is no "immediate" interpolation mode.
 
 ## The Evaluation Engine: `asteval` vs. `eval`
 
-Dracon offers two engines for evaluating the Python expressions within `${...}` and `$(...)`:
+Dracon offers two engines for evaluating expressions:
 
 1.  **`asteval` (Default & Recommended):**
 
@@ -60,10 +56,9 @@ Expressions have access to:
 
 - Variables provided via `DraconLoader(context=...)`.
 - Variables defined via `!define` / `!set_default`.
-- Dracon's default context (`getenv`, `getcwd`, `construct`).
-- Include-specific context (`$DIR`, `$FILE`, etc.).
+- Dracon's default context functions: `getenv`, `getcwd`, `listdir`, `join`, `basename`, `dirname`, `expanduser`, `now`, `construct`.
+- File-specific context variables: `DIR`, `FILE`, `FILE_PATH`, `FILE_STEM`, `FILE_EXT`, `FILE_LOAD_TIME`, `FILE_SIZE`.
+- `numpy` as `np` (when installed).
 - Python built-ins allowed by the engine (`asteval` has a curated list; `eval` has all).
 - Special symbols for references (`@`, `&` handled internally before evaluation).
 - Helper functions or classes added to the context.
-
-The _exact_ context available depends on _when_ the expression is evaluated (composition time for `$(...)`, access time for `${...}`). Lazy evaluation (`${...}`) generally has access to a more complete context reflecting the final configuration structure.

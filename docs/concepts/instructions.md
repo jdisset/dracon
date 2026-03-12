@@ -1,6 +1,6 @@
 # Concepts: Composition Instructions
 
-Dracon provides special instruction tags (`!define`, `!if`, `!each`, `!noconstruct`) that allow you to embed logic directly into your YAML. These instructions operate _during the composition phase_, manipulating the YAML node tree and context _before_ includes, merges, or final Python object construction occurs.
+Dracon provides special instruction tags (`!define`, `!if`, `!each`) that allow you to embed logic directly into your YAML. These instructions operate _during the composition phase_, manipulating the YAML node tree and context _before_ includes, merges, or final Python object construction occurs. There are also construction-phase tags like `!noconstruct` that control what gets built into Python objects.
 
 ## Defining Variables (`!define`, `!set_default`)
 
@@ -37,13 +37,15 @@ config:
 
 Includes or excludes configuration blocks based on a condition evaluated _at composition time_.
 
-- **Syntax:** `!if <condition_expr>: <node_value>`
+- **Syntax:** `!if <condition_expr>: <node_value>` (must be a mapping key)
 - **Behavior:**
-  - `<condition_expr>` is evaluated. It can be a boolean literal (`true`/`false`), an integer (0 is false, others true), a string (non-empty is true), or an interpolation (`${...}` or `$(...)`) resolving to a truthy/falsy value _at composition time_.
-  - **If True:**
-    - If `<node_value>` is a mapping, its key-value pairs are merged into the parent mapping (using default merge).
-    - If `<node_value>` is a scalar/sequence, the _entire_ `!if ...: ...` entry is replaced by `<node_value>` (mainly useful if the parent is a sequence).
-  - **If False:** The _entire_ `!if ...: ...` entry is **removed**.
+  - `<condition_expr>` is evaluated. It can be a boolean literal (`true`/`false`), an integer (0 is false, others true), a string (non-empty is true), or an interpolation (`${...}`) resolving to a truthy/falsy value _at composition time_.
+  - **Shorthand format** (no `then`/`else` keys in value):
+    - **If True:** The value's key-value pairs are merged into the parent mapping.
+    - **If False:** The `!if` entry is **removed** entirely.
+  - **`then`/`else` format** (value mapping contains `then` and/or `else` keys):
+    - **If True:** The `then` branch's content is merged into the parent mapping.
+    - **If False:** The `else` branch's content is merged (or nothing if no `else`).
 
 ```yaml
 !define enable_feature_x: ${getenv('FEATURE_X') == 'true'}
@@ -125,7 +127,7 @@ Sometimes you need helper nodes or templates during composition that shouldn't a
 - **`!noconstruct <node>`**
 
   - Applies to any node (scalar, sequence, mapping).
-  - The node exists during composition (can be referenced via anchors `&`, includes `!include`, or defines `!define`) but it and its children are **completely removed** before the final construction phase begins.
+  - The node exists during composition (can be referenced via anchors `&`, includes `!include`, or defines `!define`) but it and its children are **skipped during the construction phase** — they won't appear in the final Python object.
 
 - **`__dracon__<key>: ...`**
   - Applies only to top-level keys in a mapping.

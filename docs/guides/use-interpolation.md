@@ -40,7 +40,7 @@ print(config.server.log_level)  # Output: DEBUG
 Inside a `${...}` expression, use `@` followed by a [KeyPath](../reference/keypaths.md) to reference the _final_ value of another configuration key after all loading, merging, and construction.
 
 - **Absolute Path:** `@/path/from/root`
-- **Relative Path:** `@.sibling_key`, `@../parent_key`
+- **Relative Path:** `@sibling_key`, `@..parent_key` (two dots = up one level)
 
 ```yaml
 app:
@@ -56,30 +56,17 @@ logging:
 
 **Important:** `@` references point to the _final, constructed_ value, but the expression itself is still evaluated lazily.
 
-## Immediate Interpolation (`$(...)`)
+## Alternative Syntax: `$(...)`
 
-Values enclosed in `$(...)` are evaluated _immediately_ during the YAML parsing phase.
-
-**Use Cases:**
-
-- Dynamically generating YAML tags.
-- Calculating simple scalar values needed instantly.
-
-**Limitations:**
-
-- Cannot use `@` references (target values don't exist yet).
-- Can only reliably access context variables defined _before_ the `$(...)` expression.
+The `$(...)` syntax is also supported and behaves **identically** to `${...}` — both are evaluated lazily at construction time. Use whichever you prefer.
 
 ```yaml
-!define type_name: "str"
 !define scale: 10
 
 config:
-  # Tag determined immediately
-  value: !$(type_name) 123.45 # Node gets tag !str
-
-  # Value calculated immediately
-  scaled_value: $(scale * 5.5) # Node gets value 55.0
+  # these are equivalent
+  scaled_a: ${scale * 5.5}
+  scaled_b: $(scale * 5.5)
 ```
 
 ## Using Context Variables

@@ -2,6 +2,9 @@
 
 Dracon provides special YAML tags that add programming-like capabilities to your configuration files.
 
+!!! important
+    All instructions (`!define`, `!if`, `!each`) must appear as **mapping key tags** — they tag the key, not the value.
+
 ## Variable Definition
 
 ### `!define` - Define Variables
@@ -9,19 +12,19 @@ Dracon provides special YAML tags that add programming-like capabilities to your
 Define variables for use throughout the configuration:
 
 ```yaml
-# Simple variable definition
+# simple variable definition
 !define api_version: v2
 
-# Expression-based definition
-!define max_workers: ${os.cpu_count() * 2}
+# expression-based definition
+!define max_workers: ${int(getenv('NUM_CPUS', '4')) * 2}
 
-# Dictionary definition
+# dictionary definition
 !define database_config:
   host: localhost
   port: 5432
   ssl: true
 
-# Use defined variables
+# use defined variables
 api_endpoint: https://api.example.com/${api_version}
 workers: ${max_workers}
 database: ${database_config}
@@ -32,61 +35,65 @@ database: ${database_config}
 Set variables only if they don't already exist:
 
 ```yaml
-# Set default only if not already defined
+# set default only if not already defined
 !set_default environment: development
 !set_default log_level: INFO
 
-# Later definitions won't override
-!set_default environment: production  # Ignored if already set
+# later definitions won't override
+!set_default environment: production  # ignored if already set
 
 app_config:
-  env: ${environment}     # Uses first definition
-  logging: ${log_level}   # Uses default
+  env: ${environment}     # uses first definition
+  logging: ${log_level}   # uses default
 ```
+
+### Processing Order
+
+Instructions are processed in this order: `!set_default` → `!define` → `!each` → `!if`. This means `!define` can override `!set_default`, and `!if`/`!each` can use variables defined by both.
 
 ## Conditional Logic
 
 ### `!if` - Conditional Inclusion
 
-Include content based on conditions:
+Include or exclude content based on conditions. The `!if` tag goes on the **key** (not the value):
 
 ```yaml
-# Simple conditional
-database: !if ${getenv('ENVIRONMENT') == 'prod'}
+# then/else format — content is injected into the parent mapping
+!if ${getenv('ENVIRONMENT') == 'prod'}:
   then:
-    host: prod-db.example.com
-    ssl: true
+    database_host: prod-db.example.com
+    database_ssl: true
   else:
-    host: localhost
-    ssl: false
+    database_host: localhost
+    database_ssl: false
 
-# Without else clause
-debug_settings: !if ${getenv('DEBUG', 'false') == 'true'}
+# without else clause
+!if ${getenv('DEBUG', 'false') == 'true'}:
   then:
     log_level: DEBUG
     verbose: true
 
-# Complex conditions
-cache_config: !if ${int(getenv('MEMORY_GB', '4')) >= 8}
-  then:
-    type: redis
-    size: 2GB
-  else:
-    type: memory
-    size: 512MB
+# shorthand format — include content directly if condition is true
+!if ${getenv('ENABLE_CACHE', 'true') == 'true'}:
+  cache_type: redis
+  cache_size: 2GB
 ```
+
+!!! note
+    The `then`/`else` format checks for keys literally named `then` and `else` in the value mapping. If those keys are present, it uses them as branches. Otherwise, the entire value is included as-is when the condition is true (shorthand format).
 
 ### Nested Conditionals
 
 ```yaml
-deployment: !if ${getenv('ENVIRONMENT') == 'prod'}
-  then: !if ${getenv('REGION') == 'us-east-1'}
-    then:
-      cluster: prod-us-east
-      replicas: 5
-    else:
-      cluster: prod-eu-west
-      replicas: 3
+!if ${getenv('ENVIRONMENT') == 'prod'}:
+  then:
+    !if ${getenv('REGION') == 'us-east-1'}:
+      then:
+        cluster: prod-us-east
+        replicas: 5
+      else:
+        cluster: prod-eu-west
+        replicas: 3
   else:
     cluster: dev
     replicas: 1
@@ -96,10 +103,10 @@ deployment: !if ${getenv('ENVIRONMENT') == 'prod'}
 
 ### `!each(var)` - Loop over Collections
 
-Iterate over sequences and mappings:
+Iterate over sequences and mappings. Takes a **single** variable name:
 
 ```yaml
-# Loop over list
+# loop over list
 !define environments: [dev, staging, prod]
 
 !each(env) ${environments}:
@@ -107,23 +114,28 @@ Iterate over sequences and mappings:
     database_url: postgres://db.${env}.local/myapp
     redis_url: redis://cache.${env}.local
 
-# Loop over mapping
+# loop over mapping keys
 !define services:
   auth: 8001
   api: 8002
   web: 8080
 
-!each(service, port) ${services}:
-  ${service}_service:
-    name: ${service}
-    port: ${port}
-    url: http://localhost:${port}
+# iterating a dict yields its keys
+!each(service) ${services}:
+  ${service}_url: http://localhost:${services[service]}
+
+# to iterate over key-value pairs, use .items()
+!each(item) ${services.items()}:
+  ${item[0]}_service:
+    name: ${item[0]}
+    port: ${item[1]}
+    url: http://localhost:${item[1]}
 ```
 
 ### Advanced Loop Patterns
 
 ```yaml
-# Loop with complex content
+# loop with complex content
 !define replicas: 3
 
 !each(i) ${range(replicas)}:
@@ -135,7 +147,7 @@ Iterate over sequences and mappings:
       WORKER_ID: ${i}
       WORKER_TYPE: standard
 
-# Conditional within loop
+# conditional within loop
 !define features: [auth, api, cache, metrics]
 
 !each(feature) ${features}:
@@ -171,7 +183,7 @@ deployment_steps:
   - name: initialize
     command: setup
 
-  # Dynamic items spliced directly into the sequence
+  # dynamic items spliced directly into the sequence
   - !each(svc) ${services}:
       - name: deploy_${svc}
         command: kubectl apply -f ${svc}.yaml
@@ -179,7 +191,7 @@ deployment_steps:
   - name: verify
     command: healthcheck
 
-  # Another dynamic section
+  # another dynamic section
   - !each(svc) ${services}:
       - name: test_${svc}
         command: pytest tests/${svc}/
@@ -220,19 +232,18 @@ deployments:
 
 ## Construction Control
 
-### `!noconstruct` - Prevent Construction
+### `!noconstruct` - Skip During Construction
 
-Prevent automatic Pydantic model construction:
+Tag a key or value with `!noconstruct` to skip it during Pydantic model construction. The node is kept in the YAML tree during composition but ignored when building Python objects.
 
 ```yaml
-# Raw data without model construction
-raw_config: !noconstruct
-  database:
-    host: localhost
-    port: 5432
-  
-# Later construct manually if needed
-app_config: !DatabaseConfig ${raw_config.database}
+# this key-value pair will be excluded from the constructed object
+!noconstruct metadata:
+  internal_note: this is for tooling only
+
+# regular keys are constructed normally
+app_name: my-service
+port: 8080
 ```
 
 ## Deferred Execution
@@ -242,13 +253,13 @@ app_config: !DatabaseConfig ${raw_config.database}
 Delay construction until runtime context is available:
 
 ```yaml
-# Simple deferred
+# simple deferred
 output_path: !deferred /data/${runtime_id}/output
 
-# Deferred with context clearing
+# deferred with context clearing
 clean_path: !deferred::clear_ctx=old_context /new/${new_runtime_var}
 
-# Deferred with tag
+# deferred with tag
 model_config: !deferred:MyModel
   setting1: ${runtime_value}
   setting2: computed
@@ -259,12 +270,14 @@ model_config: !deferred:MyModel
 ### Instructions with Includes
 
 ```yaml
-# Conditional includes
-config: !if ${getenv('USE_LOCAL_CONFIG', 'false') == 'true'}
-  then: !include file:local.yaml
-  else: !include file:default.yaml
+# conditional includes
+!if ${getenv('USE_LOCAL_CONFIG', 'false') == 'true'}:
+  then:
+    config: !include file:local.yaml
+  else:
+    config: !include file:default.yaml
 
-# Loop with includes
+# loop with includes
 !define config_files: [database, cache, logging]
 
 !each(config_name) ${config_files}:
@@ -277,11 +290,11 @@ config: !if ${getenv('USE_LOCAL_CONFIG', 'false') == 'true'}
 !define base_port: 8000
 !define services: [auth, api, worker]
 
-!each(service, index) ${enumerate(services)}:
-  !define service_port: ${base_port + index}
-  
-  ${service}_config:
-    name: ${service}
+!each(item) ${list(enumerate(services))}:
+  !define service_port: ${base_port + item[0]}
+
+  ${item[1]}_config:
+    name: ${item[1]}
     port: ${service_port}
     health_check: http://localhost:${service_port}/health
 ```
@@ -291,7 +304,7 @@ config: !if ${getenv('USE_LOCAL_CONFIG', 'false') == 'true'}
 ```yaml
 !define deployment_type: ${getenv('DEPLOYMENT', 'standard')}
 
-app_config: !if ${deployment_type == 'microservices'}
+!if ${deployment_type == 'microservices'}:
   then:
     !each(service) ${services}:
       ${service}: !include file:services/${service}.yaml
@@ -301,17 +314,13 @@ app_config: !if ${deployment_type == 'microservices'}
 
 ## Error Handling
 
-### Graceful Failures
+### Graceful Defaults
 
 ```yaml
-# Optional variable definition
-!if ${hasattr(os, 'getenv')}:
-  then:
-    !define api_key: ${getenv('API_KEY', '')}
-  else:
-    !define api_key: ''
+# optional variable definition
+!set_default api_key: ${getenv('API_KEY', '')}
 
-# Conditional execution with validation
+# conditional execution with validation
 !if ${getenv('CONFIG_FILE', '') != ''}:
   then:
     external_config: !include file:${getenv('CONFIG_FILE')}
@@ -321,7 +330,6 @@ app_config: !if ${deployment_type == 'microservices'}
 
 - Instructions are processed during composition, not at runtime
 - Complex loops and conditionals can slow loading
-
 - Variables are resolved once and cached
 - Deferred instructions delay computation until needed
 
@@ -332,30 +340,22 @@ app_config: !if ${deployment_type == 'microservices'}
 ```yaml
 !define environment: ${getenv('ENVIRONMENT', 'dev')}
 
-database: !if ${environment == 'prod'}
-  then: !include file:config/prod-db.yaml
-  else: !include file:config/dev-db.yaml
-
-features: !if ${environment in ['staging', 'prod']}
+!if ${environment == 'prod'}:
   then:
-    - feature_flags
-    - monitoring
-    - alerts
+    database: !include file:config/prod-db.yaml
   else:
-    - debug_mode
-    - hot_reload
-```
+    database: !include file:config/dev-db.yaml
 
-### Service Discovery
-
-```yaml
-!define service_discovery: ${getenv('SERVICE_DISCOVERY', 'static')}
-
-services: !if ${service_discovery == 'consul'}
-  then: ${discover_services_from_consul()}
+!if ${environment in ['staging', 'prod']}:
+  then:
+    features:
+      - feature_flags
+      - monitoring
+      - alerts
   else:
-    !each(service, port) ${static_services}:
-      ${service}: http://localhost:${port}
+    features:
+      - debug_mode
+      - hot_reload
 ```
 
 ### Feature Flags
