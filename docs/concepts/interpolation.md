@@ -50,6 +50,76 @@ There's also a `DRACON_EVAL_ENGINE` environment variable that can be set to `ast
 
 **Recommendation:** Stick with the default `asteval` engine unless you have a very specific, well-understood need for `eval` and fully control the configuration sources.
 
+## Permissive Evaluation (Two-Phase Resolution)
+
+By default, if an expression references an undefined variable, Dracon raises an `EvaluationError`. This is usually what you want — typos get caught early.
+
+But sometimes you need **two-phase resolution**: some `${...}` variables are known at config load time, others are injected later at runtime. Without permissive mode, you'd have to wrap every runtime-dependent expression in `!deferred`, even when the expression is a simple string template.
+
+With `permissive=True`, Dracon resolves what it can and leaves the rest as literal `${...}` strings:
+
+```python
+from dracon.interpolation import evaluate_expression
+
+# phase 1: only 'prefix' is known
+result = evaluate_expression(
+    "${prefix + '_' + version}",
+    context={'prefix': 'deploy'},
+    permissive=True,
+)
+# result: "${\'deploy_\' + version}"  (partially folded)
+
+# phase 2: 'version' is now available
+final = evaluate_expression(
+    result,
+    context={'prefix': 'deploy', 'version': '1.2.3'},
+)
+# final: "deploy_1.2.3"
+```
+
+### How it works
+
+When `permissive=True` and an expression hits an undefined name:
+
+1. Dracon catches the `UndefinedNameError` (a subclass of `EvaluationError`)
+2. It runs **constant folding** on the AST — substituting known variables and simplifying sub-expressions that can be computed (arithmetic, string concat, comparisons, boolean ops, `if/else` with known conditions)
+3. The result is either a `PartiallyResolved` expression (some progress made) or left completely unchanged
+
+Multi-interpolation strings work naturally — known parts resolve, unknown parts stay:
+
+```python
+result = evaluate_expression(
+    "${a} and ${b}",
+    context={'a': 1},
+    permissive=True,
+)
+# result: "1 and ${b}"
+```
+
+### Where to use `permissive`
+
+The `permissive` parameter is available on:
+
+- `evaluate_expression(..., permissive=True)` — the core function
+- `do_safe_eval(..., permissive=True)` — low-level eval
+- `InterpolableNode.evaluate(..., permissive=True)` — node-level
+- `LazyInterpolable(value, permissive=True)` — lazy wrapper
+- `resolve_all_lazy(obj, permissive=True)` — bulk resolution
+- `Dracontainer.resolve_all_lazy(permissive=True)` — container method
+
+### Permissive vs. `!deferred`
+
+Both handle "not yet available" values, but they solve different problems:
+
+| | Permissive eval | `!deferred` |
+|---|---|---|
+| **Scope** | Individual `${...}` expressions | Entire YAML subtrees |
+| **Result** | String with unresolved `${...}` markers | `DeferredNode` object |
+| **Use case** | Template strings with mixed known/unknown vars | Complex objects that need runtime construction |
+| **Resolution** | Call `evaluate_expression` again with full context | Call `construct(node, context={...})` |
+
+Use permissive eval when you have simple template strings where some variables arrive later. Use `!deferred` when entire object branches need runtime construction with Python objects (models, connections, etc.).
+
 ## Context and Symbol Availability
 
 Expressions have access to:
