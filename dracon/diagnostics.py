@@ -122,6 +122,13 @@ class EvaluationError(DraconError):
         self.available_symbols = _filter_symbols_for_display(available_symbols) if available_symbols else None
 
 
+class UndefinedNameError(EvaluationError):
+    """Raised when an expression references a name not in the symbol table."""
+    def __init__(self, name: str, **kwargs):
+        self.undefined_name = name
+        super().__init__(f"name '{name}' is not defined", **kwargs)
+
+
 def _filter_symbols_for_display(symbols: Optional[dict[str, Any]], max_keys: int = 20) -> Optional[dict[str, str]]:
     """Filter symbols dict for error display, keeping only user-relevant keys with type info."""
     if not symbols:

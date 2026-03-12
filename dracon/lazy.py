@@ -167,6 +167,7 @@ class LazyInterpolable(Lazy[T]):
                     context=ctx,
                     enable_shorthand_vars=self.enable_shorthand_vars,
                     source_context=self.source_context,
+                    permissive=self.permissive,
                 )
                 return self.validate(resolved_value)
             except InterpolationError:
@@ -487,6 +488,7 @@ def resolve_all_lazy(
     visited_ids=None,
     context_override=None,
     max_passes=20,
+    permissive: bool = False,
 ):
     """Resolves all lazy objects in a multi-pass approach by depth level."""
     if visited_ids is None:
@@ -501,6 +503,7 @@ def resolve_all_lazy(
                 current_path = ROOTPATH
             obj.root_obj = root_obj
             obj.current_path = current_path
+            obj.permissive = permissive
             return obj.resolve(context_override=context_override)
         return obj  # return non-lazy, non-container types as is
 
@@ -522,7 +525,6 @@ def resolve_all_lazy(
 
     resolved_something_in_last_pass = True
     pass_num = 0
-    max_passes = max_passes
 
     while resolved_something_in_last_pass and pass_num < max_passes:
         resolved_something_in_last_pass = False
@@ -563,6 +565,7 @@ def resolve_all_lazy(
                 adjusted_path = KeyPath(adjusted_path_str)
 
                 # Pass the container `obj` as the root for key resolution relative to itself
+                key.permissive = permissive
                 success, transform = resolve_single_key(
                     adjusted_path, key, root_obj, context_override
                 )
@@ -588,6 +591,7 @@ def resolve_all_lazy(
                     break
             adjusted_path = KeyPath(adjusted_path_str)
 
+            value.permissive = permissive
             success = resolve_single_value(adjusted_path, value, root_obj, context_override)
             if success:
                 resolved_something_in_last_pass = True
@@ -605,20 +609,20 @@ def resolve_all_lazy(
                     key_str = k.value if isinstance(k, LazyInterpolable) else str(k)
                     child_path = current_path + key_str
                     obj[k] = resolve_all_lazy(
-                        v, root_obj, child_path, visited_ids, context_override, max_passes
+                        v, root_obj, child_path, visited_ids, context_override, max_passes, permissive=permissive
                     )
             elif list_like(obj) and not isinstance(obj, (str, bytes)):
                 for i, item in enumerate(list(obj)):  # iterate copy
                     child_path = current_path + str(i)
                     obj[i] = resolve_all_lazy(
-                        item, root_obj, child_path, visited_ids, context_override, max_passes
+                        item, root_obj, child_path, visited_ids, context_override, max_passes, permissive=permissive
                     )
             elif isinstance(obj, BaseModel):
                 for field_name in list(obj.model_fields_set):  # iterate copy
                     child_path = current_path + field_name
                     current_val = getattr(obj, field_name)
                     resolved_val = resolve_all_lazy(
-                        current_val, root_obj, child_path, visited_ids, context_override, max_passes
+                        current_val, root_obj, child_path, visited_ids, context_override, max_passes, permissive=permissive
                     )
                     try:
                         setattr(obj, field_name, resolved_val)

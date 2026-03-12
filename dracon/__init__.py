@@ -18,7 +18,7 @@ from dracon.loader import (
     make_callable,
 )
 
-from dracon.lazy import resolve_all_lazy
+from dracon.lazy import resolve_all_lazy, LazyDraconModel
 from dracon.commandline import Arg, HelpSection, Program, make_program, dracon_program, Subcommand, subcommand
 from dracon.resolvable import Resolvable
 from dracon.merge import MergeKey
@@ -32,6 +32,7 @@ from dracon.diagnostics import (
     DraconError,
     CompositionError,
     EvaluationError,
+    UndefinedNameError,
     SchemaError,
     SourceContext,
     SourceLocation,
