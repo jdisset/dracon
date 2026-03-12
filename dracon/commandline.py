@@ -803,9 +803,18 @@ class Program(BaseModel, Generic[T]):
             if print_help in actions:
                 print_help_subcommand(self, child_prog, subcmd_name)
 
+            # include interpolated subcommand defaults so ${...} goes through
+            # YAML composition (plain defaults are left to pydantic)
+            subcmd_defaults = {}
+            for fname, finfo in subcmd_type.model_fields.items():
+                if fname != self._subcommand_discriminator and fname not in subcmd_raw_args:
+                    if isinstance(finfo.default, str) and '${' in finfo.default:
+                        subcmd_defaults[fname] = finfo.default
+
             # combine subcmd args into root raw_args
             root_raw_args[field_name] = {
-                self._subcommand_discriminator: subcmd_name, **subcmd_raw_args
+                self._subcommand_discriminator: subcmd_name,
+                **subcmd_defaults, **subcmd_raw_args,
             }
         else:
             # no subcommand token — just config files
@@ -1211,6 +1220,12 @@ class Program(BaseModel, Generic[T]):
             for subcmd_type in set(self._subcommand_map.values()):
                 sub_tag = f"{subcmd_type.__module__}.{subcmd_type.__name__}"
                 loader.update_context({sub_tag: subcmd_type, subcmd_type.__name__: subcmd_type})
+
+        # inject interpolated string defaults into raw_args so ${...} goes through
+        # YAML composition (plain string defaults are left to pydantic)
+        for fname, finfo in self.conf_type.model_fields.items():
+            if fname not in raw_args and isinstance(finfo.default, str) and '${' in finfo.default:
+                raw_args[fname] = finfo.default
 
         pdump_str = loader.dump(self.conf_type.__new__(self.conf_type))
 
