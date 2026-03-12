@@ -10,7 +10,7 @@ from pydantic import (
     WrapValidator,
     ValidationError,
 )
-from typing import Annotated, Optional, List, Literal, Union, Dict, Any, Tuple, Set
+from typing import Annotated, Optional, List, Literal, Union, Dict, Any, Tuple, Set, get_args, get_origin
 import subprocess
 import os
 from datetime import datetime
@@ -1912,3 +1912,373 @@ def test_dracon_program_sections_epilog(capsys):
     assert "Custom:" in out
     assert "custom content" in out
     assert "footer text" in out
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Subcommand system tests
+# ──────────────────────────────────────────────────────────────────────────────
+
+from dracon import Subcommand, subcommand, dracon_program
+from dracon.commandline import HelpSection
+
+
+# -- fixtures for subcommand tests --
+
+class TrainCmd(BaseModel):
+    """Train a model on the dataset."""
+    action: Literal['train'] = 'train'
+    epochs: Annotated[int, Arg(help="Number of epochs")] = 10
+    lr: float = 0.001
+
+    def run(self, ctx):
+        return {'action': 'train', 'epochs': self.epochs, 'lr': self.lr, 'verbose': ctx.verbose}
+
+
+class EvalCmd(BaseModel):
+    """Evaluate a model on test data."""
+    action: Literal['eval'] = 'eval'
+    dataset: Annotated[str, Arg(help="Test dataset path")] = "test.csv"
+
+    def run(self, ctx):
+        return {'action': 'eval', 'dataset': self.dataset, 'verbose': ctx.verbose}
+
+
+class SubCmdCLI(BaseModel):
+    verbose: Annotated[bool, Arg(short='v', help="Verbose output")] = False
+    command: Subcommand(TrainCmd, EvalCmd)
+
+
+# -- test Subcommand() type factory --
+
+def test_subcommand_produces_annotated_union():
+    """Subcommand() returns an Annotated[Union[...], Field(discriminator=...), Arg(subcommand=True)]"""
+    from typing import get_args, get_origin
+    import typing
+    ann = Subcommand(TrainCmd, EvalCmd)
+    # should be Annotated
+    assert typing.get_origin(ann) is Annotated
+    inner_args = typing.get_args(ann)
+    # first arg is the Union
+    union_type = inner_args[0]
+    assert typing.get_origin(union_type) is Union
+    union_members = set(typing.get_args(union_type))
+    assert union_members == {TrainCmd, EvalCmd}
+    # metadata should contain an Arg with subcommand=True
+    metadata = inner_args[1:]
+    arg_meta = [m for m in metadata if isinstance(m, Arg)]
+    assert len(arg_meta) == 1
+    assert arg_meta[0].subcommand is True
+    assert arg_meta[0].positional is True
+
+
+# -- test @subcommand decorator --
+
+def test_subcommand_decorator_injects_discriminator():
+    """@subcommand('name') injects action: Literal['name'] = 'name' into the model."""
+
+    @subcommand('deploy')
+    class DeployCmd(BaseModel):
+        target: str = "prod"
+
+    assert 'action' in DeployCmd.model_fields
+    field = DeployCmd.model_fields['action']
+    assert field.default == 'deploy'
+    # the annotation should be Literal['deploy']
+    args = get_args(field.annotation)
+    assert 'deploy' in args
+
+    # should be instantiable
+    inst = DeployCmd(target="staging")
+    assert inst.action == 'deploy'
+    assert inst.target == "staging"
+
+
+def test_subcommand_decorator_custom_discriminator():
+    """@subcommand supports custom discriminator field name."""
+
+    @subcommand('build', discriminator='cmd')
+    class BuildCmd(BaseModel):
+        output: str = "dist"
+
+    assert 'cmd' in BuildCmd.model_fields
+    inst = BuildCmd()
+    assert inst.cmd == 'build'
+
+
+# -- test Program detects subcommand fields --
+
+def test_program_detects_subcommand_map():
+    """Program.model_post_init builds _subcommand_map from Subcommand fields."""
+    prog = make_program(SubCmdCLI, name="test")
+    assert hasattr(prog, '_subcommand_map')
+    assert 'train' in prog._subcommand_map
+    assert 'eval' in prog._subcommand_map
+    assert prog._subcommand_map['train'] is TrainCmd
+    assert prog._subcommand_map['eval'] is EvalCmd
+    assert prog._subcommand_field_name == 'command'
+
+
+# -- test parsing --
+
+def test_parse_subcommand_basic():
+    """tool train --epochs 10 -> correct TrainCmd with epochs=10"""
+    prog = make_program(SubCmdCLI, name="tool")
+    conf, _ = prog.parse_args(["train", "--epochs", "50"])
+    assert isinstance(conf.command, TrainCmd)
+    assert conf.command.epochs == 50
+    assert conf.command.action == 'train'
+    assert conf.verbose is False
+
+
+def test_parse_subcommand_shared_before():
+    """tool --verbose train --epochs 10 -> verbose=True on root, epochs=10 on subcmd"""
+    prog = make_program(SubCmdCLI, name="tool")
+    conf, _ = prog.parse_args(["--verbose", "train", "--epochs", "10"])
+    assert conf.verbose is True
+    assert isinstance(conf.command, TrainCmd)
+    assert conf.command.epochs == 10
+
+
+def test_parse_subcommand_shared_after():
+    """tool train --epochs 10 --verbose -> same as shared before"""
+    prog = make_program(SubCmdCLI, name="tool")
+    conf, _ = prog.parse_args(["train", "--epochs", "10", "--verbose"])
+    assert conf.verbose is True
+    assert isinstance(conf.command, TrainCmd)
+    assert conf.command.epochs == 10
+
+
+def test_parse_subcommand_eval():
+    """tool eval --dataset mydata.csv"""
+    prog = make_program(SubCmdCLI, name="tool")
+    conf, _ = prog.parse_args(["eval", "--dataset", "mydata.csv"])
+    assert isinstance(conf.command, EvalCmd)
+    assert conf.command.dataset == "mydata.csv"
+
+
+def test_parse_subcommand_defaults():
+    """subcommand with all defaults"""
+    prog = make_program(SubCmdCLI, name="tool")
+    conf, _ = prog.parse_args(["train"])
+    assert isinstance(conf.command, TrainCmd)
+    assert conf.command.epochs == 10
+    assert conf.command.lr == 0.001
+
+
+def test_parse_subcommand_equals_syntax():
+    """tool train --epochs=50"""
+    prog = make_program(SubCmdCLI, name="tool")
+    conf, _ = prog.parse_args(["train", "--epochs=50"])
+    assert conf.command.epochs == 50
+
+
+# -- test config file scoping --
+
+def test_parse_subcommand_root_scoped_config(tmp_path):
+    """tool +base.yaml train -> root-scoped merge"""
+    config = tmp_path / "base.yaml"
+    config.write_text("verbose: true\n")
+    prog = make_program(SubCmdCLI, name="tool")
+    conf, _ = prog.parse_args([f"+{config}", "train"])
+    assert conf.verbose is True
+    assert isinstance(conf.command, TrainCmd)
+
+
+def test_parse_subcommand_scoped_config(tmp_path):
+    """tool train +training.yaml -> subcommand-scoped merge"""
+    config = tmp_path / "training.yaml"
+    config.write_text("epochs: 99\nlr: 0.01\n")
+    prog = make_program(SubCmdCLI, name="tool")
+    conf, _ = prog.parse_args(["train", f"+{config}"])
+    assert isinstance(conf.command, TrainCmd)
+    assert conf.command.epochs == 99
+    assert conf.command.lr == 0.01
+
+
+def test_parse_subcommand_full_config(tmp_path):
+    """full config at root with command: {action: train, epochs: 50}"""
+    config = tmp_path / "full.yaml"
+    config.write_text("verbose: true\ncommand:\n  action: train\n  epochs: 50\n")
+    prog = make_program(SubCmdCLI, name="tool")
+    conf, _ = prog.parse_args([f"+{config}"])
+    assert conf.verbose is True
+    assert isinstance(conf.command, TrainCmd)
+    assert conf.command.epochs == 50
+
+
+# -- test help output --
+
+def test_subcommand_toplevel_help(capsys):
+    """top-level --help lists commands with descriptions"""
+    prog = make_program(SubCmdCLI, name="ml-tool", version="1.0")
+    with pytest.raises(SystemExit):
+        prog.parse_args(["--help"])
+    out = capsys.readouterr().out
+    assert "Commands:" in out or "commands:" in out.lower()
+    assert "train" in out
+    assert "eval" in out
+    assert "Train a model" in out
+    assert "Evaluate a model" in out
+
+
+def test_subcommand_per_cmd_help(capsys):
+    """per-subcommand --help shows correct args, hides discriminator"""
+    prog = make_program(SubCmdCLI, name="ml-tool")
+    with pytest.raises(SystemExit):
+        prog.parse_args(["train", "--help"])
+    out = capsys.readouterr().out
+    assert "epochs" in out
+    assert "lr" in out
+    # discriminator 'action' should not appear
+    assert "--action" not in out
+
+
+def test_subcommand_help_shows_usage_with_command(capsys):
+    """top-level help shows COMMAND in usage line"""
+    prog = make_program(SubCmdCLI, name="ml-tool")
+    with pytest.raises(SystemExit):
+        prog.parse_args(["--help"])
+    out = capsys.readouterr().out
+    assert "COMMAND" in out
+
+
+# -- test YAML config validation --
+
+def test_subcommand_yaml_config_validates():
+    """YAML config {command: {action: train, epochs: 10}} validates correctly"""
+    data = {'verbose': False, 'command': {'action': 'train', 'epochs': 10, 'lr': 0.001}}
+    inst = SubCmdCLI.model_validate(data)
+    assert isinstance(inst.command, TrainCmd)
+    assert inst.command.epochs == 10
+
+
+# -- test .run() dispatch --
+
+def test_subcommand_run_dispatch():
+    """subcommand .run(ctx) receives parent instance"""
+
+    @dracon_program(name="tool")
+    class RunCLI(BaseModel):
+        verbose: Annotated[bool, Arg(short='v')] = False
+        command: Subcommand(TrainCmd, EvalCmd)
+
+    result = RunCLI.cli(["--verbose", "train", "--epochs", "25"])
+    assert result == {'action': 'train', 'epochs': 25, 'lr': 0.001, 'verbose': True}
+
+
+def test_root_run_takes_precedence():
+    """.run() on root takes precedence over subcommand .run()"""
+
+    class SubCmd(BaseModel):
+        action: Literal['sub'] = 'sub'
+        def run(self, ctx):
+            return 'subcmd ran'
+
+    @dracon_program(name="tool")
+    class RootRunCLI(BaseModel):
+        command: Subcommand(SubCmd)
+        def run(self):
+            return 'root ran'
+
+    result = RootRunCLI.cli(["sub"])
+    assert result == 'root ran'
+
+
+# -- test errors --
+
+def test_unknown_subcommand_error():
+    """unknown subcommand name produces an error"""
+    prog = make_program(SubCmdCLI, name="tool")
+    with pytest.raises(SystemExit):
+        prog.parse_args(["nonexistent"])
+
+
+def test_missing_subcommand_with_no_default():
+    """no subcommand provided when field is required -> error"""
+
+    class StrictCLI(BaseModel):
+        command: Subcommand(TrainCmd, EvalCmd)
+
+    prog = make_program(StrictCLI, name="tool")
+    with pytest.raises(SystemExit):
+        prog.parse_args([])
+
+
+# -- test nested subcommands --
+
+def test_nested_subcommands():
+    """tool remote add --name origin"""
+
+    class AddCmd(BaseModel):
+        """Add a remote."""
+        action: Literal['add'] = 'add'
+        name: Annotated[str, Arg(help="Remote name")]
+
+    class RemoveCmd(BaseModel):
+        """Remove a remote."""
+        action: Literal['remove'] = 'remove'
+        name: Annotated[str, Arg(help="Remote name")]
+
+    class RemoteCmd(BaseModel):
+        """Manage remotes."""
+        action: Literal['remote'] = 'remote'
+        sub: Subcommand(AddCmd, RemoveCmd)
+
+    class ListCmd(BaseModel):
+        """List items."""
+        action: Literal['list'] = 'list'
+
+    class GitLikeCLI(BaseModel):
+        command: Subcommand(RemoteCmd, ListCmd)
+
+    prog = make_program(GitLikeCLI, name="git-like")
+    conf, _ = prog.parse_args(["remote", "add", "--name", "origin"])
+    assert isinstance(conf.command, RemoteCmd)
+    assert isinstance(conf.command.sub, AddCmd)
+    assert conf.command.sub.name == "origin"
+
+
+# -- test config layering with subcommand overrides --
+
+def test_config_layering_subcommand_override(tmp_path):
+    """CLI args override subcommand-scoped config"""
+    config = tmp_path / "training.yaml"
+    config.write_text("epochs: 99\nlr: 0.01\n")
+    prog = make_program(SubCmdCLI, name="tool")
+    conf, _ = prog.parse_args(["train", f"+{config}", "--lr", "0.0001"])
+    assert conf.command.epochs == 99
+    assert conf.command.lr == 0.0001
+
+
+# -- test context variables with subcommands --
+
+def test_subcommand_with_define_vars():
+    """context variables work with subcommands"""
+    prog = make_program(SubCmdCLI, name="tool")
+    conf, _ = prog.parse_args(["train", "--epochs", "10"])
+    assert conf.command.epochs == 10
+
+
+# -- test @subcommand decorator with Subcommand() --
+
+def test_decorator_subcommand_in_union():
+    """@subcommand decorated classes work with Subcommand()"""
+
+    @subcommand('start')
+    class StartCmd(BaseModel):
+        """Start the service."""
+        port: int = 8080
+
+    @subcommand('stop')
+    class StopCmd(BaseModel):
+        """Stop the service."""
+        force: bool = False
+
+    class SvcCLI(BaseModel):
+        command: Subcommand(StartCmd, StopCmd)
+
+    prog = make_program(SvcCLI, name="svc")
+    conf, _ = prog.parse_args(["start", "--port", "3000"])
+    assert isinstance(conf.command, StartCmd)
+    assert conf.command.port == 3000
+    assert conf.command.action == 'start'
