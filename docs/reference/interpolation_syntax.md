@@ -255,6 +255,30 @@ database_url: ${
 }
 ```
 
+## Permissive Mode
+
+When `permissive=True`, undefined variables don't raise errors — they survive as literal `${...}` strings. Known variables are resolved and constant sub-expressions are folded.
+
+```python
+from dracon.interpolation import evaluate_expression
+
+# partial resolution
+evaluate_expression("${a} and ${b}", context={'a': 1}, permissive=True)
+# → "1 and ${b}"
+
+# single expression with partial folding
+evaluate_expression("${x + 1 + y}", context={'x': 10}, permissive=True)
+# → "${11 + y}"
+
+# fully unknown — returned unchanged
+evaluate_expression("${unknown}", context={}, permissive=True)
+# → "${unknown}"
+```
+
+Available on: `evaluate_expression`, `do_safe_eval`, `InterpolableNode.evaluate`, `LazyInterpolable`, `resolve_all_lazy`, and `Dracontainer.resolve_all_lazy`.
+
+See [Permissive Evaluation](../concepts/interpolation.md#permissive-evaluation-two-phase-resolution) for details.
+
 ## Performance Notes
 
 - Expressions are cached when possible
