@@ -66,7 +66,7 @@ Merge configs from files, packages, or environment variables using `!include` an
 
 #### Generate CLIs Automatically
 
-Generate type-safe CLIs directly from Pydantic models. Override any field-even nested ones-via command line (`--nested.arg 42`) or files (`+config.yaml`, `--arg +file@key`). Help is auto-generated:
+Generate type-safe CLIs directly from Pydantic models. Override any field — even nested ones — via command line (`--nested.arg 42` or `--nested.arg=42`), files (`+config.yaml`, `+config.yaml@sub.key`), or context variables (`++var=value`). Arguments can be freely mixed in any order. Help is auto-generated:
 
 <img
   src="https://raw.githubusercontent.com/jdisset/dracon/main/docs/assets/cli_help.png"
@@ -144,11 +144,22 @@ output_path: "/data/${run_id}/output"
 # Run with config file
 $ python main.py +config.yaml
 
-# Override specific values
+# Override specific values (space or equals syntax)
 $ python main.py +config.yaml -e dev --workers 2
+$ python main.py +config.yaml -e dev --workers=2
 
-# Pass context variables for interpolation
+# Layer multiple config files (later overrides earlier)
+$ python main.py +base.yaml +prod.yaml
+
+# Pass context variables for ${...} interpolation
 $ python main.py +config.yaml ++run_id my_experiment
+$ python main.py +config.yaml ++run_id=my_experiment
+
+# Override any nested config path
+$ python main.py +config.yaml --database.host=localhost --database.port=9999
+
+# All argument types can be freely mixed in any order
+$ python main.py action +base.yaml --workers 4 +overrides.yaml ++run_id test -e prod
 
 # Load config programmatically
 result = AppConfig.invoke("+config.yaml")           # Load, validate, run()
