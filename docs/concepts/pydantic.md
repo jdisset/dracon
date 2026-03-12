@@ -63,3 +63,71 @@ assert isinstance(config.server, Server)
 assert config.server.host == "api.example.com"
 assert config.server.port == 8080 # Default applied by Pydantic
 ```
+
+## `LazyDraconModel`: Lazy Interpolation in Pydantic Models
+
+When you load YAML with `${...}` expressions into standard Pydantic models, dracon resolves all interpolations eagerly during construction. This is fine most of the time, but sometimes you want field values to remain unresolved until you actually access them — for example, when the context needed for resolution isn't available at load time.
+
+`LazyDraconModel` is a `BaseModel` subclass that defers `${...}` resolution to attribute access time. Fields can hold `LazyInterpolable` objects that survive pydantic validation and resolve transparently when you read them.
+
+```python
+from dracon import LazyDraconModel
+from typing import Annotated
+
+class ServerConfig(LazyDraconModel):
+    host: str = "server-${instance}.example.com"
+    port: int = 8080
+```
+
+```yaml
+# config.yaml
+server: !ServerConfig
+  host: "db-${region}.internal"
+```
+
+```python
+config = dr.load("config.yaml", context={
+    'ServerConfig': ServerConfig,
+    'region': 'us-east-1',
+})
+
+# interpolation resolves here, on access:
+print(config.server.host)  # -> "db-us-east-1.internal"
+```
+
+### How it works
+
+Two mechanisms cooperate:
+
+1. **`ignore_lazy` field validator** — when pydantic receives a `LazyInterpolable` value for a field (e.g., a `str` field gets a lazy object), the validator stores it as-is instead of rejecting it, and captures the field's type validator for later.
+
+2. **`__getattribute__` override** — when you access a field, if the stored value is a `Lazy` object, it resolves the interpolation on the fly using the model's root object and keypath context, then returns the resolved value.
+
+### When to use it
+
+- **Default:** Use `BaseModel`. Eager resolution is simpler and covers most cases.
+- **Use `LazyDraconModel`** when field defaults contain `${...}` expressions that depend on context not yet available at construction time, or when you want resolution deferred to access time.
+
+### With CLI subcommands
+
+`LazyDraconModel` works as a subcommand model base. Field defaults containing `${...}` are resolved using the program's context:
+
+```python
+from dracon import dracon_program, Arg, Subcommand, LazyDraconModel
+from pydantic import BaseModel
+from typing import Annotated, Literal
+
+class TrainCmd(LazyDraconModel):
+    action: Literal['train'] = 'train'
+    output_dir: Annotated[str, Arg(help="Output directory")] = "${BASE_DIR}/training"
+    epochs: int = 10
+
+@dracon_program(name="ml-tool", context={'BASE_DIR': '/results'})
+class CLI(BaseModel):
+    command: Subcommand(TrainCmd)
+
+# ml-tool train → output_dir resolves to "/results/training"
+```
+
+!!! note
+    The discriminator field (`action: Literal['train']`) must still be a plain `Literal` — dracon automatically excludes it from the lazy validator to satisfy pydantic's discriminated union requirements.
