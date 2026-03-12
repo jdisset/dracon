@@ -27,6 +27,8 @@ from dracon.interpolation_utils import (
 )
 
 
+import ast
+import re
 import logging
 
 logger = logging.getLogger(__name__)
@@ -38,6 +40,7 @@ logger = logging.getLogger(__name__)
 from dracon.diagnostics import (
     DraconError,
     EvaluationError,
+    UndefinedNameError,
     SourceContext,
 )
 
@@ -57,6 +60,91 @@ try:
     BASE_DRACON_SYMBOLS['np'] = np
 except ImportError:
     pass  # numpy not installed
+
+
+class _UnresolvedSentinel:
+    _instance = None
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    def __repr__(self): return 'UNRESOLVED'
+    def __bool__(self): return False
+
+UNRESOLVED_SENTINEL = _UnresolvedSentinel()
+
+
+class PartiallyResolved:
+    __slots__ = ('expr',)
+    def __init__(self, expr: str): self.expr = expr
+    def __repr__(self): return f'PartiallyResolved({self.expr!r})'
+
+
+_FOLDABLE = (str, int, float, bool, type(None))
+
+# compiled regex for extracting undefined name from NameError messages
+_UNDEF_NAME_RE = re.compile(r"name '(\w+)' is not defined")
+
+
+class _Folder(ast.NodeTransformer):
+    """AST node transformer that substitutes known variables and folds constant sub-expressions."""
+
+    def __init__(self, symbols: dict):
+        self.symbols = symbols
+
+    def _try_fold(self, node, children):
+        """Attempt to fold a node whose children are all constants."""
+        if all(isinstance(c, ast.Constant) for c in children):
+            try:
+                val = eval(compile(ast.Expression(body=node), '<fold>', 'eval'))
+                return ast.copy_location(ast.Constant(value=val), node)
+            except Exception:
+                pass
+        return node
+
+    def visit_Name(self, node):
+        if node.id.startswith('__'):
+            return node
+        if node.id in self.symbols and isinstance(self.symbols[node.id], _FOLDABLE):
+            return ast.copy_location(ast.Constant(value=self.symbols[node.id]), node)
+        return node
+
+    def visit_BinOp(self, node):
+        self.generic_visit(node)
+        return self._try_fold(node, [node.left, node.right])
+
+    def visit_UnaryOp(self, node):
+        self.generic_visit(node)
+        return self._try_fold(node, [node.operand])
+
+    def visit_Compare(self, node):
+        self.generic_visit(node)
+        return self._try_fold(node, [node.left] + node.comparators)
+
+    def visit_BoolOp(self, node):
+        self.generic_visit(node)
+        return self._try_fold(node, node.values)
+
+    def visit_IfExp(self, node):
+        self.generic_visit(node)
+        if isinstance(node.test, ast.Constant):
+            return node.body if node.test.value else node.orelse
+        return node
+
+
+def fold_known_vars(expr: str, symbols: dict) -> str:
+    """Fold known variables into an expression, leaving unknowns as-is.
+
+    Pure function using stdlib ast. Returns the simplified expression string.
+    """
+    try:
+        tree = ast.parse(expr, mode='eval')
+    except SyntaxError:
+        return expr
+
+    folded = _Folder(symbols).visit(tree)
+    ast.fix_missing_locations(folded)
+    return ast.unparse(folded)
 
 
 def debug_string_state(label: str, s: str):
@@ -160,15 +248,12 @@ def preprocess_expr(expr: str):
 
 def _extract_identifiers(expr: str) -> set:
     """extract potential variable names from an expression using simple regex."""
-    import re
-    # match python identifiers but exclude keywords and numbers
     pattern = r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
     return set(re.findall(pattern, expr))
 
 
 def _analyze_eval_error(expr: str, error: Exception, symbols: Optional[dict]) -> str:
     """Analyze an evaluation error and produce a helpful hint."""
-    import re
     error_msg = str(error)
     hints = []
 
@@ -192,7 +277,7 @@ def _analyze_eval_error(expr: str, error: Exception, symbols: Optional[dict]) ->
                         break
 
     # pattern: name 'X' is not defined
-    undef_match = re.search(r"name '(\w+)' is not defined", error_msg)
+    undef_match = _UNDEF_NAME_RE.search(error_msg)
     if undef_match:
         var_name = undef_match.group(1)
         hints.append(f"Variable '{var_name}' is not defined in this context")
@@ -215,7 +300,7 @@ def _analyze_eval_error(expr: str, error: Exception, symbols: Optional[dict]) ->
 
 
 @ftrace(watch=[], inputs=['expr'])
-def do_safe_eval(expr: str, engine: str, symbols: Optional[dict] = None, source_context: Optional[SourceContext] = None) -> Any:
+def do_safe_eval(expr: str, engine: str, symbols: Optional[dict] = None, source_context: Optional[SourceContext] = None, permissive: bool = False) -> Any:
     original_expr = expr
     expr = preprocess_expr(expr)
 
@@ -230,11 +315,28 @@ def do_safe_eval(expr: str, engine: str, symbols: Optional[dict] = None, source_
                 if isinstance(val, LazyProtocol):
                     symbols[ident] = val.resolve()
 
+    try:
+        return _do_safe_eval_engine(expr, engine, symbols, source_context, original_expr)
+    except UndefinedNameError:
+        if not permissive:
+            raise
+        folded = fold_known_vars(expr, symbols or {})
+        if folded != expr:
+            return PartiallyResolved(folded)
+        return UNRESOLVED_SENTINEL
+
+
+def _do_safe_eval_engine(expr: str, engine: str, symbols: Optional[dict], source_context: Optional[SourceContext], original_expr: str) -> Any:
     if engine == 'asteval':
         safe_eval = Interpreter(user_symbols=symbols or {}, max_string_length=1000)
         try:
             res = safe_eval.eval(expr, raise_errors=True)
         except Exception as e:
+            # detect undefined name errors before generic handling
+            if isinstance(e, NameError):
+                m = _UNDEF_NAME_RE.search(str(e))
+                if m:
+                    raise UndefinedNameError(m.group(1), context=source_context, cause=e, expression=original_expr, available_symbols=symbols) from e
             hint = _analyze_eval_error(expr, e, symbols)
             # asteval populates error list even when raising - extract location info
             error_location = ""
@@ -292,6 +394,11 @@ def do_safe_eval(expr: str, engine: str, symbols: Optional[dict] = None, source_
                 msg += error_location
             raise EvaluationError(msg, context=source_context, cause=e, expression=original_expr, available_symbols=symbols) from e
         except Exception as e:
+            # detect undefined name errors before generic handling
+            if isinstance(e, NameError):
+                name = getattr(e, 'name', None)
+                if name:
+                    raise UndefinedNameError(name, context=source_context, cause=e, expression=original_expr, available_symbols=symbols) from e
             hint = _analyze_eval_error(expr, e, symbols)
             msg = f"Error evaluating expression: {e}"
             if hint:
@@ -366,6 +473,7 @@ def evaluate_expression(
     context: Optional[Dict[str, Any]] = None,
     enable_shorthand_vars: bool = True,
     source_context: Optional[SourceContext] = None,
+    permissive: bool = False,
 ) -> Any:
     from dracon.merge import merged, MergeKey
 
@@ -393,6 +501,8 @@ def evaluate_expression(
             expr = expr.resolve()
         return expr
 
+    made_progress = False
+
     # check if the entire expression is a single interpolation
     if (
         len(interpolations) == 1
@@ -410,9 +520,17 @@ def evaluate_expression(
             context=context,
             enable_shorthand_vars=enable_shorthand_vars,
             source_context=source_context,
+            permissive=permissive,
         )
-        evaluated_expr = do_safe_eval(str(resolved_expr), engine, symbols, source_context)
-        endexpr = recurse_lazy_resolve(evaluated_expr)
+        evaluated_expr = do_safe_eval(str(resolved_expr), engine, symbols, source_context, permissive=permissive)
+        if evaluated_expr is UNRESOLVED_SENTINEL:
+            endexpr = expr  # leave ${...} as-is
+        elif isinstance(evaluated_expr, PartiallyResolved):
+            endexpr = '${' + evaluated_expr.expr + '}'
+            made_progress = True
+        else:
+            endexpr = recurse_lazy_resolve(evaluated_expr)
+            made_progress = True
     else:
         # process and replace each interpolation within the expression
         offset = 0
@@ -426,12 +544,24 @@ def evaluate_expression(
                 context=context,
                 enable_shorthand_vars=enable_shorthand_vars,
                 source_context=source_context,
+                permissive=permissive,
             )
-            evaluated_expr = do_safe_eval(str(resolved_expr), engine, symbols, source_context)
-            newexpr = str(recurse_lazy_resolve(evaluated_expr))
+            evaluated_expr = do_safe_eval(str(resolved_expr), engine, symbols, source_context, permissive=permissive)
+            if evaluated_expr is UNRESOLVED_SENTINEL:
+                continue  # leave this ${...} block as-is
+            elif isinstance(evaluated_expr, PartiallyResolved):
+                newexpr = '${' + evaluated_expr.expr + '}'
+                made_progress = True
+            else:
+                newexpr = str(recurse_lazy_resolve(evaluated_expr))
+                made_progress = True
             expr = expr[: match.start + offset] + newexpr + expr[match.end + offset :]
             offset += len(newexpr) - (match.end - match.start)
         endexpr = expr
+
+    # short-circuit recursion if permissive and no progress made
+    if permissive and not made_progress:
+        return endexpr
 
     if allow_recurse != 0 and isinstance(endexpr, str):
         return evaluate_expression(
@@ -443,6 +573,7 @@ def evaluate_expression(
             context=context,
             enable_shorthand_vars=enable_shorthand_vars,
             source_context=source_context,
+            permissive=permissive,
         )
     return endexpr
 
@@ -490,7 +621,7 @@ class InterpolableNode(ContextNode):
         self.init_outermost_interpolations = state['init_outermost_interpolations']
         self.referenced_nodes = state['referenced_nodes']
 
-    def evaluate(self, path='/', root_obj=None, engine=DEFAULT_EVAL_ENGINE, context=None):
+    def evaluate(self, path='/', root_obj=None, engine=DEFAULT_EVAL_ENGINE, context=None, permissive=False):
         context = context or {}
         context = {**self.context, **context}
         newval = evaluate_expression(
@@ -500,6 +631,7 @@ class InterpolableNode(ContextNode):
             engine=engine,
             context=context,  # type: ignore
             source_context=self.source_context,
+            permissive=permissive,
         )
         return newval
 

@@ -169,8 +169,8 @@ class Dracontainer:
                 if isinstance(item, Dracontainer):
                     item.set_lazy_resolve(value, recursive=True)
 
-    def resolve_all_lazy(self):
-        resolve_all_lazy(self)
+    def resolve_all_lazy(self, permissive: bool = False):
+        resolve_all_lazy(self, permissive=permissive)
 
 
 class Mapping(Dracontainer, MutableMapping[K, V], Generic[K, V]):
