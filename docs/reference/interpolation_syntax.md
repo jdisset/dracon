@@ -11,20 +11,20 @@ Dracon provides powerful expression interpolation using `${...}` syntax for dyna
 log_level: ${getenv('LOG_LEVEL', 'INFO')}
 
 # Mathematical expressions
-max_workers: ${os.cpu_count() * 2}
+max_workers: ${int(getenv('NUM_CPUS', '4')) * 2}
 
 # String operations
 app_name: ${getenv('APP_NAME', 'myapp').lower()}
 ```
 
-### Immediate vs Lazy Evaluation
+### Evaluation Timing
+
+All interpolation expressions — whether using `${...}` or `$(...)` — are evaluated lazily at construction time. Both syntaxes behave identically.
 
 ```yaml
-# Lazy evaluation (default) - resolved at construction time
-computed_at_runtime: ${time.time()}
-
-# Immediate evaluation - resolved during loading
-computed_at_load: $(time.time())
+# evaluated at construction time
+computed: ${now()}
+also_computed: $(now())  # same behavior as ${}
 ```
 
 ## Shorthand Variables
@@ -92,8 +92,8 @@ config_files: ${listdir('/etc/myapp')}
 
 # Path operations
 log_file: ${join(expanduser('~/logs'), 'app.log')}
-script_name: ${basename(__file__)}
-script_dir: ${dirname(__file__)}
+script_name: ${basename(FILE)}   # FILE is set by the file loader
+script_dir: ${dirname(FILE)}
 ```
 
 ### Date/Time Functions
@@ -109,15 +109,20 @@ iso_format: ${now('%Y-%m-%dT%H:%M:%S')}
 filename_safe: ${now('%Y%m%d_%H%M%S')}
 ```
 
+### NumPy (when installed)
+
+When `numpy` is installed, it's available as `np`:
+
+```yaml
+weights: ${np.array([0.1, 0.5, 0.4])}
+normalized: ${np.linspace(0, 1, 10).tolist()}
+```
+
 ### Dracon Functions
 
 ```yaml
 # Construct deferred nodes
-output_path: ${construct(deferred_node, {'runtime_var': 'value'})}
-
-# Access current file context
-config_dir: ${__DRACON__CURRENT_PATH}
-parent_dir: ${__DRACON__PARENT_PATH}
+output_path: ${construct(deferred_node, runtime_var='value')}
 ```
 
 ## Context Variables
@@ -134,8 +139,8 @@ config_size: ${FILE_SIZE}
 ### Custom Context
 
 ```python
-# Provided when loading
-loader.load('config.yaml', context={
+# Provided at loader construction time
+loader = DraconLoader(context={
     'version': '1.2.3',
     'deployment': 'production',
     'custom_func': lambda x: x.upper()
@@ -255,7 +260,7 @@ database_url: ${
 - Expressions are cached when possible
 - References (`@` and `&`) are resolved efficiently
 - Complex expressions may impact loading time
-- Use immediate evaluation `$()` for values that don't change
+- `$()` and `${}` behave identically — both are lazy
 
 ## Common Use Cases
 

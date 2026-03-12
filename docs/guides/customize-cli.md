@@ -39,7 +39,6 @@ class CliConfig(BaseModel):
 - `long`: String for the long flag (e.g., `'output-directory'` for `--output-directory`). Default is derived from field name (e.g., `output_dir` -> `output-dir`).
 - `help`: Description shown in the `--help` message.
 - `positional`: `True` to make the argument positional instead of an option. Order defined by field order in the model.
-- `required`: `True` to mark an optional Pydantic field as required on the CLI. Default derived from Pydantic field definition.
 - `is_flag`: `True` for boolean flags (no value needed, presence means `True`). `False` to require an explicit value (`--verbose true`). Default is `True` for `bool` types.
 - `default_str`: Custom string representation of the default value for the help message (overrides automatic formatting).
 

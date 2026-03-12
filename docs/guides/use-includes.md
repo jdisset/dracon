@@ -47,10 +47,12 @@ defaults: !include pkg:my_package:configs/defaults.yaml
 When including via `file:` or `pkg:`, Dracon injects context variables into the _included_ file's scope:
 
 - `$DIR`: Directory of the included file.
-- `$FILE`: Full path to the included file.
+- `$FILE`: Full path to the included file (same as `$FILE_PATH`).
 - `$FILE_STEM`: Filename without extension.
+- `$FILE_EXT`: File extension (e.g., `.yaml`).
+- `$FILE_LOAD_TIME`: Human-readable load timestamp.
+- `$FILE_SIZE`: File size in bytes.
 - `$PACKAGE_NAME`: (For `pkg:` only) Name of the package.
-- ... and others related to time/size.
 
 This is useful for relative includes _within_ the included file.
 

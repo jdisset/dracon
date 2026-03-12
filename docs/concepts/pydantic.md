@@ -34,13 +34,14 @@ Pydantic provides data validation and settings management using Python type anno
 
 ```python
 # models.py
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 class Server(BaseModel):
     host: str
     port: int = 8080 # Pydantic default
 
-    @validator('port')
+    @field_validator('port')
+    @classmethod
     def port_must_be_positive(cls, v):
         if v <= 0:
             raise ValueError('Port must be positive')

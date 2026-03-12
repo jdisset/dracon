@@ -89,12 +89,12 @@ If only `<<:` is used without any `{}` or `[]` options and no `@target_path`, th
 
 | Syntax        | Dictionary Behavior                      | List Behavior                       | Description                                               |
 | :------------ | :--------------------------------------- | :---------------------------------- | :-------------------------------------------------------- |
-| `<<:`         | Append/Recurse, Existing Wins (`{~>}`)   | Replace, **Existing** Wins (`[~>]`) | Default merge.                                            |
+| `<<:`         | Append/Recurse, Existing Wins (`{+>}`)   | Replace, Existing Wins (`[~>]`)     | Default merge.                                            |
 | `<<{<+}:`     | Append/Recurse, New Wins                 | Replace, Existing Wins (`[~>]`)     | Common override pattern (new file wins dict keys)         |
-| `<<[+>]:`     | Append/Recurse, Existing Wins (`{~>}`)   | Concatenate, Existing first         | Append new list items to existing list                    |
-| `<<[+<]:`     | Append/Recurse, Existing Wins (`{~>}`)   | Concatenate, **New** first          | Prepend new list items to existing list                   |
+| `<<[+>]:`     | Append/Recurse, Existing Wins (`{+>}`)   | Concatenate, Existing first         | Append new list items to existing list                    |
+| `<<[+<]:`     | Append/Recurse, Existing Wins (`{+>}`)   | Concatenate, **New** first          | Prepend new list items to existing list                   |
 | `<<{~<}[~>]:` | Replace, New Wins                        | Replace, Existing Wins              | Dict values fully replaced (new wins), list kept existing |
-| `<<@target:`  | Append/Recurse, **target Wins** (`{<+}`) | Replace, Existing Wins (`[~>]`)     | Default merge on specified target subkey                  |
+| `<<@target:`  | Append/Recurse, New Wins (`{+<}`)        | Replace, New Wins (`[~<]`)          | Default merge on specified target subkey (new wins)       |
 | `<<(<):`      | Append/Recurse, Existing Wins (`{+>}`)   | Replace, Existing Wins (`[~>]`)     | Default merge + propagate `!define` vars to parent scope  |
 
 !!! note

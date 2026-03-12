@@ -332,20 +332,16 @@ api_url: ${getenv('API_URL') or 'http://localhost:8080'}
 Extend the loader system:
 
 ```python
-from dracon.loaders import BaseLoader
+def load_from_db(path: str, **kwargs):
+    """Custom loader function. Returns (content_string, context_dict)."""
+    config_data = fetch_config_from_db(path)
+    return config_data, {}
 
-class DatabaseLoader(BaseLoader):
-    def load(self, path, context):
-        # Load configuration from database
-        return fetch_config_from_db(path)
+# Register via constructor
+loader = DraconLoader(custom_loaders={'db': load_from_db})
 
-# Register custom loader
-loader = DraconLoader()
-loader.register_loader('db', DatabaseLoader())
-
-# Use in YAML
-config: !include db:config_table@prod_settings
-````
+# Use in YAML: !include db:config_table@prod_settings
+```
 
 ### Pre-commit Hook Integration
 

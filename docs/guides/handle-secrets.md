@@ -76,7 +76,7 @@ For more complex scenarios (e.g., fetching secrets from Vault, AWS Secrets Manag
 # vault_loader.py
 import hvac # Example using HVAC client for HashiCorp Vault
 
-def load_from_vault(path: str, loader=None):
+def load_from_vault(path: str, **kwargs):
     # path might be "secret/data/myapp#api_key"
     secret_path, key = path.split('#')
     client = hvac.Client(url='http://localhost:8200') # Configure appropriately

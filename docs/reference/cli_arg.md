@@ -97,14 +97,14 @@ workers: Annotated[int, Arg(
 ```
 
 ### `auto_dash_alias: bool = None`
-Controls `_` to `-` alias generation. `None` inherits from the program's `default_auto_dash_alias` setting (which defaults to `True`). Set to `False` to disable for a specific field.
+Controls `_` to `-` conversion in the long flag name. `None` inherits from the program's `default_auto_dash_alias` setting (which defaults to `True`). When enabled, underscores in the field name are **replaced** with dashes to form the CLI flag.
 
 ```python
 max_connections: Annotated[int, Arg(help="Maximum connections")]
-# Creates both --max_connections and --max-connections (default behavior)
+# Creates --max-connections (underscores replaced with dashes)
 
 raw_name: Annotated[str, Arg(auto_dash_alias=False, help="No dash alias")]
-# Creates only --raw_name (no --raw-name alias)
+# Creates --raw_name (underscores kept as-is)
 ```
 
 ### `subcommand: bool = False`
@@ -487,6 +487,73 @@ myapp --api_key +secrets/api.key
 # Override nested value from file
 myapp --database.password +secrets/db-pass.txt
 ```
+
+## `HelpSection`
+
+Custom sections displayed in CLI `--help` output, between the options and the epilog.
+
+```python
+from dracon import HelpSection
+
+@dracon_program(
+    name="my-tool",
+    sections=[
+        HelpSection(title="Examples", body="  my-tool --port 9090 +prod.yaml"),
+        HelpSection(title="Environment Variables", body="  DB_HOST    Database hostname\n  DB_PORT    Database port"),
+    ],
+    epilog="See https://docs.example.com for full documentation.",
+)
+class Config(BaseModel):
+    port: int = 8080
+```
+
+**Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `title` | `str` | Section heading |
+| `body` | `str` | Section content (pre-formatted) |
+
+## `dracon_program` Decorator
+
+Turns a Pydantic `BaseModel` into a CLI program by adding class methods.
+
+```python
+@dracon_program(
+    name="my-app",
+    description="My application",
+    version="1.0",
+)
+class Config(BaseModel):
+    port: int = 8080
+```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` | Class name | Program name shown in help |
+| `description` | `str` | Class docstring | Description shown in help |
+| `version` | `str` | `None` | Version string shown in help |
+| `deferred_paths` | `List[str]` | `[]` | KeyPaths to defer during loading |
+| `context_types` | `List[type]` | `None` | Types added to context as `{name: type}` |
+| `context` | `Dict[str, Any]` | `None` | Additional context dict for interpolation |
+| `auto_context` | `bool` | `False` | Capture types from the decorator call site |
+| `sections` | `List[HelpSection]` | `None` | Custom help sections |
+| `epilog` | `str` | `None` | Text shown at the end of help output |
+
+**Added class methods:**
+
+| Method | Description |
+|--------|-------------|
+| `.cli(argv=None)` | Parse CLI args (or `sys.argv`) and run |
+| `.invoke(*configs, **context_kwargs)` | Run with config file paths and injected context |
+| `.from_config(*configs, **context_kwargs)` | Load config without running |
+| `.load(config_path, context=None)` | Low-level single-file load |
+
+## `make_program(conf_type, **kwargs)`
+
+Low-level factory that creates a `Program[T]` from a `BaseModel` subclass. Accepts the same keyword arguments as `Program` (`name`, `description`, `version`, `sections`, `epilog`, `default_auto_dash_alias`).
 
 ## Best Practices
 
