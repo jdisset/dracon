@@ -58,6 +58,7 @@ logger = logging.getLogger(__name__)
 
 B = TypeVar("B", bound=BaseModel)
 ProgramType = ForwardRef("Program")
+DEFAULT_DISCRIMINATOR = 'action'
 
 
 def get_root_exception(e):
@@ -89,6 +90,29 @@ class Arg:
     is_file: bool = False
     is_flag: Optional[bool] = None  # none means auto-detect
     auto_dash_alias: Optional[bool] = None  # none means overridden by the program
+    subcommand: bool = False
+
+
+def Subcommand(*cmd_types, discriminator=DEFAULT_DISCRIMINATOR, **arg_kwargs):
+    """type factory: Annotated[Union[...], Field(discriminator=...), Arg(subcommand=True, positional=True)]"""
+    from pydantic import Field as PydanticField
+    return Annotated[
+        Union[tuple(cmd_types)],
+        PydanticField(discriminator=discriminator),
+        Arg(subcommand=True, positional=True, **arg_kwargs),
+    ]
+
+
+def subcommand(name: str, discriminator: str = 'action'):
+    """decorator that injects a Literal discriminator field into a BaseModel."""
+    def wrapper(cls):
+        from pydantic.fields import FieldInfo
+        # add the discriminator field
+        cls.__annotations__[discriminator] = Literal[name]
+        cls.model_fields[discriminator] = FieldInfo(annotation=Literal[name], default=name)
+        cls.model_rebuild(force=True)
+        return cls
+    return wrapper
 
 
 def _get_arg_resolvable_status(arg_type: Optional[Type[Any]]) -> bool:
@@ -295,8 +319,53 @@ def _gather_all_args(prg: "Program") -> Tuple[List[Arg], List[Arg]]:
     return options_flags, nested_args
 
 
+def _emit_help_panel(content: Text, title_str: str, version: Optional[str] = None) -> None:
+    """renders help content as a panel and exits."""
+    title = Text(title_str, style=COLOR_BOLD_CYAN)
+    if version:
+        title.append(f" (v{version})", style=COLOR_CYAN)
+    console.print(
+        Panel(content, title=title, box=ROUNDED, border_style=COLOR_BRIGHT_BLACK, expand=False)
+    )
+    sys.exit(0)
+
+
+def _append_description(content: Text, description: Optional[str]) -> None:
+    """appends a description block with separator to help content."""
+    if description:
+        content.append(f"\n{description.strip()}\n\n", style=COLOR_ITALIC)
+        content.append("─" * min(console.width - 4, 80) + "\n\n", style=COLOR_BRIGHT_BLACK)
+
+
+def _append_options_section(
+    content: Text, args: List[Arg], model_type: type,
+    title: str = "Options:", exclude: Optional[set] = None,
+) -> None:
+    """appends an options section to help content."""
+    exclude = exclude or set()
+    filtered = [a for a in args if not a.positional and a.real_name not in exclude and a.real_name != 'help']
+    if not filtered:
+        return
+    content.append(f"{title}\n", style=COLOR_BOLD_CYAN)
+    for arg in filtered:
+        field = model_type.model_fields.get(arg.real_name)
+        _append_arg_details(content, arg, field, is_positional=False)
+
+
+def _append_help_arg(content: Text, args: List[Arg]) -> None:
+    """appends the --help entry at the end of help content."""
+    help_arg = next((a for a in args if a.real_name == 'help'), None)
+    if help_arg:
+        _append_arg_details(content, help_arg, None, is_positional=False)
+
+
 def print_help(prg: "Program", _) -> None:
     """prints the help message and exits."""
+
+    if prg._subcommand_map:
+        _print_help_with_subcommands(prg)
+        return
+
     positionals = [a for a in prg._args if a.positional]
     options_flags, nested_args = _gather_all_args(prg)
     all_options_flags = sorted(
@@ -306,9 +375,7 @@ def print_help(prg: "Program", _) -> None:
     help_arg = next((a for a in options_flags if a.real_name == 'help'), None)
 
     content = Text()
-    if prg.description:
-        content.append(f"\n{prg.description}\n\n", style=COLOR_ITALIC)
-        content.append("─" * min(console.width - 4, 80) + "\n\n", style=COLOR_BRIGHT_BLACK)
+    _append_description(content, prg.description)
 
     usage = [prg.name or "command"] + ["[OPTIONS]"] if all_options_flags else []
     usage.extend(pos.real_name.upper() for pos in positionals)
@@ -324,7 +391,6 @@ def print_help(prg: "Program", _) -> None:
     if all_options_flags or help_arg:
         content.append("Options:\n", style=COLOR_BOLD_CYAN)
         for arg in all_options_flags:
-            # find corresponding field definition if possible
             field, model = None, prg.conf_type
             try:
                 for part in arg.real_name.split('.'):
@@ -337,7 +403,7 @@ def print_help(prg: "Program", _) -> None:
             except (AttributeError, TypeError):
                 field = None
             _append_arg_details(content, arg, field, is_positional=False)
-        if help_arg:  # ensure help is always last
+        if help_arg:
             _append_arg_details(content, help_arg, None, is_positional=False)
 
     if prg.sections:
@@ -351,13 +417,64 @@ def print_help(prg: "Program", _) -> None:
         content.append("─" * min(console.width - 4, 80) + "\n", style=COLOR_BRIGHT_BLACK)
         content.append(f"{prg.epilog}\n", style=COLOR_DIM)
 
-    title = Text(prg.name or "Command", style=COLOR_BOLD_CYAN)
-    if prg.version:
-        title.append(f" (v{prg.version})", style=COLOR_CYAN)
-    console.print(
-        Panel(content, title=title, box=ROUNDED, border_style=COLOR_BRIGHT_BLACK, expand=False)
-    )
-    sys.exit(0)
+    _emit_help_panel(content, prg.name or "Command", prg.version)
+
+
+def _print_help_with_subcommands(prg: "Program") -> None:
+    """prints top-level help with subcommand listing."""
+    content = Text()
+    _append_description(content, prg.description)
+
+    prog_name = prg.name or "command"
+    content.append("Usage: ", style=COLOR_BOLD)
+    content.append(f"{prog_name} [OPTIONS] COMMAND [COMMAND_OPTIONS]\n\n", style=COLOR_YELLOW)
+
+    # list commands
+    content.append("Commands:\n", style=COLOR_BOLD_CYAN)
+    max_name_len = max(len(n) for n in prg._subcommand_map)
+    for cmd_name, cmd_type in prg._subcommand_map.items():
+        doc = (cmd_type.__doc__ or "").strip().split('\n')[0]
+        padding = " " * (max_name_len - len(cmd_name) + 4)
+        content.append(f"  {cmd_name}", style=COLOR_YELLOW)
+        if doc:
+            content.append(f"{padding}{doc}")
+        content.append("\n")
+    content.append("\n")
+
+    _append_options_section(content, prg._args, prg.conf_type)
+    _append_help_arg(content, prg._args)
+    content.append(f"Use '{prog_name} COMMAND --help' for more info on a command.\n", style=COLOR_DIM)
+
+    _emit_help_panel(content, prog_name, prg.version)
+
+
+def print_help_subcommand(parent_prg: "Program", child_prg: "Program", subcmd_name: str) -> None:
+    """prints help for a specific subcommand and exits."""
+    subcmd_type = child_prg.conf_type
+
+    content = Text()
+    _append_description(content, subcmd_type.__doc__)
+
+    usage_parts = [parent_prg.name or "command", subcmd_name, "[OPTIONS]"]
+    content.append("Usage: ", style=COLOR_BOLD)
+    content.append(" ".join(usage_parts) + "\n\n", style=COLOR_YELLOW)
+
+    # subcmd options (exclude discriminator)
+    disc = parent_prg._subcommand_discriminator
+    subcmd_args = [
+        a for a in child_prg._args
+        if a.real_name != 'help' and a.real_name != disc
+    ]
+    if subcmd_args:
+        content.append("Options:\n", style=COLOR_BOLD_CYAN)
+        for arg in subcmd_args:
+            field = subcmd_type.model_fields.get(arg.real_name)
+            _append_arg_details(content, arg, field, is_positional=arg.positional)
+
+    _append_options_section(content, parent_prg._args, parent_prg.conf_type, title="Shared Options:")
+    _append_help_arg(content, child_prg._args)
+
+    _emit_help_panel(content, f"{parent_prg.name or 'command'} {subcmd_name}")
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
@@ -429,7 +546,49 @@ class Program(BaseModel, Generic[T]):
 
     def model_post_init(self, *args, **kwargs):
         super().model_post_init(*args, **kwargs)
-        self._args = [getArg(self, name, f) for name, f in self.conf_type.model_fields.items()]
+        # detect subcommand fields before building _args
+        self._subcommand_map: Dict[str, type] = {}
+        self._subcommand_field_name: Optional[str] = None
+        self._subcommand_discriminator: str = DEFAULT_DISCRIMINATOR
+
+        for field_name, field_info in self.conf_type.model_fields.items():
+            meta = field_info.metadata or []
+            arg_meta = next((m for m in meta if isinstance(m, Arg) and m.subcommand), None)
+            if arg_meta:
+                self._subcommand_field_name = field_name
+                # find the discriminator from Field metadata
+                for m in meta:
+                    disc = getattr(m, 'discriminator', None)
+                    if disc:
+                        self._subcommand_discriminator = disc
+                        break
+                # introspect union members to build subcommand map
+                annotation = field_info.annotation
+                origin = typing_get_origin(annotation)
+                if origin is Annotated:
+                    annotation = get_args(annotation)[0]
+                    origin = typing_get_origin(annotation)
+                if origin is Union:
+                    members = get_args(annotation)
+                elif isinstance(annotation, type) and issubclass(annotation, BaseModel):
+                    # single-type "union" (Union[X] collapses to X)
+                    members = (annotation,)
+                else:
+                    members = ()
+                for member in members:
+                    if isinstance(member, type) and issubclass(member, BaseModel):
+                        disc_field = member.model_fields.get(self._subcommand_discriminator)
+                        if disc_field:
+                            lit_args = get_args(disc_field.annotation)
+                            for lit_val in lit_args:
+                                self._subcommand_map[lit_val] = member
+                break  # only one subcommand field
+
+        # build _args excluding subcommand field (handled specially)
+        self._args = [
+            getArg(self, name, f) for name, f in self.conf_type.model_fields.items()
+            if name != self._subcommand_field_name
+        ]
         self._args.append(
             Arg(
                 real_name="help",
@@ -458,6 +617,9 @@ class Program(BaseModel, Generic[T]):
     def parse_args(self, argv: List[str], **kwargs) -> tuple[Optional[T], Dict[str, Any]]:
         """parses command line arguments and generates configuration."""
 
+        if self._subcommand_map:
+            return self._parse_with_subcommands(argv, **kwargs)
+
         self._positionals = [arg for arg in self._args if arg.positional][::-1]  # reverse for pop()
         logger.debug(f"positional args: {self._positionals}, arg map: {self._arg_map}")
 
@@ -482,32 +644,18 @@ class Program(BaseModel, Generic[T]):
         if print_help in actions:
             print_help(self, None)
         try:
-            # merge stored context from Program instance with kwargs
             program_context = getattr(self, 'context', None)
             if program_context:
                 kwargs = {'context': program_context, **kwargs}
             conf = self._generate_config(
                 raw_args, nested_args, defined_vars, confs_to_merge, **kwargs
             )
-            for action in actions:  # process actions like --help after config generation
+            for action in actions:
                 action_result = action(self, conf)
                 if action_result is not None:
                     conf = action_result
-        except DraconError as e:
-            # print dracon errors with full context information
-            handle_dracon_error(e, exit_code=1)
-        except ValidationError as e:
-            self.print_validation_error(e)
-        except Exception as e:  # catch other config generation errors
-            root_exception = get_root_exception(e)
-            if isinstance(root_exception, DraconError):
-                handle_dracon_error(root_exception, exit_code=1)
-            elif isinstance(root_exception, ValidationError):
-                self.print_validation_error(root_exception)
-            else:
-                logger.error(f"Error when generating configuration: {root_exception}")
-                logger.exception(e)
-                sys.exit(1)
+        except Exception as e:
+            self._handle_config_error(e)
 
         # prepare final raw args dict for return
         final_raw_args = raw_args.copy()
@@ -518,6 +666,198 @@ class Program(BaseModel, Generic[T]):
             }
         )
         return conf, final_raw_args
+
+    def _parse_with_subcommands(self, argv: List[str], **kwargs) -> tuple[Optional[T], Dict[str, Any]]:
+        """two-phase parsing: split argv at subcommand boundary, parse each side."""
+        field_name = self._subcommand_field_name
+        available = ', '.join(self._subcommand_map.keys())
+
+        # scan for subcommand token, tracking config presence along the way
+        subcmd_idx = None
+        subcmd_name = None
+        has_config = False
+        for idx, token in enumerate(argv):
+            if token.startswith('+') and not token.startswith('++'):
+                has_config = True
+                continue
+            if token.startswith('-'):
+                if token in ('--help', '-h'):
+                    print_help(self, None)
+                continue
+            if token in self._subcommand_map:
+                subcmd_idx = idx
+                subcmd_name = token
+                break
+            else:
+                print(f"\nError: unknown command '{token}'", file=sys.stderr)
+                print(f"Available commands: {available}\n", file=sys.stderr)
+                sys.exit(1)
+
+        # no subcommand found
+        if subcmd_idx is None:
+            if has_config:
+                before_args = argv
+                subcmd_raw_args = {}
+            else:
+                print(f"\nError: a command is required", file=sys.stderr)
+                print(f"Available commands: {available}\n", file=sys.stderr)
+                sys.exit(1)
+
+        if subcmd_idx is not None:
+            before_args = argv[:subcmd_idx]
+            after_args = argv[subcmd_idx + 1:]
+            subcmd_type = self._subcommand_map[subcmd_name]
+
+            # build child program for the subcommand to know its arg map
+            child_prog = Program[subcmd_type](
+                conf_type=subcmd_type,
+                name=f"{self.name} {subcmd_name}" if self.name else subcmd_name,
+                default_auto_dash_alias=self.default_auto_dash_alias,
+            )
+
+            # split after_args into: root args, subcmd args, root configs, subcmd configs
+            root_raw_args, root_nested_args = {}, {}
+            subcmd_raw_args, subcmd_nested_args = {}, {}
+            defined_vars, actions = {}, []
+            root_confs, subcmd_confs = [], []
+
+            # parse before_args (all root-scoped)
+            self._positionals = []  # no positionals for root in subcommand mode
+            i = 0
+            try:
+                while i < len(before_args):
+                    i = self._parse_single_arg(
+                        before_args, i, root_raw_args, root_nested_args,
+                        defined_vars, actions, root_confs,
+                    )
+            except ArgParseError as e:
+                print(f"\nError: {e}\n", file=sys.stderr)
+                print_help(self, None)
+
+            # parse after_args — route to root or subcmd
+            child_prog._positionals = [a for a in child_prog._args if a.positional][::-1]
+            i = 0
+            try:
+                while i < len(after_args):
+                    token = after_args[i]
+
+                    # check for help
+                    if token in ('--help', '-h'):
+                        print_help_subcommand(self, child_prog, subcmd_name)  # exits
+
+                    # check for nested subcommands in the child
+                    if child_prog._subcommand_map and not token.startswith('-') and not token.startswith('+'):
+                        # delegate remaining args to child's subcommand parser
+                        remaining = after_args[i:]
+                        child_conf, child_raw = child_prog._parse_with_subcommands(remaining, **kwargs)
+                        if child_conf is not None:
+                            # convert to dict for merging into parent's config generation
+                            subcmd_raw_args = child_conf.model_dump()
+                        i = len(after_args)  # consumed all
+                        break
+
+                    if token.startswith('+'):
+                        subcmd_confs.append(token[1:])
+                        i += 1
+                    elif token.startswith('++') or token.startswith('--define.'):
+                        # defined vars go to shared pool
+                        i = self._parse_single_arg(
+                            after_args, i, root_raw_args, root_nested_args,
+                            defined_vars, actions, root_confs,
+                        )
+                    elif token.startswith('--') or token.startswith('-'):
+                        # check equals syntax
+                        check_token = token.split('=', 1)[0] if '=' in token else token
+
+                        if check_token in child_prog._arg_map:
+                            i = child_prog._parse_single_arg(
+                                after_args, i, subcmd_raw_args, subcmd_nested_args,
+                                defined_vars, actions, subcmd_confs,
+                            )
+                        elif check_token in self._arg_map:
+                            i = self._parse_single_arg(
+                                after_args, i, root_raw_args, root_nested_args,
+                                defined_vars, actions, root_confs,
+                            )
+                        elif '.' in check_token[2:]:
+                            # nested key — route to root
+                            i = self._parse_single_arg(
+                                after_args, i, root_raw_args, root_nested_args,
+                                defined_vars, actions, root_confs,
+                            )
+                        else:
+                            raise ArgParseError(f"unknown argument {token}")
+                    else:
+                        # positional in subcmd context
+                        if child_prog._positionals:
+                            i = child_prog._parse_single_arg(
+                                after_args, i, subcmd_raw_args, subcmd_nested_args,
+                                defined_vars, actions, subcmd_confs,
+                            )
+                        else:
+                            raise ArgParseError(f"unexpected positional argument '{token}'")
+            except ArgParseError as e:
+                print(f"\nError: {e}\n", file=sys.stderr)
+                print_help_subcommand(self, child_prog, subcmd_name)
+
+            if print_help in actions:
+                print_help_subcommand(self, child_prog, subcmd_name)
+
+            # combine subcmd args into root raw_args
+            root_raw_args[field_name] = {
+                self._subcommand_discriminator: subcmd_name, **subcmd_raw_args
+            }
+        else:
+            # no subcommand token — just config files
+            root_raw_args, root_nested_args = {}, {}
+            defined_vars, actions = {}, []
+            root_confs = []
+            self._positionals = []
+            i = 0
+            try:
+                while i < len(argv):
+                    i = self._parse_single_arg(
+                        argv, i, root_raw_args, root_nested_args,
+                        defined_vars, actions, root_confs,
+                    )
+            except ArgParseError as e:
+                print(f"\nError: {e}\n", file=sys.stderr)
+                print_help(self, None)
+            subcmd_confs = []
+
+        # generate final config
+        conf = None
+        try:
+            program_context = getattr(self, 'context', None)
+            if program_context:
+                kwargs = {'context': program_context, **kwargs}
+            conf = self._generate_config(
+                root_raw_args, root_nested_args, defined_vars,
+                root_confs, subcmd_confs=subcmd_confs,
+                subcmd_field_name=field_name if subcmd_idx is not None else None,
+                **kwargs,
+            )
+        except Exception as e:
+            self._handle_config_error(e)
+
+        return conf, {}
+
+    def _handle_config_error(self, e: Exception) -> None:
+        """handles exceptions from config generation consistently."""
+        if isinstance(e, DraconError):
+            handle_dracon_error(e, exit_code=1)
+        elif isinstance(e, ValidationError):
+            self.print_validation_error(e)
+        else:
+            root_exception = get_root_exception(e)
+            if isinstance(root_exception, DraconError):
+                handle_dracon_error(root_exception, exit_code=1)
+            elif isinstance(root_exception, ValidationError):
+                self.print_validation_error(root_exception)
+            else:
+                logger.error(f"Error when generating configuration: {root_exception}")
+                logger.exception(e)
+                sys.exit(1)
 
     def _format_error_item_text(self, error: dict) -> Text:
         from .loader import dump
@@ -831,7 +1171,8 @@ class Program(BaseModel, Generic[T]):
         return loader.compose_config_from_str(value)
 
     def _generate_config(
-        self, raw_args: dict, nested_args: dict, defined_vars: dict, confs_to_merge: list, **kwargs
+        self, raw_args: dict, nested_args: dict, defined_vars: dict, confs_to_merge: list,
+        subcmd_confs: Optional[list] = None, subcmd_field_name: Optional[str] = None, **kwargs
     ) -> Optional[T]:
         """generates the final configuration object by merging sources and validating."""
 
@@ -865,6 +1206,12 @@ class Program(BaseModel, Generic[T]):
         full_tag = f"{self.conf_type.__module__}.{self.conf_type.__name__}"
         loader.update_context({full_tag: self.conf_type, self.conf_type.__name__: self.conf_type})
 
+        # register subcommand types in context for YAML tag resolution (deduplicated)
+        if self._subcommand_map:
+            for subcmd_type in set(self._subcommand_map.values()):
+                sub_tag = f"{subcmd_type.__module__}.{subcmd_type.__name__}"
+                loader.update_context({sub_tag: subcmd_type, subcmd_type.__name__: subcmd_type})
+
         pdump_str = loader.dump(self.conf_type.__new__(self.conf_type))
 
         logger.debug(f"pdump_str: {pdump_str}")
@@ -885,7 +1232,7 @@ class Program(BaseModel, Generic[T]):
         # compose initial structure from defaults
         current_composition = loader.compose_config_from_str(pdump_str)
 
-        # merge included config files
+        # merge included config files (root-scoped)
         if confs_to_merge:
             for conf in confs_to_merge:
                 this_conf = loader.compose(conf)
@@ -893,6 +1240,21 @@ class Program(BaseModel, Generic[T]):
                     raise ArgParseError(f"invalid include file: {conf}")
                 current_composition = loader.merge(
                     current_composition, this_conf, merge_key=MergeKey(raw="<<{<~}[<~]")
+                )
+
+        # merge subcommand-scoped config files (wrapped under subcmd field name)
+        if subcmd_confs and subcmd_field_name:
+            for conf_path in subcmd_confs:
+                this_conf = loader.compose(conf_path)
+                if not isinstance(this_conf, CompositionResult):
+                    raise ArgParseError(f"invalid include file: {conf_path}")
+                # wrap under the subcommand field: {command: <loaded content>}
+                from dracon.nodes import DraconScalarNode, DraconMappingNode as DMN
+                key_node = loader.yaml.representer.represent_data(subcmd_field_name)
+                wrapped = DMN(tag='tag:yaml.org,2002:map', value=[(key_node, this_conf.root)])
+                wrapped_comp = CompositionResult(root=wrapped)
+                current_composition = loader.merge(
+                    current_composition, wrapped_comp, merge_key=MergeKey(raw="<<{<~}[<~]")
                 )
 
         from dracon.nodes import Node
@@ -1061,37 +1423,47 @@ def dracon_program(
             'epilog': epilog,
         }
 
+        def _make_prog(cfg):
+            return make_program(
+                cls, name=cfg['name'], description=cfg['description'],
+                sections=cfg['sections'], epilog=cfg['epilog'],
+                version=cfg.get('version'),
+            )
+
+        def _dispatch_run(instance, prog):
+            """dispatch .run() — root takes precedence, else subcommand .run(ctx)."""
+            if hasattr(instance, 'run'):
+                return instance.run()
+            subcmd_field = prog._subcommand_field_name
+            if subcmd_field:
+                subcmd = getattr(instance, subcmd_field, None)
+                if subcmd and hasattr(subcmd, 'run'):
+                    return subcmd.run(instance)
+            return instance
+
         @classmethod
         def cli(cls, argv=None):
             cfg = cls._dracon_program_config
-            prog = make_program(
-                cls, name=cfg['name'], description=cfg['description'],
-                sections=cfg['sections'], epilog=cfg['epilog'],
-            )
+            prog = _make_prog(cfg)
             instance, _ = prog.parse_args(
                 argv if argv is not None else sys.argv[1:],
                 deferred_paths=cfg['deferred_paths'],
                 context=cfg['context'],
             )
-            if hasattr(instance, 'run'):
-                return instance.run()
-            return instance
+            return _dispatch_run(instance, prog)
 
         @classmethod
         def invoke(cls, *config_files, **context_kwargs):
+            cfg = cls._dracon_program_config
+            prog = _make_prog(cfg)
             instance = cls.from_config(*config_files, **context_kwargs)
-            if hasattr(instance, 'run'):
-                return instance.run()
-            return instance
+            return _dispatch_run(instance, prog)
 
         @classmethod
         def from_config(cls, *config_files, **context_kwargs):
             cfg = cls._dracon_program_config
             merged_context = {**cfg['context'], **context_kwargs}
-            prog = make_program(
-                cls, name=cfg['name'], description=cfg['description'],
-                sections=cfg['sections'], epilog=cfg['epilog'],
-            )
+            prog = _make_prog(cfg)
             argv = [c if c.startswith('+') else f'+{c}' for c in config_files]
             instance, _ = prog.parse_args(
                 argv,
