@@ -204,4 +204,114 @@ $ python app.py debug=true port=8080  # if settings is marked positional=True
 - Nested dictionary keys use dot notation: `parent.child.key=value`
 - Both syntaxes can be mixed with file loading: `--settings +config.yaml debug=true`
 
+## Subcommands
+
+Use subcommands to split your CLI into distinct actions, each with their own arguments — like `git commit`, `git push`, etc.
+
+### Define Subcommand Models
+
+Each subcommand is a `BaseModel` with an `action` discriminator field and (optionally) a `.run(ctx)` method:
+
+```python
+from dracon import Arg, Subcommand, dracon_program
+from pydantic import BaseModel
+from typing import Annotated, Literal
+
+class TrainCmd(BaseModel):
+    """Train a model on the dataset."""
+    action: Literal['train'] = 'train'
+    epochs: Annotated[int, Arg(help="Number of training epochs")] = 10
+    lr: float = 0.001
+
+    def run(self, ctx):
+        # ctx is the root CLI instance — access shared options here
+        print(f"Training (verbose={ctx.verbose}) for {self.epochs} epochs")
+
+class EvalCmd(BaseModel):
+    """Evaluate model performance."""
+    action: Literal['eval'] = 'eval'
+    dataset: Annotated[str, Arg(help="Path to test dataset")]
+
+    def run(self, ctx):
+        print(f"Evaluating on {self.dataset}")
+```
+
+### Wire Into Root Model
+
+Use `Subcommand()` on the root model to declare the union:
+
+```python
+@dracon_program(name="ml-tool", version="1.0")
+class CLI(BaseModel):
+    verbose: Annotated[bool, Arg(short='v', help="Verbose output")] = False
+    command: Subcommand(TrainCmd, EvalCmd)
+```
+
+That's it. Run with:
+
+```bash
+ml-tool train --epochs 50
+ml-tool --verbose eval --dataset test.csv
+ml-tool train --help
+```
+
+### Skip the Discriminator Boilerplate
+
+The `@subcommand` decorator injects the `action: Literal[...] = ...` field for you:
+
+```python
+from dracon import subcommand
+
+@subcommand('train')
+class TrainCmd(BaseModel):
+    """Train a model."""
+    epochs: int = 10
+    # action: Literal['train'] = 'train' is added automatically
+```
+
+### Subcommand-Scoped Config Files
+
+Config files appearing **after** the subcommand name are scoped to it — the file only needs the subcommand's own fields, no wrapper:
+
+```bash
+ml-tool train +training.yaml --lr 0.0001
+```
+
+```yaml
+# training.yaml
+epochs: 99
+lr: 0.01
+```
+
+Files **before** the subcommand merge at the root level:
+
+```bash
+ml-tool +base.yaml train
+```
+
+### Nested Subcommands
+
+Subcommand models can contain their own `Subcommand` fields for multi-level CLIs:
+
+```python
+class AddCmd(BaseModel):
+    action: Literal['add'] = 'add'
+    name: Annotated[str, Arg(help="Remote name")]
+
+class RemoveCmd(BaseModel):
+    action: Literal['remove'] = 'remove'
+    name: Annotated[str, Arg(help="Remote name")]
+
+class RemoteCmd(BaseModel):
+    """Manage remotes."""
+    action: Literal['remote'] = 'remote'
+    sub: Subcommand(AddCmd, RemoveCmd)
+```
+
+```bash
+my-tool remote add --name origin
+```
+
+See the [Subcommand reference](../reference/cli_arg.md#subcommands) for full API details.
+
 By combining these `Arg` parameters, you can create sophisticated and user-friendly command-line interfaces directly from your Pydantic configuration models.

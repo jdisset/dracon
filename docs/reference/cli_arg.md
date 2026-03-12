@@ -107,6 +107,167 @@ raw_name: Annotated[str, Arg(auto_dash_alias=False, help="No dash alias")]
 # Creates only --raw_name (no --raw-name alias)
 ```
 
+### `subcommand: bool = False`
+Marks this field as a subcommand union. Automatically set by `Subcommand()` — you don't need to set this manually.
+
+## Subcommands
+
+### `Subcommand(*cmd_types, discriminator='action', **arg_kwargs)`
+
+Type factory that creates the correct `Annotated[Union[...], Field(discriminator=...), Arg(subcommand=True)]` annotation for a subcommand field.
+
+```python
+from dracon import Subcommand
+
+class CLI(BaseModel):
+    command: Subcommand(TrainCmd, EvalCmd)
+    # equivalent to:
+    # command: Annotated[
+    #     Union[TrainCmd, EvalCmd],
+    #     Field(discriminator='action'),
+    #     Arg(subcommand=True, positional=True),
+    # ]
+```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `*cmd_types` | `type[BaseModel]` | (required) | Subcommand model classes |
+| `discriminator` | `str` | `'action'` | Field name used to distinguish subcommands |
+| `**arg_kwargs` | | | Additional kwargs passed to `Arg()` |
+
+Each subcommand type must have a discriminator field with a `Literal` type:
+
+```python
+class TrainCmd(BaseModel):
+    action: Literal['train'] = 'train'  # discriminator
+    epochs: int = 10
+```
+
+### `@subcommand(name, discriminator='action')`
+
+Decorator that injects the discriminator field automatically, removing the boilerplate:
+
+```python
+from dracon import subcommand
+
+@subcommand('train')
+class TrainCmd(BaseModel):
+    epochs: int = 10
+    # action: Literal['train'] = 'train' is injected automatically
+
+@subcommand('eval')
+class EvalCmd(BaseModel):
+    dataset: str
+```
+
+Custom discriminator field name:
+
+```python
+@subcommand('deploy', discriminator='cmd')
+class DeployCmd(BaseModel):
+    target: str = "prod"
+    # cmd: Literal['deploy'] = 'deploy' is injected
+```
+
+### Subcommand Help Output
+
+**Top-level** (`ml-tool --help`):
+
+```
+ml-tool (v1.0)
+
+  Usage: ml-tool [OPTIONS] COMMAND [COMMAND_OPTIONS]
+
+  Commands:
+    train    Train a model on the dataset.
+    eval     Evaluate a model on test data.
+
+  Options:
+    -v, --verbose
+      Verbose output
+      [default: False]
+
+  Use 'ml-tool COMMAND --help' for more info on a command.
+```
+
+**Per-subcommand** (`ml-tool train --help`):
+
+```
+ml-tool train
+
+  Train a model on the dataset.
+
+  Usage: ml-tool train [OPTIONS]
+
+  Options:
+    --epochs  int
+      Number of epochs
+      [default: 10]
+
+    --lr  float
+      [default: 0.001]
+
+  Shared Options:
+    -v, --verbose
+      Verbose output
+      [default: False]
+```
+
+### Subcommand Config Files
+
+Config files placed **after** the subcommand name are scoped to that subcommand — their contents are merged under the subcommand field:
+
+```bash
+ml-tool train +training.yaml    # training.yaml is merged into command:
+```
+
+```yaml
+# training.yaml — no wrapper needed, just the subcommand's fields:
+epochs: 99
+lr: 0.01
+```
+
+Config files **before** the subcommand merge at root level:
+
+```bash
+ml-tool +base.yaml train        # base.yaml merges at root
+```
+
+A full config can also specify the subcommand inline:
+
+```yaml
+# full_config.yaml
+verbose: true
+command:
+  action: train
+  epochs: 50
+```
+
+### Nested Subcommands
+
+Subcommand models can themselves contain `Subcommand` fields:
+
+```python
+class AddCmd(BaseModel):
+    action: Literal['add'] = 'add'
+    name: Annotated[str, Arg(help="Remote name")]
+
+class RemoveCmd(BaseModel):
+    action: Literal['remove'] = 'remove'
+    name: Annotated[str, Arg(help="Remote name")]
+
+class RemoteCmd(BaseModel):
+    action: Literal['remote'] = 'remote'
+    sub: Subcommand(AddCmd, RemoveCmd)
+
+class GitCLI(BaseModel):
+    command: Subcommand(RemoteCmd, ListCmd)
+
+# Usage: git-tool remote add --name origin
+```
+
 ## Automatic CLI Generation
 
 ### Field Types

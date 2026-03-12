@@ -56,6 +56,96 @@ my-app action +base.yaml --workers 4 +overrides.yaml ++runname test -e prod
 
 Dracon classifies each token by its prefix (`+`, `++`, `--`, `-`, or none) and processes them accordingly, regardless of position.
 
+## Subcommands
+
+Dracon supports subcommands (like `git remote add` or `docker compose up`) via Pydantic discriminated unions. The model defines the schema — no separate subcommand registration needed.
+
+Each subcommand is a `BaseModel` with a discriminator field (`action: Literal['name'] = 'name'`), and the root model declares the subcommand field using `Subcommand(*types)`:
+
+```python
+from dracon import dracon_program, Arg, Subcommand
+from pydantic import BaseModel
+from typing import Annotated, Literal
+
+class TrainCmd(BaseModel):
+    """Train a model."""
+    action: Literal['train'] = 'train'
+    epochs: Annotated[int, Arg(help="Number of epochs")] = 10
+
+    def run(self, ctx):
+        print(f"Training for {self.epochs} epochs (verbose={ctx.verbose})")
+
+class EvalCmd(BaseModel):
+    """Evaluate a model."""
+    action: Literal['eval'] = 'eval'
+    dataset: Annotated[str, Arg(help="Test dataset path")]
+
+    def run(self, ctx):
+        print(f"Evaluating on {self.dataset}")
+
+@dracon_program(name="ml-tool")
+class CLI(BaseModel):
+    verbose: Annotated[bool, Arg(short='v')] = False
+    command: Subcommand(TrainCmd, EvalCmd)
+```
+
+Usage:
+
+```bash
+ml-tool train --epochs 50
+ml-tool --verbose eval --dataset test.csv
+ml-tool train --help                        # per-subcommand help
+```
+
+### Shared Options
+
+Options defined on the root model (like `--verbose` above) can appear before or after the subcommand name — both are equivalent:
+
+```bash
+ml-tool --verbose train --epochs 50
+ml-tool train --epochs 50 --verbose
+```
+
+### Config File Scoping
+
+Config files (`+file`) are scoped by position relative to the subcommand name:
+
+- **Before** the subcommand → merges at root level
+- **After** the subcommand → merges under the subcommand field only
+
+```bash
+ml-tool +base.yaml train                    # root-scoped
+ml-tool train +training.yaml                # subcommand-scoped (file just needs epochs/lr, no wrapper)
+```
+
+A full config file at root level can also specify the subcommand via the discriminator field:
+
+```yaml
+# full_config.yaml
+verbose: true
+command:
+  action: train
+  epochs: 50
+```
+
+### Run Dispatch
+
+When using `@dracon_program`, `.cli()` dispatches `.run()` automatically:
+
+1. If the **root model** has `.run()` → calls `instance.run()` (developer controls everything)
+2. Else if the **subcommand** has `.run(ctx)` → calls `subcmd.run(root_instance)` with the root config as context
+3. Else → returns the config instance
+
+### Nested Subcommands
+
+Subcommands can themselves contain `Subcommand` fields for multi-level nesting:
+
+```bash
+git-tool remote add --name origin
+```
+
+See the [CLI customization guide](../guides/customize-cli.md#subcommands) and [Subcommand reference](../reference/cli_arg.md#subcommands) for full details.
+
 ## Configuration Loading and Precedence
 
 This is where Dracon's CLI integrates seamlessly with its configuration loading capabilities. When `program.parse_args()` runs, configuration sources are applied in a specific order, with later sources overriding earlier ones:
