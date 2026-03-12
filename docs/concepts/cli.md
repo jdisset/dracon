@@ -144,6 +144,8 @@ Subcommands can themselves contain `Subcommand` fields for multi-level nesting:
 git-tool remote add --name origin
 ```
 
+Subcommand models can also inherit from `LazyDraconModel` instead of `BaseModel` if their field defaults contain `${...}` interpolations that should resolve using the program's context. See [LazyDraconModel](../concepts/pydantic.md#lazyDraconmodel-lazy-interpolation-in-pydantic-models) for details.
+
 See the [CLI customization guide](../guides/customize-cli.md#subcommands) and [Subcommand reference](../reference/cli_arg.md#subcommands) for full details.
 
 ## Configuration Loading and Precedence
