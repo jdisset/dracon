@@ -2106,6 +2106,24 @@ def test_parse_subcommand_full_config(tmp_path):
     assert conf.command.epochs == 50
 
 
+def test_subcommand_layered_configs_merge(tmp_path):
+    """Multiple subcommand-scoped +files merge fields, not replace.
+
+    Regression: subcommand config merge used replace strategy ({<~}),
+    so the second file erased fields from the first. Fixed to recursive ({<+}).
+    """
+    base = tmp_path / "base.yaml"
+    base.write_text("epochs: 99\nlr: 0.001\n")
+    overlay = tmp_path / "overlay.yaml"
+    overlay.write_text("lr: 0.5\n")
+    prog = make_program(SubCmdCLI, name="tool")
+    conf, _ = prog.parse_args(["train", f"+{base}", f"+{overlay}"])
+    assert isinstance(conf.command, TrainCmd)
+    # epochs from base survives, lr from overlay wins
+    assert conf.command.epochs == 99
+    assert conf.command.lr == 0.5
+
+
 # -- test help output --
 
 def test_subcommand_toplevel_help(capsys):

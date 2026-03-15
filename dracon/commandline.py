@@ -1266,6 +1266,7 @@ class Program(BaseModel, Generic[T]):
                 )
 
         # merge subcommand-scoped config files (wrapped under subcmd field name)
+        # Strategy: recurse + new wins — later files overlay fields, not replace
         if subcmd_confs and subcmd_field_name:
             for conf_path in subcmd_confs:
                 this_conf = loader.compose(conf_path)
@@ -1277,7 +1278,7 @@ class Program(BaseModel, Generic[T]):
                 wrapped = DMN(tag='tag:yaml.org,2002:map', value=[(key_node, this_conf.root)])
                 wrapped_comp = CompositionResult(root=wrapped)
                 current_composition = loader.merge(
-                    current_composition, wrapped_comp, merge_key=MergeKey(raw="<<{<~}[<~]")
+                    current_composition, wrapped_comp, merge_key=MergeKey(raw="<<{<+}[<+]")
                 )
 
         from dracon.nodes import Node
