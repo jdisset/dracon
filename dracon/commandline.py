@@ -124,6 +124,28 @@ def _get_arg_resolvable_status(arg_type: Optional[Type[Any]]) -> bool:
         return isinstance(arg_type, type) and issubclass(arg_type, (DeferredNode, Resolvable))
 
 
+class _RawStr(str):
+    """Sentinel: a string value that should skip YAML composition."""
+    pass
+
+
+def _is_str_field(arg_type) -> bool:
+    """Check if a field's type resolves to plain str (should skip YAML composition)."""
+    if arg_type is str:
+        return True
+    origin = getattr(arg_type, '__origin__', None)
+    # Annotated[str, ...] → check first arg
+    if origin is Annotated:
+        args = get_args(arg_type)
+        return _is_str_field(args[0]) if args else False
+    # str | None (Union) → str if all non-None members are str
+    if origin is Union:
+        args = get_args(arg_type)
+        non_none = [a for a in args if a is not type(None)]
+        return all(a is str for a in non_none)
+    return False
+
+
 def getArg(program: "Program", name: str, pydantic_field) -> Arg:
     """creates the final Arg object based on model field and program defaults."""
     base_arg = Arg(
@@ -1030,6 +1052,8 @@ class Program(BaseModel, Generic[T]):
             elif collection_type == "dict_like":
                 value, i = self._collect_dict_values(argv, i)
                 raw_args[arg_obj.real_name] = value
+            elif _is_str_field(arg_obj.arg_type):
+                raw_args[arg_obj.real_name] = _RawStr(argstr)
             else:
                 raw_args[arg_obj.real_name] = argstr
 
@@ -1063,6 +1087,10 @@ class Program(BaseModel, Generic[T]):
                 # if is_file=true, prepend '+' to trigger loading, ensure 'file:' scheme
                 if arg_obj and arg_obj.is_file and not v.startswith('+'):
                     v = f"+{v}"  # allow pkg:path etc. with is_file
+
+                # str-typed fields skip YAML composition — pass through raw
+                if arg_obj and _is_str_field(arg_obj.arg_type):
+                    v = _RawStr(v)
 
                 target_dict[real_name] = v
                 logger.debug(f"setting {real_name} to {target_dict[real_name]}")
@@ -1181,11 +1209,7 @@ class Program(BaseModel, Generic[T]):
                 raise ArgParseError(
                     f"Failed to load override reference '{include_str}': {e}"
                 ) from e
-        # try YAML composition; fall back to raw string for free-text values
-        try:
-            return loader.compose_config_from_str(value)
-        except Exception:
-            return value
+        return loader.compose_config_from_str(value)
 
     def _generate_config(
         self, raw_args: dict, nested_args: dict, defined_vars: dict, confs_to_merge: list,
@@ -1283,15 +1307,30 @@ class Program(BaseModel, Generic[T]):
 
         from dracon.nodes import Node
 
-        def compose_value(v):
+        def compose_value(v, is_str=False):
+            if isinstance(v, _RawStr):
+                is_str = True
+                v = str(v)
             if isinstance(v, Node):
                 val = v
             elif isinstance(v, dict):
                 return {k: compose_value(sub_v) for k, sub_v in v.items()}
             else:
-                val = self._compose_value(str(v), loader)
-                if isinstance(val, CompositionResult):
-                    val = val.root
+                if is_str:
+                    # str-typed fields: try YAML composition (for ${...} interpolation),
+                    # but fall back to raw string on YAML *parse* errors only.
+                    # This is type-aware, not a blanket catch.
+                    from ruamel.yaml import YAMLError
+                    try:
+                        val = self._compose_value(str(v), loader)
+                        if isinstance(val, CompositionResult):
+                            val = val.root
+                    except (YAMLError, ArgParseError):
+                        return loader.yaml.representer.represent_data(v)
+                else:
+                    val = self._compose_value(str(v), loader)
+                    if isinstance(val, CompositionResult):
+                        val = val.root
             return val
 
         def dict_to_node(d):
