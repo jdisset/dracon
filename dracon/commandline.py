@@ -1181,8 +1181,11 @@ class Program(BaseModel, Generic[T]):
                 raise ArgParseError(
                     f"Failed to load override reference '{include_str}': {e}"
                 ) from e
-        # else we parse the value from scratch
-        return loader.compose_config_from_str(value)
+        # try YAML composition; fall back to raw string for free-text values
+        try:
+            return loader.compose_config_from_str(value)
+        except Exception:
+            return value
 
     def _generate_config(
         self, raw_args: dict, nested_args: dict, defined_vars: dict, confs_to_merge: list,

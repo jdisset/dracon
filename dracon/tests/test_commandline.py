@@ -2399,3 +2399,32 @@ def test_subcommand_positional_list_str():
     conf, _ = prog.parse_args(["submit", "echo hello"])
     assert isinstance(conf.sub, SubmitCmd)
     assert conf.sub.command == ["echo hello"]
+
+
+class _FreeTextCLI(BaseModel):
+    message: Annotated[str, Arg(positional=True)]
+
+
+def test_cli_string_with_colons():
+    """string values containing colons should not be YAML-parsed."""
+    prog = make_program(_FreeTextCLI, name="tool")
+    conf, _ = prog.parse_args(["Step 1: do this. Step 2: do that."])
+    assert conf.message == "Step 1: do this. Step 2: do that."
+
+
+def test_cli_string_with_braces():
+    """string values containing braces should fall back to raw string."""
+    prog = make_program(_FreeTextCLI, name="tool")
+    conf, _ = prog.parse_args(["{not: valid: yaml: here}"])
+    assert conf.message == "{not: valid: yaml: here}"
+
+
+def test_cli_yaml_parseable_values_still_work():
+    """values that are valid YAML and useful (ints, bools) should still be parsed."""
+
+    class TypedCLI(BaseModel):
+        count: Annotated[int, Arg(positional=True)]
+
+    prog = make_program(TypedCLI, name="tool")
+    conf, _ = prog.parse_args(["42"])
+    assert conf.count == 42
