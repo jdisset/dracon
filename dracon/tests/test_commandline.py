@@ -2283,6 +2283,37 @@ def test_subcommand_plusplus_after_subcmd(tmp_path):
     assert conf.command.epochs == 99
 
 
+# -- test CLI raw string fallback --
+
+class MessageApp(BaseModel):
+    message: Annotated[str, Arg(positional=True, help="A text message")]
+
+
+def test_cli_string_with_colons():
+    """String values containing colons should fall back to raw string, not YAML-parsed."""
+    prog = make_program(MessageApp, name="tool")
+    conf, _ = prog.parse_args(["Step 1: do this. Step 2: do that."])
+    assert conf.message == "Step 1: do this. Step 2: do that."
+
+
+def test_cli_string_with_curly_braces():
+    """String values with curly braces should not be YAML-parsed as dicts."""
+    prog = make_program(MessageApp, name="tool")
+    conf, _ = prog.parse_args(["function() { return 42; }"])
+    assert conf.message == "function() { return 42; }"
+
+
+def test_cli_named_arg_with_colons():
+    """Named string args with colons should fall back to raw string."""
+
+    class NamedMsg(BaseModel):
+        msg: Annotated[str, Arg(help="message")] = ""
+
+    prog = make_program(NamedMsg, name="tool")
+    conf, _ = prog.parse_args(["--msg", "Step 1: foo. Step 2: bar."])
+    assert conf.msg == "Step 1: foo. Step 2: bar."
+
+
 # -- test @subcommand decorator with Subcommand() --
 
 def test_decorator_subcommand_in_union():
