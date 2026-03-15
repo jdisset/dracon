@@ -1277,6 +1277,8 @@ class Program(BaseModel, Generic[T]):
         def compose_value(v):
             if isinstance(v, Node):
                 val = v
+            elif isinstance(v, dict):
+                return {k: compose_value(sub_v) for k, sub_v in v.items()}
             else:
                 val = self._compose_value(str(v), loader)
                 if isinstance(val, CompositionResult):
@@ -1288,12 +1290,12 @@ class Program(BaseModel, Generic[T]):
             if isinstance(d, Node):
                 return d
             elif isinstance(d, dict):
-                node = DraconMappingNode(tag='tag:yaml.org,2002:map', value=[])
+                pairs = []
                 for k, v in d.items():
                     key_node = loader.yaml.representer.represent_data(k)
                     value_node = dict_to_node(v)
-                    node.value.append((key_node, value_node))
-                return node
+                    pairs.append((key_node, value_node))
+                return DraconMappingNode(tag='tag:yaml.org,2002:map', value=pairs)
             else:
                 return loader.yaml.representer.represent_data(d)
 

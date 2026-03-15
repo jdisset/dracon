@@ -2359,3 +2359,19 @@ def test_lazy_root_and_subcommand():
     conf = AllLazyCLI.cli(["go"])
     assert conf.base == '/out/root'
     assert conf.command.path == '/out/sub'
+
+
+def test_subcommand_positional_list_str():
+    """positional list[str] in subcommand passes list (not stringified) to pydantic"""
+
+    @subcommand('submit')
+    class SubmitCmd(BaseModel):
+        command: Annotated[list[str], Arg(positional=True, help="Commands")]
+
+    class CLI(BaseModel):
+        sub: Subcommand(SubmitCmd)
+
+    prog = make_program(CLI, name="repro")
+    conf, _ = prog.parse_args(["submit", "echo hello"])
+    assert isinstance(conf.sub, SubmitCmd)
+    assert conf.sub.command == ["echo hello"]
