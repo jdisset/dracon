@@ -677,7 +677,12 @@ class Program(BaseModel, Generic[T]):
         subcmd_name = None
         has_config = False
         for idx, token in enumerate(argv):
-            if token.startswith('+') and not token.startswith('++'):
+            if token.startswith('++') or token.startswith('--define.'):
+                # context variable — skip (and consume value if space-separated)
+                if '=' not in token and idx + 1 < len(argv):
+                    continue  # value token will be skipped on next iteration
+                continue
+            if token.startswith('+'):
                 has_config = True
                 continue
             if token.startswith('-'):
@@ -756,15 +761,15 @@ class Program(BaseModel, Generic[T]):
                         i = len(after_args)  # consumed all
                         break
 
-                    if token.startswith('+'):
-                        subcmd_confs.append(token[1:])
-                        i += 1
-                    elif token.startswith('++') or token.startswith('--define.'):
-                        # defined vars go to shared pool
+                    if token.startswith('++') or token.startswith('--define.'):
+                        # defined vars go to shared pool — must check before '+' config
                         i = self._parse_single_arg(
                             after_args, i, root_raw_args, root_nested_args,
                             defined_vars, actions, root_confs,
                         )
+                    elif token.startswith('+'):
+                        subcmd_confs.append(token[1:])
+                        i += 1
                     elif token.startswith('--') or token.startswith('-'):
                         # check equals syntax
                         check_token = token.split('=', 1)[0] if '=' in token else token

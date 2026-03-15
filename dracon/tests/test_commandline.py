@@ -2259,6 +2259,30 @@ def test_subcommand_with_define_vars():
     assert conf.command.epochs == 10
 
 
+def test_subcommand_plusplus_not_parsed_as_config(tmp_path):
+    """++var=value after subcommand is a context variable, not a config file.
+
+    Regression test: ++var was parsed as + (config prefix) + +var (filename),
+    because startswith('+') matched before startswith('++').
+    """
+    config = tmp_path / "base.yaml"
+    config.write_text("!set_default my_epochs: 5\ncommand:\n  action: train\n  epochs: ${my_epochs}\n")
+    prog = make_program(SubCmdCLI, name="tool")
+    # ++my_epochs=42 should override the !set_default in the config
+    conf, _ = prog.parse_args([f"+{config}", "++my_epochs=42"])
+    assert isinstance(conf.command, TrainCmd)
+    assert conf.command.epochs == 42
+
+
+def test_subcommand_plusplus_after_subcmd(tmp_path):
+    """++var after subcommand name should be a context variable."""
+    config = tmp_path / "train.yaml"
+    config.write_text("!set_default ep: 10\nepochs: ${ep}\n")
+    prog = make_program(SubCmdCLI, name="tool")
+    conf, _ = prog.parse_args(["train", f"+{config}", "++ep=99"])
+    assert conf.command.epochs == 99
+
+
 # -- test @subcommand decorator with Subcommand() --
 
 def test_decorator_subcommand_in_union():
