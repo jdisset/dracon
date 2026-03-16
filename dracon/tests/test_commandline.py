@@ -2524,3 +2524,169 @@ def test_cli_yaml_parseable_values_still_work():
     prog = make_program(TypedCLI, name="tool")
     conf, _ = prog.parse_args(["42"])
     assert conf.count == 42
+
+
+# --- ConfigFile auto-discovery tests ---
+
+from dracon.commandline import ConfigFile, _discover_config_files, dracon_program
+
+
+class _DiscoverConfig(BaseModel):
+    host: str = "default"
+    port: int = 80
+
+
+def test_config_file_home_dir(tmp_path):
+    """auto-discovered home-dir config provides base-layer defaults."""
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text("host: from-home\nport: 9090\n")
+
+    @dracon_program(name="test-home", config_files=[ConfigFile(str(cfg_file))])
+    class CLI(_DiscoverConfig):
+        pass
+
+    result = CLI.cli([])
+    assert result.host == "from-home"
+    assert result.port == 9090
+
+
+def test_config_file_cli_override_wins(tmp_path):
+    """explicit +file.yaml overrides auto-discovered config."""
+    home_cfg = tmp_path / "home.yaml"
+    home_cfg.write_text("host: from-home\nport: 9090\n")
+    override_cfg = tmp_path / "override.yaml"
+    override_cfg.write_text("host: from-override\n")
+
+    @dracon_program(name="test-override", config_files=[ConfigFile(str(home_cfg))])
+    class CLI(_DiscoverConfig):
+        pass
+
+    result = CLI.cli([f"+{override_cfg}"])
+    assert result.host == "from-override"
+    assert result.port == 9090  # still from home (not overridden)
+
+
+def test_config_file_flag_override_wins(tmp_path):
+    """--flag overrides both auto-discovered and explicit configs."""
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text("host: from-home\nport: 9090\n")
+
+    @dracon_program(name="test-flag", config_files=[ConfigFile(str(cfg_file))])
+    class CLI(_DiscoverConfig):
+        pass
+
+    result = CLI.cli(["--host", "from-flag"])
+    assert result.host == "from-flag"
+    assert result.port == 9090
+
+
+def test_config_file_required_missing():
+    """required=True raises FileNotFoundError for missing files."""
+    with pytest.raises(FileNotFoundError):
+        _discover_config_files([ConfigFile("/nonexistent/config.yaml", required=True)])
+
+
+def test_config_file_optional_missing():
+    """optional (default) missing file produces no error and no configs."""
+    result = _discover_config_files([ConfigFile("/nonexistent/config.yaml")])
+    assert result == []
+
+
+def test_config_file_search_parents(tmp_path):
+    """search_parents=True walks up from CWD to find the config."""
+    cfg_file = tmp_path / ".tool.yaml"
+    cfg_file.write_text("host: found-it\n")
+    child = tmp_path / "a" / "b" / "c"
+    child.mkdir(parents=True)
+
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(str(child))
+        found = _discover_config_files([ConfigFile(".tool.yaml", search_parents=True)])
+        assert len(found) == 1
+        assert found[0] == str(cfg_file)
+    finally:
+        os.chdir(old_cwd)
+
+
+def test_config_file_search_parents_not_found(tmp_path):
+    """search_parents with no match returns empty list."""
+    child = tmp_path / "a" / "b"
+    child.mkdir(parents=True)
+
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(str(child))
+        found = _discover_config_files([ConfigFile(".nonexistent.yaml", search_parents=True)])
+        assert found == []
+    finally:
+        os.chdir(old_cwd)
+
+
+def test_config_file_multiple_layered(tmp_path):
+    """multiple ConfigFiles are layered in declaration order."""
+    base = tmp_path / "base.yaml"
+    base.write_text("host: base\nport: 80\n")
+    layer = tmp_path / "layer.yaml"
+    layer.write_text("host: layered\n")
+
+    @dracon_program(
+        name="test-multi",
+        config_files=[ConfigFile(str(base)), ConfigFile(str(layer))],
+    )
+    class CLI(_DiscoverConfig):
+        pass
+
+    result = CLI.cli([])
+    assert result.host == "layered"  # second config wins
+    assert result.port == 80  # from first config
+
+
+def test_config_file_from_config(tmp_path):
+    """from_config() also applies auto-discovery."""
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text("host: auto-discovered\n")
+    extra = tmp_path / "extra.yaml"
+    extra.write_text("port: 1234\n")
+
+    @dracon_program(name="test-fc", config_files=[ConfigFile(str(cfg_file))])
+    class CLI(_DiscoverConfig):
+        pass
+
+    result = CLI.from_config(str(extra))
+    assert result.host == "auto-discovered"
+    assert result.port == 1234
+
+
+def test_config_file_selector(tmp_path):
+    """ConfigFile with selector extracts a subtree."""
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text("section:\n  host: selected\n  port: 4321\n")
+
+    found = _discover_config_files([ConfigFile(str(cfg_file), selector="section")])
+    assert len(found) == 1
+    assert found[0].endswith("@section")
+
+
+def test_config_file_required_search_parents(tmp_path):
+    """required=True + search_parents=True raises when not found."""
+    child = tmp_path / "deep" / "dir"
+    child.mkdir(parents=True)
+
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(str(child))
+        with pytest.raises(FileNotFoundError):
+            _discover_config_files([
+                ConfigFile(".nonexistent.yaml", search_parents=True, required=True)
+            ])
+    finally:
+        os.chdir(old_cwd)
+
+
+def test_config_file_search_parents_absolute_path_errors():
+    """search_parents with an absolute path raises ValueError."""
+    with pytest.raises(ValueError, match="meaningless with absolute path"):
+        _discover_config_files([
+            ConfigFile("/absolute/path.yaml", search_parents=True)
+        ])

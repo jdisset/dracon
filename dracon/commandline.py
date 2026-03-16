@@ -3,6 +3,7 @@
 import sys
 import typing
 import logging
+from pathlib import Path
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import (
@@ -91,6 +92,58 @@ class Arg:
     is_flag: Optional[bool] = None  # none means auto-detect
     auto_dash_alias: Optional[bool] = None  # none means overridden by the program
     subcommand: bool = False
+
+
+@dataclass(frozen=True)
+class ConfigFile:
+    """declares a config file for auto-discovery by @dracon_program.
+
+    Auto-discovered configs are loaded as the base layer (below explicit
+    +file.yaml args and --flag overrides). Useful for home-dir defaults
+    (~/.tool/config.yaml) and project-local overrides (.tool.yaml).
+    """
+    path: str
+    search_parents: bool = False
+    required: bool = False
+    selector: Optional[str] = None
+
+
+def _discover_config_files(config_files: List[ConfigFile]) -> List[str]:
+    """resolve ConfigFile declarations to actual file paths."""
+    found = []
+    for cf in config_files:
+        expanded = Path(cf.path).expanduser()
+        if cf.search_parents:
+            if expanded.is_absolute():
+                raise ValueError(
+                    f"search_parents is meaningless with absolute path: {cf.path}"
+                )
+            resolved = _search_parents(expanded)
+        else:
+            resolved = expanded if expanded.exists() else None
+        if resolved:
+            path_str = str(resolved)
+            if cf.selector:
+                path_str += f"@{cf.selector}"
+            found.append(path_str)
+        elif cf.required:
+            raise FileNotFoundError(
+                f"Required config file not found: {cf.path}"
+            )
+    return found
+
+
+def _search_parents(relative: Path) -> Optional[Path]:
+    """walk up from CWD looking for a file matching `relative`."""
+    current = Path.cwd()
+    while True:
+        candidate = current / relative
+        if candidate.exists():
+            return candidate
+        parent = current.parent
+        if parent == current:
+            return None
+        current = parent
 
 
 def Subcommand(*cmd_types, discriminator=DEFAULT_DISCRIMINATOR, **arg_kwargs):
@@ -1452,6 +1505,7 @@ def dracon_program(
     auto_context: bool = False,
     sections: Optional[List[HelpSection]] = None,
     epilog: Optional[str] = None,
+    config_files: Optional[List[ConfigFile]] = None,
 ):
     """
     Decorator to turn a Pydantic BaseModel into a dracon CLI program.
@@ -1470,6 +1524,7 @@ def dracon_program(
         context_types: Types to add to context as {name: type}
         context: Additional context dict
         auto_context: Capture types from decorator call site
+        config_files: auto-discovered config files (base layer, below CLI args)
     """
     from dracon.utils import extract_types_from_caller
 
@@ -1496,6 +1551,7 @@ def dracon_program(
             'context': full_context,
             'sections': sections,
             'epilog': epilog,
+            'config_files': config_files or [],
         }
 
         def _make_prog(cfg):
@@ -1516,12 +1572,15 @@ def dracon_program(
                     return subcmd.run(instance)
             return instance
 
+        def _auto_config_argv(cfg):
+            return [f'+{c}' for c in _discover_config_files(cfg['config_files'])]
+
         @classmethod
         def cli(cls, argv=None):
             cfg = cls._dracon_program_config
             prog = _make_prog(cfg)
             instance, _ = prog.parse_args(
-                argv if argv is not None else sys.argv[1:],
+                _auto_config_argv(cfg) + (argv if argv is not None else sys.argv[1:]),
                 deferred_paths=cfg['deferred_paths'],
                 context=cfg['context'],
             )
@@ -1535,13 +1594,13 @@ def dracon_program(
             return _dispatch_run(instance, prog)
 
         @classmethod
-        def from_config(cls, *config_files, **context_kwargs):
+        def from_config(cls, *user_configs, **context_kwargs):
             cfg = cls._dracon_program_config
             merged_context = {**cfg['context'], **context_kwargs}
             prog = _make_prog(cfg)
-            argv = [c if c.startswith('+') else f'+{c}' for c in config_files]
+            user_argv = [c if c.startswith('+') else f'+{c}' for c in user_configs]
             instance, _ = prog.parse_args(
-                argv,
+                _auto_config_argv(cfg) + user_argv,
                 deferred_paths=cfg['deferred_paths'],
                 context=merged_context,
             )
