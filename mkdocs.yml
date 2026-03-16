@@ -72,6 +72,7 @@ nav:
       - "Customize CLI Arguments": "guides/customize-cli.md"
       - "Handle Secrets": "guides/handle-secrets.md"
       - "Use Deferred Execution": "guides/use-deferred.md"
+      - "Inspect & Debug Configs": "guides/inspect-configs.md"
   - "Conceptual Guides":
       - concepts/index.md # Section index page
       # - "Core Principles": "concepts/principles.md" # Maybe combine into others
@@ -91,6 +92,7 @@ nav:
       - "Instruction Tags": "reference/instruction_tags.md"
       - "CLI (`Arg`) Parameters": "reference/cli_arg.md"
       - "KeyPaths": "reference/keypaths.md"
+      - "dracon-print CLI": "reference/dracon_print.md"
 # Add static assets if needed (e.g., logo)
 # extra:
 #   generator: false # Disable MkDocs generator tag in footer
