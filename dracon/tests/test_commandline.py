@@ -2072,6 +2072,53 @@ def test_parse_subcommand_equals_syntax():
     assert conf.command.epochs == 50
 
 
+# -- test shared option with space-separated value before subcommand --
+
+def test_shared_option_space_value_before_subcommand():
+    """tool --name myvalue subcmd should not treat 'myvalue' as a subcommand.
+
+    Regression: the pre-subcommand scan didn't know which flags take values,
+    so --name myvalue would parse 'myvalue' as an unknown subcommand name.
+    """
+
+    @subcommand('run')
+    class RunCmd(BaseModel):
+        count: int = 1
+
+    @subcommand('check')
+    class CheckCmd(BaseModel):
+        deep: bool = False
+
+    class NamedCLI(BaseModel):
+        name: Annotated[str, Arg(help="Daemon name")] = "default"
+        command: Subcommand(RunCmd, CheckCmd)
+
+    prog = make_program(NamedCLI, name="tool")
+
+    # space-separated value: --name myvalue run
+    conf, _ = prog.parse_args(["--name", "myvalue", "run", "--count", "5"])
+    assert conf.name == "myvalue"
+    assert isinstance(conf.command, RunCmd)
+    assert conf.command.count == 5
+
+    # equals syntax should still work: --name=myvalue run
+    conf2, _ = prog.parse_args(["--name=myvalue", "run"])
+    assert conf2.name == "myvalue"
+    assert isinstance(conf2.command, RunCmd)
+
+    # flag (bool) before subcommand should not skip the next token
+    class FlagCLI(BaseModel):
+        verbose: Annotated[bool, Arg(short='v', help="Verbose")] = False
+        name: Annotated[str, Arg(help="Name")] = "default"
+        command: Subcommand(RunCmd, CheckCmd)
+
+    prog2 = make_program(FlagCLI, name="tool")
+    conf3, _ = prog2.parse_args(["-v", "--name", "foo", "check"])
+    assert conf3.verbose is True
+    assert conf3.name == "foo"
+    assert isinstance(conf3.command, CheckCmd)
+
+
 # -- test config file scoping --
 
 def test_parse_subcommand_root_scoped_config(tmp_path):

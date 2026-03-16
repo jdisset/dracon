@@ -698,18 +698,28 @@ class Program(BaseModel, Generic[T]):
         subcmd_idx = None
         subcmd_name = None
         has_config = False
-        for idx, token in enumerate(argv):
+        idx = 0
+        while idx < len(argv):
+            token = argv[idx]
             if token.startswith('++') or token.startswith('--define.'):
-                # context variable — skip (and consume value if space-separated)
-                if '=' not in token and idx + 1 < len(argv):
-                    continue  # value token will be skipped on next iteration
+                # context variable — skip value if space-separated
+                if '=' not in token:
+                    idx += 1  # skip the value token
+                idx += 1
                 continue
             if token.startswith('+'):
                 has_config = True
+                idx += 1
                 continue
             if token.startswith('-'):
                 if token in ('--help', '-h'):
                     print_help(self, None)
+                # if this option takes a value (not a flag), skip the next token
+                opt_key = token.split('=', 1)[0] if '=' in token else token
+                arg = self._arg_map.get(opt_key)
+                if arg and not arg.is_flag and '=' not in token:
+                    idx += 1  # skip the value token
+                idx += 1
                 continue
             if token in self._subcommand_map:
                 subcmd_idx = idx
