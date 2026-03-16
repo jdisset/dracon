@@ -55,6 +55,7 @@ model2 = create_model(layers=5)
 - **`@dracon_program` decorator**: Turn any Pydantic model into a CLI app with one line
 - **`make_callable`**: Transform YAML configs into reusable factory functions
 - **Layered config**: YAML with environment/CLI overrides, includes, variables, and Python expressions
+- **Auto-discovered config files**: Declare `ConfigFile('~/.tool/config.yaml')` or `ConfigFile('.tool.yaml', search_parents=True)` — auto-loaded as base layer, like `.gitconfig`
 - **Pydantic integration**: Type safety and validation out of the box
 - **Auto CLI generation**: Every field becomes a CLI flag, including nested ones
 - **Deferred execution**: Runtime injection of values not available at load time

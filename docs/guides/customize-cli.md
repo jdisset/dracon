@@ -314,3 +314,72 @@ my-tool remote add --name origin
 See the [Subcommand reference](../reference/cli_arg.md#subcommands) for full API details.
 
 By combining these `Arg` parameters, you can create sophisticated and user-friendly command-line interfaces directly from your Pydantic configuration models.
+
+## Auto-Discovered Config Files (`ConfigFile`)
+
+Programs can declare config files that are automatically discovered and loaded as a base layer — like `.gitconfig`, `Cargo.toml`, or `.eslintrc`. Users get sensible defaults without passing `+file.yaml` on every invocation.
+
+```python
+from dracon import dracon_program, ConfigFile
+
+@dracon_program(
+    name='my-tool',
+    config_files=[
+        ConfigFile('~/.my-tool/config.yaml'),              # home-dir defaults
+        ConfigFile('.my-tool.yaml', search_parents=True),   # project-local override
+    ],
+)
+class Config(BaseModel):
+    host: str = "localhost"
+    port: int = 8080
+```
+
+### ConfigFile Options
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `path` | `str` | _(required)_ | File path (`~` is expanded) |
+| `search_parents` | `bool` | `False` | Walk up from CWD to find the file |
+| `required` | `bool` | `False` | Error if not found |
+| `selector` | `str \| None` | `None` | Extract a subtree via `@keypath` |
+
+### How Layering Works
+
+Auto-discovered configs are prepended as `+file` args before any user-provided args. Standard dracon merge rules apply.
+
+**Precedence (lowest → highest):**
+
+1. Model field defaults
+2. Auto-discovered configs (in declaration order)
+3. Explicit CLI `+file.yaml`
+4. CLI `--flag` / `--nested.path` overrides
+
+### Parent Directory Search
+
+With `search_parents=True`, dracon walks up from the current working directory toward root, looking for the first match. This lets projects drop a config file at any level:
+
+```
+~/projects/myapp/.my-tool.yaml    ← picked up when CWD is anywhere under myapp/
+~/.my-tool/config.yaml            ← always available (no search, just expanduser)
+```
+
+### Example: Multi-Layer Tool Config
+
+```yaml
+# ~/.my-tool/config.yaml — user defaults
+host: my-server.local
+port: 443
+
+# ~/projects/dev-env/.my-tool.yaml — project override
+host: localhost
+port: 8080
+```
+
+```bash
+my-tool status                           # uses both configs, project wins
+my-tool --port 9999 status               # CLI flag wins over everything
+my-tool +/tmp/special.yaml status        # explicit +file layers between auto and flags
+```
+
+!!! note
+    `search_parents=True` requires a relative path. Absolute paths raise `ValueError` since parent-walking is meaningless for them.
