@@ -703,8 +703,7 @@ class InterpolableNode(ContextNode):
                 offset += len(newexpr) - match.end + match.start
             elif match.symbol == '@' and any([i.contains(match.start) for i in interps]):
                 ...  # handled in postproc
-            else:
-                raise ValueError(f'Unknown interpolation symbol: {match.symbol}')
+            # else: @/& outside ${...} — literal text, not a reference
 
         if references:
             self.init_outermost_interpolations = outermost_interpolation_exprs(self.value)

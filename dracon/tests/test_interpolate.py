@@ -156,6 +156,23 @@ def test_shorthand_nested_interpolation():
     assert config.v8 == 3
 
 
+def test_at_and_ampersand_outside_interpolation():
+    """@/& in plain text (not inside ${...}) should be treated as literal text."""
+    yaml_content = """
+    input: |
+      Send email to @admin and check R&D docs.
+      See also @path/to/file and &anchor_ref outside interpolation.
+    plain: "contact @support for help"
+    mixed: "use ${1 + 2} but also @literal"
+    """
+    config = dr.loads(yaml_content)
+    assert "@admin" in config.input
+    assert "R&D" in config.input
+    assert config.plain == "contact @support for help"
+    assert "3" in config.mixed
+    assert "@literal" in config.mixed
+
+
 def test_ampersand_interpolation_simple():
     yaml_content = """
     base: &base_anchor
