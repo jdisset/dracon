@@ -565,4 +565,29 @@ def test_show_defined_variables(tmp_path, capfd):
         os.environ.pop("DRACON_SHOW_VARS", None)
 
 
+def test_set_default_marks_cli_var_as_used(tmp_path):
+    """++var consumed by !set_default should not trigger 'not used' warning."""
+    from dracon.commandline import make_program, console
+    from dracon.lazy import LazyDraconModel
+    from io import StringIO
+
+    class Config(LazyDraconModel):
+        result: int = 0
+
+    # set_default is the only consumer — no ${} interpolation
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("!set_default my_var: 1\nresult: 42\n")
+
+    program = make_program(Config, name="test", context={'Config': Config})
+    buf = StringIO()
+    old_file = console.file
+    console.file = buf
+    try:
+        config, _ = program.parse_args([f"+{config_file}", "++my_var=99"])
+    finally:
+        console.file = old_file
+    output = buf.getvalue()
+    assert "not used" not in output.lower()
+
+
 ##────────────────────────────────────────────────────────────────────────────}}}

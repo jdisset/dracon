@@ -177,6 +177,10 @@ class SetDefault(Define):
     def process(self, comp_res: CompositionResult, path: KeyPath, loader):
         var_name, value, parent_node = self.get_name_and_value(comp_res, path, loader)
 
+        # mark as accessed for usage tracking when the variable already exists
+        if var_name in loader.context:
+            _ = loader.context[var_name]
+
         walk_node(
             node=parent_node,
             callback=partial(
