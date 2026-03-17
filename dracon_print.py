@@ -13,6 +13,7 @@ from io import StringIO
 from typing import Any, Dict, List, Optional
 
 from dracon import DraconLoader, KeyPath, dump, resolve_all_lazy
+from dracon.utils import build_nested_dict
 
 VERSION = "0.2.0"
 log = logging.getLogger("dracon-print")
@@ -26,6 +27,34 @@ def _parse_yaml_value(val: str) -> Any:
         return yaml.load(StringIO(val))
     except Exception:
         return val
+
+
+def _apply_overrides(loader, composition, overrides: Dict[str, Any]):
+    """Merge dotted-path overrides into a CompositionResult.
+
+    Uses dracon's own build_nested_dict + merge — same mechanism as the CLI.
+    """
+    from dracon.composer import CompositionResult
+    from dracon.merge import MergeKey
+    from dracon.nodes import DraconMappingNode
+
+    nested = build_nested_dict(overrides)
+
+    def dict_to_node(d):
+        if isinstance(d, dict):
+            pairs = []
+            for k, v in d.items():
+                key_node = loader.yaml.representer.represent_data(k)
+                val_node = dict_to_node(v)
+                pairs.append((key_node, val_node))
+            return DraconMappingNode(tag="tag:yaml.org,2002:map", value=pairs)
+        return loader.yaml.representer.represent_data(d)
+
+    override_node = dict_to_node(nested)
+    override_comp = CompositionResult(root=override_node)
+    return loader.merge(
+        composition, override_comp, merge_key=MergeKey(raw="<<{<+}[<~]"),
+    )
 
 
 class DraconPrint:
@@ -43,6 +72,7 @@ class DraconPrint:
         show_vars: bool = False,
         verbose: bool = False,
         context: Optional[Dict[str, Any]] = None,
+        overrides: Optional[Dict[str, Any]] = None,
     ):
         self.config_files = config_files
         self.resolve = resolve
@@ -53,6 +83,7 @@ class DraconPrint:
         self.show_vars = show_vars
         self.verbose = verbose
         self.context = context or {}
+        self.overrides = overrides or {}
         # -r and -j imply -c (resolve/json need constructed objects)
         self.construct = construct or resolve or json_output
 
@@ -62,11 +93,16 @@ class DraconPrint:
         cr = None
 
         try:
-            if self.construct:
+            if self.construct and not self.overrides:
                 res = loader.load(self.config_files)
             else:
                 cr = loader.compose(self.config_files)
-                res = cr.root
+                if self.overrides:
+                    cr = _apply_overrides(loader, cr, self.overrides)
+                if self.construct:
+                    res = loader.load_node(cr.root)
+                else:
+                    res = cr.root
         except FileNotFoundError as e:
             self._error(f"File not found: {e}")
         except Exception as e:
@@ -254,6 +290,7 @@ def parse_argv(argv: List[str]) -> DraconPrint:
 
     config_files: List[str] = []
     context: Dict[str, Any] = {}
+    overrides: Dict[str, Any] = {}
     flags: Dict[str, Any] = {}
 
     i = 0
@@ -357,6 +394,21 @@ def parse_argv(argv: List[str]) -> DraconPrint:
             i += 1
             continue
 
+        # --dotted.path=value or --dotted.path value (config path overrides)
+        if token.startswith('--') and '.' in token.lstrip('-'):
+            key_part = token[2:]
+            if '=' in key_part:
+                name, val = key_part.split('=', 1)
+                overrides[name] = _parse_yaml_value(val)
+            elif i + 1 < len(argv):
+                overrides[key_part] = _parse_yaml_value(argv[i + 1])
+                i += 1
+            else:
+                print(f"Error: {token} requires a value", file=sys.stderr)
+                sys.exit(1)
+            i += 1
+            continue
+
         # unknown long flags
         if token.startswith('--'):
             print(f"Error: unknown option: {token}", file=sys.stderr)
@@ -388,6 +440,7 @@ def parse_argv(argv: List[str]) -> DraconPrint:
         show_vars=flags.get('show_vars', False),
         verbose=flags.get('verbose', False),
         context=context,
+        overrides=overrides,
     )
 
 
@@ -418,13 +471,18 @@ Context Variables:
   ++name=value          Equals form
   --define.name value   Long form
 
+Config Overrides:
+  --path.to.key value   Override a config value at a dotted keypath
+  --path.to.key=value   Equals form
+
 Examples:
   dracon-print config.yaml                      Compose and print
   dracon-print base.yaml override.yaml -c       Layer and construct
   dracon-print config.yaml -cr                  Construct and resolve
   dracon-print config.yaml -s database          Select subtree
   dracon-print config.yaml ++env=prod -cj       Inject var, JSON output
-  dracon-print +base.yaml +prod.yaml -r         Dracon-style +file syntax"""
+  dracon-print +base.yaml +prod.yaml -r         Dracon-style +file syntax
+  dracon-print config.yaml --db.port=9999       Override nested config value"""
 
 
 def _print_help(file=None):
