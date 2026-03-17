@@ -870,11 +870,18 @@ class Program(BaseModel, Generic[T]):
                                 defined_vars, actions, root_confs,
                             )
                         elif '.' in check_token[2:]:
-                            # nested key — route to root
-                            i = self._parse_single_arg(
-                                after_args, i, root_raw_args, root_nested_args,
-                                defined_vars, actions, root_confs,
-                            )
+                            # nested key — route based on first segment ownership
+                            first_seg = check_token[2:].split('.')[0].replace('-', '_')
+                            if first_seg in subcmd_type.model_fields:
+                                i = child_prog._parse_single_arg(
+                                    after_args, i, subcmd_raw_args, subcmd_nested_args,
+                                    defined_vars, actions, subcmd_confs,
+                                )
+                            else:
+                                i = self._parse_single_arg(
+                                    after_args, i, root_raw_args, root_nested_args,
+                                    defined_vars, actions, root_confs,
+                                )
                         else:
                             raise ArgParseError(f"unknown argument {token}")
                     else:
@@ -900,6 +907,10 @@ class Program(BaseModel, Generic[T]):
                 if fname != self._subcommand_discriminator and fname not in subcmd_raw_args:
                     if isinstance(finfo.default, str) and '${' in finfo.default:
                         subcmd_defaults[fname] = finfo.default
+
+            # prefix subcmd nested args with field name and merge into root
+            for k, v in subcmd_nested_args.items():
+                root_nested_args[f"{field_name}.{k}"] = v
 
             # combine subcmd args into root raw_args
             root_raw_args[field_name] = {

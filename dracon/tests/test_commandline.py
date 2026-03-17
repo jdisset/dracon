@@ -2690,3 +2690,24 @@ def test_config_file_search_parents_absolute_path_errors():
         _discover_config_files([
             ConfigFile("/absolute/path.yaml", search_parents=True)
         ])
+
+
+def test_subcommand_nested_override_with_config_file(tmp_path):
+    """--nested.field on subcommand should win over +config values."""
+
+    class Inner(BaseModel):
+        value: int = 100
+
+    @subcommand("run")
+    class RunCmd(BaseModel):
+        inner: Inner = Inner()
+
+    class CLI(BaseModel):
+        command: Subcommand(RunCmd)
+
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("inner:\n  value: 50\n")
+
+    prog = make_program(CLI, name="tool")
+    conf, _ = prog.parse_args(["run", f"+{config_file}", "--inner.value", "10"])
+    assert conf.command.inner.value == 10
