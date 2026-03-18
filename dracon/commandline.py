@@ -1391,16 +1391,19 @@ class Program(BaseModel, Generic[T]):
                 return {k: compose_value(sub_v) for k, sub_v in v.items()}
             else:
                 if is_str:
-                    # str-typed fields: try YAML composition (for ${...} interpolation),
-                    # but fall back to raw string on YAML *parse* errors only.
-                    # This is type-aware, not a blanket catch.
+                    # str-typed fields: only compose if interpolation is present.
+                    # Plain values (including integer-looking strings like "1234")
+                    # must not go through YAML composition — it would coerce them
+                    # to their YAML scalar type (int, bool, etc.) with no error.
+                    if '${' not in str(v):
+                        return loader.yaml.representer.represent_data(str(v))
                     from ruamel.yaml import YAMLError
                     try:
                         val = self._compose_value(str(v), loader)
                         if isinstance(val, CompositionResult):
                             val = val.root
                     except (YAMLError, ArgParseError):
-                        return loader.yaml.representer.represent_data(v)
+                        return loader.yaml.representer.represent_data(str(v))
                 else:
                     val = self._compose_value(str(v), loader)
                     if isinstance(val, CompositionResult):

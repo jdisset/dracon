@@ -2526,6 +2526,33 @@ def test_cli_yaml_parseable_values_still_work():
     assert conf.count == 42
 
 
+def test_str_positional_integer_looking_value_stays_str():
+    """str-typed positional arg must not be YAML-coerced to int when value looks like a number."""
+    prog = make_program(_FreeTextCLI, name="tool")
+    conf, _ = prog.parse_args(["1234567890"])
+    assert conf.message == "1234567890"
+    assert isinstance(conf.message, str)
+
+
+def test_str_positional_uuid_stays_str():
+    """UUID-shaped strings (all-digits or hex) must not be YAML-coerced."""
+    prog = make_program(_FreeTextCLI, name="tool")
+    conf, _ = prog.parse_args(["550e8400e29b41d4a716446655440000"])
+    assert isinstance(conf.message, str)
+    assert conf.message == "550e8400e29b41d4a716446655440000"
+
+
+def test_str_positional_with_interpolation_still_composes():
+    """str-typed positional containing ${var} must still do dracon interpolation."""
+
+    class InterpCLI(BaseModel):
+        path: Annotated[str, Arg(positional=True)]
+
+    prog = make_program(InterpCLI, name="tool")
+    conf, _ = prog.parse_args(["/home/${USER}/data"], context={"USER": "jean"})
+    assert conf.path == "/home/jean/data"
+
+
 # --- ConfigFile auto-discovery tests ---
 
 from dracon.commandline import ConfigFile, _discover_config_files, dracon_program
