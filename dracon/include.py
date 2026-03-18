@@ -22,6 +22,7 @@ from dracon.loaders.file import read_from_file
 from dracon.loaders.pkg import read_from_pkg
 from dracon.loaders.env import read_from_env
 from dracon.loaders.var import read_from_var
+from dracon.loaders.raw import read_raw, read_rawpkg
 
 
 DEFAULT_LOADERS: Dict[str, Callable] = {
@@ -29,6 +30,8 @@ DEFAULT_LOADERS: Dict[str, Callable] = {
     'pkg': read_from_pkg,
     'env': read_from_env,
     'var': read_from_var,
+    'raw': read_raw,
+    'rawpkg': read_rawpkg,
 }
 
 
