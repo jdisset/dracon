@@ -13,6 +13,7 @@ from dracon.utils import (
     deepcopy,
     list_like,
     clean_context_keys,
+    values_equal,
 )
 from dracon.nodes import (
     MergeNode,
@@ -360,7 +361,7 @@ def dict_diff(dict1, dict2):
     for key, value in dict1.items():
         if key not in dict2:
             diff[key] = value
-        elif value != dict2[key]:
+        elif not values_equal(value, dict2[key]):
             if dict_like(value) and dict_like(dict2[key]):
                 diff[key] = dict_diff(value, dict2[key])
             else:

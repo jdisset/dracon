@@ -1002,3 +1002,60 @@ def test_large_context_not_duplicated():
 
     assert large_data[0] == 0
     assert large_data[-1] == 99
+
+
+def test_deferred_with_numpy_array_and_merge(tmp_path):
+    """Regression test: deferred + numpy array variable + merge must not crash.
+
+    See dracon/bugs/deferred_merge_numpy_array_truthiness.md
+    """
+    import numpy as np
+
+    base = tmp_path / "base.yaml"
+    base.write_text("color: red\nparams:\n  x: 1\n  y: 2\n")
+
+    template = tmp_path / "template.yaml"
+    template.write_text(
+        f"!set_default n: 5\n"
+        f'!set_default arr: "${{linspace(0, 1, int(n))}}"\n'
+        f"\n"
+        f"config:\n"
+        f"  <<: !include file:{base}\n"
+        f"  <<{{+<}}:\n"
+        f"    params:\n"
+        f"      z: 3\n"
+        f"\n"
+        f'data: "${{arr}}"\n'
+    )
+
+    auto = tmp_path / "auto.yaml"
+    auto.write_text(
+        f"!set_default ndim: 2\n"
+        f"\n"
+        f"!if ${{ndim == 3}}:\n"
+        f"  <<: !include file:{template}\n"
+        f"\n"
+        f"!if ${{ndim == 2}}:\n"
+        f"  simple: true\n"
+    )
+
+    ctx = {"linspace": np.linspace}
+
+    # 2D path (no array) should work
+    r2 = loads(
+        f"result:\n  !deferred\n    !define ndim: 2\n    <<: !include file:{auto}",
+        context=ctx,
+    )
+    result_2d = r2["result"].construct()
+    assert result_2d["simple"] is True
+
+    # 3D path (numpy array + merge) must not raise ValueError
+    r3 = loads(
+        f"result:\n  !deferred\n    !define ndim: 3\n    <<: !include file:{auto}",
+        context=ctx,
+    )
+    result_3d = r3["result"].construct()
+    assert isinstance(result_3d["data"], np.ndarray)
+    assert len(result_3d["data"]) == 5
+    assert result_3d["config"]["color"] == "red"
+    assert result_3d["config"]["params"] == {"x": 1, "y": 2, "z": 3}

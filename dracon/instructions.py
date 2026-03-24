@@ -11,7 +11,7 @@ from dracon.composer import (
     DraconMappingNode,
     DraconSequenceNode,
 )
-from dracon.utils import ShallowDict
+from dracon.utils import ShallowDict, values_equal
 from ruamel.yaml.nodes import Node
 from dracon.keypath import KeyPath, KeyPathToken, MAPPING_KEY
 from dracon.merge import merged, MergeKey, add_to_context
@@ -189,7 +189,7 @@ class SetDefault(Define):
         )
 
         comp_res.defined_vars.setdefault(var_name, value)
-        if var_name not in comp_res.defined_vars or comp_res.defined_vars[var_name] == value:
+        if var_name not in comp_res.defined_vars or values_equal(comp_res.defined_vars[var_name], value):
             comp_res.default_vars.add(var_name)
 
         return comp_res

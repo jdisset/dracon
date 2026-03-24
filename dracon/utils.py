@@ -158,6 +158,23 @@ def list_like(obj) -> bool:
     )
 
 
+def values_equal(a: object, b: object) -> bool:
+    """Equality check safe for types with non-scalar ``==`` (e.g. numpy arrays)."""
+    if a is b:
+        return True
+    try:
+        result = (a == b)
+    except Exception:
+        return False
+    try:
+        return bool(result)
+    except (ValueError, TypeError):
+        try:
+            return bool(result.all())  # type: ignore[union-attr]
+        except Exception:
+            return False
+
+
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
