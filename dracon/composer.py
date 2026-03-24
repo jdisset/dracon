@@ -57,6 +57,7 @@ class CompositionResult(BaseModel):
     anchor_paths: Optional[dict[str, KeyPath]] = None
     node_map: Optional[dict[KeyPath, Node]] = None
     defined_vars: dict[str, Any] = {}
+    default_vars: set[str] = set()  # vars set via !set_default (soft; overridable by !define)
 
     def __deepcopy__(self, memo=None):
         cr = CompositionResult(
@@ -64,6 +65,7 @@ class CompositionResult(BaseModel):
             special_nodes={},
             anchor_paths=deepcopy(self.anchor_paths, memo),
             defined_vars=deepcopy(self.defined_vars, memo),
+            default_vars=set(self.default_vars),
         )
         cr.make_map()
         return cr
@@ -132,24 +134,50 @@ class CompositionResult(BaseModel):
     def set_composition_at(self, at_path: KeyPath, new_comp: 'CompositionResult'):
         new_node = new_comp.root
         self.set_at(at_path, new_node)
-        self.defined_vars.update(new_comp.defined_vars)
+        for k, v in new_comp.defined_vars.items():
+            is_child_default = k in new_comp.default_vars
+            already_defined = k in self.defined_vars
+            if is_child_default and already_defined:
+                # Child !set_default should NOT override parent's value
+                continue
+            # Child !define always wins; new vars are always added
+            self.defined_vars[k] = v
+            if is_child_default:
+                self.default_vars.add(k)
+            else:
+                self.default_vars.discard(k)
 
     def merged(self, other: Union['CompositionResult', Node], key: MergeKey):
         other_node = other
-        other_defined_vars = {}
+        other_defined_vars: dict[str, Any] = {}
+        other_default_vars: set[str] = set()
         if isinstance(other, CompositionResult):
             other_node = other.root
             other_defined_vars = other.defined_vars
+            other_default_vars = other.default_vars
         assert isinstance(other_node, Node), (
             f'Invalid node type: {type(other_node)} == {other_node}'
         )
         new_root = merged(self.root, other_node, key)
-        combined_vars = {**self.defined_vars, **other_defined_vars}
+        # Merge defined_vars: !define always wins over !set_default
+        combined_vars = dict(self.defined_vars)
+        combined_defaults = set(self.default_vars)
+        for k, v in other_defined_vars.items():
+            is_other_default = k in other_default_vars
+            already_defined = k in combined_vars
+            if is_other_default and already_defined:
+                continue
+            combined_vars[k] = v
+            if is_other_default:
+                combined_defaults.add(k)
+            else:
+                combined_defaults.discard(k)
         return CompositionResult(
             root=new_root,
             special_nodes=self.special_nodes,
             anchor_paths=self.anchor_paths,
             defined_vars=combined_vars,
+            default_vars=combined_defaults,
         )
 
     def pop_all_special(self, category: SpecialNodeCategory, index=0):

@@ -189,6 +189,8 @@ class SetDefault(Define):
         )
 
         comp_res.defined_vars.setdefault(var_name, value)
+        if var_name not in comp_res.defined_vars or comp_res.defined_vars[var_name] == value:
+            comp_res.default_vars.add(var_name)
 
         return comp_res
 
