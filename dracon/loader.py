@@ -69,6 +69,8 @@ DEFAULT_CONTEXT = {
     'basename': os.path.basename,
     'dirname': os.path.dirname,
     'expanduser': os.path.expanduser,
+    # pathlib
+    'Path': Path,
     # datetime
     'now': _now_func,
 }
