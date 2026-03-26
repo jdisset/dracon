@@ -69,7 +69,11 @@ def handle_in_memory_include(
 ) -> CompositionResult:
     """Handle an in-memory include (starting with $)."""
     if name not in node.context:
-        raise ValueError(f'Invalid in-memory include: {name} not found')
+        from dracon.diagnostics import CompositionError
+        available = [k for k in node.context if not k.startswith('_')]
+        raise CompositionError(
+            f"In-memory include '{name}' not found. Available: {', '.join(sorted(available)[:10])}"
+        )
 
     incl_node = node.context[name]
     incl_node = dump_to_node_fn(incl_node)
@@ -155,17 +159,23 @@ def compose_from_include_str(
                 result.root = deepcopy(result.root)
                 return result
 
-            assert ':' in components.main_path, (
-                f'Invalid include path: anchor {components.main_path} not found in document'
-            )
+            if ':' not in components.main_path:
+                from dracon.diagnostics import CompositionError
+                raise CompositionError(
+                    f"Anchor '{components.main_path}' not found in document"
+                )
 
-        assert ':' in components.main_path, (
-            f'Invalid include path: {components.main_path}. No loader specified.'
-        )
+        if ':' not in components.main_path:
+            from dracon.diagnostics import CompositionError
+            raise CompositionError(
+                f"Invalid include path: '{components.main_path}'. Expected format: loader:path (e.g. file:config.yaml)"
+            )
 
         loader_name, path = components.main_path.split(':', 1)
         if loader_name not in custom_loaders:
-            raise ValueError(f'Unknown loader: {loader_name}')
+            from dracon.diagnostics import CompositionError
+            available = ', '.join(sorted(custom_loaders.keys()))
+            raise CompositionError(f"Unknown loader '{loader_name}'. Available: {available}")
 
         result, new_context = custom_loaders[loader_name](path, node=node)
         file_context = new_context
@@ -176,7 +186,10 @@ def compose_from_include_str(
 
         if not isinstance(result, CompositionResult):
             if not isinstance(result, str):
-                raise ValueError(f"Invalid result type from loader '{loader_name}': {type(result)}")
+                from dracon.diagnostics import CompositionError
+                raise CompositionError(
+                    f"Loader '{loader_name}' returned {type(result).__name__}, expected str or CompositionResult"
+                )
             new_loader = draconloader.copy()
             if node is not None:
                 merged_context = merged(node.context, new_context, MergeKey(raw="{<~}[<~]"))

@@ -14,6 +14,7 @@ from dracon.composer import (
 from dracon.utils import ShallowDict, values_equal
 from ruamel.yaml.nodes import Node
 from dracon.keypath import KeyPath, KeyPathToken, MAPPING_KEY
+from dracon.nodes import node_source
 from dracon.merge import merged, MergeKey, add_to_context
 from dracon.interpolation import evaluate_expression, InterpolableNode
 from dracon.deferred import DeferredNode
@@ -112,14 +113,20 @@ class Define(Instruction):
         return None
 
     def get_name_and_value(self, comp_res, path, loader):
+        from dracon.diagnostics import CompositionError
         if not path.is_mapping_key():
-            raise ValueError(
-                f"instruction {self.__class__.__name__} must be a mapping key, but got {path}"
+            raise CompositionError(
+                f"!{self.__class__.__name__.lower()} must be a mapping key, got {path}"
             )
         key_node = path.get_obj(comp_res.root)
         value_node = path.removed_mapping_key().get_obj(comp_res.root)
         parent_node = path.parent.get_obj(comp_res.root)
-        assert isinstance(parent_node, DraconMappingNode)
+        if not isinstance(parent_node, DraconMappingNode):
+            ctx = node_source(key_node)
+            raise CompositionError(
+                f"!{self.__class__.__name__.lower()} parent must be a mapping, got {type(parent_node).__name__}",
+                context=ctx,
+            )
 
         if isinstance(value_node, InterpolableNode):
             value = evaluate_expression(
@@ -134,9 +141,12 @@ class Define(Instruction):
             value = loader.load_composition_result(CompositionResult(root=value_node))
 
         var_name = key_node.value
-        assert var_name.isidentifier(), (
-            f"Invalid variable name in {self.__class__.__name__} instruction: {var_name}"
-        )
+        if not var_name.isidentifier():
+            ctx = node_source(key_node)
+            raise CompositionError(
+                f"Invalid variable name '{var_name}' in !{self.__class__.__name__.lower()}. Must be a valid Python identifier.",
+                context=ctx,
+            )
 
         del parent_node[str(path[-1])]
 
@@ -268,16 +278,22 @@ class Each(Instruction):
 
     @ftrace(inputs=False, watch=[])
     def process(self, comp_res: CompositionResult, path: KeyPath, loader):
+        from dracon.diagnostics import CompositionError
         if not path.is_mapping_key():
-            raise ValueError(f"instruction 'each' must be a mapping key, but got {path}")
+            raise CompositionError(f"!each must be a mapping key, got {path}")
 
         key_node = path.get_obj(comp_res.root)
         value_node = path.removed_mapping_key().get_obj(comp_res.root)
         parent_node = path.parent.get_obj(comp_res.root)
 
-        assert isinstance(parent_node, DraconMappingNode)
-        assert isinstance(key_node, InterpolableNode), (
-            f"Expected an interpolable node for 'each' instruction, but got {key_node}, a {type(key_node)}"
+        if not isinstance(parent_node, DraconMappingNode):
+            ctx = node_source(key_node)
+            raise CompositionError(f"!each parent must be a mapping, got {type(parent_node).__name__}", context=ctx)
+        if not isinstance(key_node, InterpolableNode):
+            ctx = node_source(key_node)
+            raise CompositionError(
+                f"!each key must contain an interpolation expression like ${{list}}, got '{key_node.value}'",
+                context=ctx,
         )
 
         list_like = evaluate_expression(
@@ -318,10 +334,9 @@ class Each(Instruction):
         del new_parent[key_node.value]
 
         if isinstance(value_node, DraconSequenceNode):
-            # Must be sole key if producing sequence (replaces parent with sequence)
-            assert len(parent_node) == 1, (
-                "Cannot use !each with sequence value unless it's the only key"
-            )
+            if len(parent_node) != 1:
+                ctx = node_source(key_node)
+                raise CompositionError("!each with sequence value must be the only key in its mapping", context=ctx)
             new_parent = DraconSequenceNode.from_mapping(parent_node, empty=True)
             for node in self._generate_sequence_items(list_like, value_node, key_node, mkey):
                 new_parent.append(node)
@@ -424,6 +439,16 @@ class Each(Instruction):
             )
 
         comp_res.set_at(path.parent, new_parent)
+
+        # record each expansion trace
+        if comp_res.trace is not None:
+            from dracon.loader import _record_subtree_trace
+            _record_subtree_trace(
+                comp_res, path.parent,
+                via="each_expansion",
+                detail=f"!each({self.var_name})",
+            )
+
         return comp_res
 
 
@@ -499,15 +524,16 @@ class If(Instruction):
             comp_res.set_at(parent_path, content_node)
         else:
             # scalar node - replace parent entirely
-            assert isinstance(parent_node, DraconMappingNode), (
-                'if statement with scalar-like must appear in a mapping'
-            )
+            if not isinstance(parent_node, DraconMappingNode):
+                from dracon.diagnostics import CompositionError
+                raise CompositionError("!if with scalar result must appear inside a mapping")
             comp_res.set_at(parent_path, content_node)
 
     @ftrace(watch=[])
     def process(self, comp_res: CompositionResult, path: KeyPath, loader):
+        from dracon.diagnostics import CompositionError
         if not path.is_mapping_key():
-            raise ValueError(f"instruction 'if' must be a key, but got {path}")
+            raise CompositionError(f"!if must be a mapping key, got {path}")
 
         value_path = path.removed_mapping_key()
         parent_path = path.parent
@@ -516,7 +542,8 @@ class If(Instruction):
         value_node = value_path.get_obj(comp_res.root)
         parent_node = parent_path.get_obj(comp_res.root)
 
-        assert key_node.tag == '!if', f"Expected tag '!if', but got {key_node.tag}"
+        if key_node.tag != '!if':
+            raise CompositionError(f"Expected tag '!if', got '{key_node.tag}'")
 
         # evaluate condition
         if isinstance(key_node, InterpolableNode):
@@ -550,6 +577,19 @@ class If(Instruction):
                 self._add_content_to_parent(parent_node, value_node, comp_res, parent_path)
 
         del parent_node[key_node.value]
+
+        # record if-branch trace
+        if comp_res.trace is not None:
+            branch = "then" if condition else "else"
+            condition_str = key_node.value
+            from dracon.composition_trace import keypath_to_dotted
+            from dracon.loader import _record_subtree_trace
+            _record_subtree_trace(
+                comp_res, parent_path,
+                via="if_branch",
+                detail=f"!if {branch} ({condition_str})",
+            )
+
         return comp_res
 
 

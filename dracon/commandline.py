@@ -673,6 +673,8 @@ class Program(BaseModel, Generic[T]):
                 action=print_help,
             )
         )
+        self._args.append(Arg(real_name="__trace__", long="trace", help="Trace provenance for a keypath"))
+        self._args.append(Arg(real_name="__trace_all__", long="trace-all", help="Show provenance for all values", is_flag=True))
         self._arg_map = {f'-{a.short}': a for a in self._args if a.short}
         self._arg_map.update({f'--{a.long}': a for a in self._args if a.long})
 
@@ -954,16 +956,26 @@ class Program(BaseModel, Generic[T]):
 
     def _handle_config_error(self, e: Exception) -> None:
         """handles exceptions from config generation consistently."""
+        # enrich DraconError with trace if available
+        loader = getattr(self, '_last_loader', None)
+        trace = None
+        if loader and getattr(loader, '_last_composition', None):
+            trace = getattr(loader._last_composition, 'trace', None)
+
         if isinstance(e, DraconError):
+            if not e.trace_history and trace and e.context:
+                e.trace_history = trace.get(getattr(e.context, 'keypath', '') or '')
             handle_dracon_error(e, exit_code=1)
         elif isinstance(e, ValidationError):
-            self.print_validation_error(e)
+            self.print_validation_error(e, trace=trace)
         else:
             root_exception = get_root_exception(e)
             if isinstance(root_exception, DraconError):
+                if not root_exception.trace_history and trace and root_exception.context:
+                    root_exception.trace_history = trace.get(getattr(root_exception.context, 'keypath', '') or '')
                 handle_dracon_error(root_exception, exit_code=1)
             elif isinstance(root_exception, ValidationError):
-                self.print_validation_error(root_exception)
+                self.print_validation_error(root_exception, trace=trace)
             else:
                 logger.error(f"Error when generating configuration: {root_exception}")
                 logger.exception(e)
@@ -1015,7 +1027,7 @@ class Program(BaseModel, Generic[T]):
             item_text.append(details_line)
         return item_text
 
-    def print_validation_error(self, e: 'ValidationError'):
+    def print_validation_error(self, e: 'ValidationError', trace=None):
         error_types = defaultdict(list)
         for error_detail in e.errors():
             error_types[error_detail['type']].append(error_detail)
@@ -1046,6 +1058,20 @@ class Program(BaseModel, Generic[T]):
 
             for error_item_data in errors_in_group:
                 all_error_text_segments.append(self._format_error_item_text(error_item_data))
+                # show provenance for this field if trace available
+                if trace and error_item_data.get('loc'):
+                    field_path = '.'.join(str(l) for l in error_item_data['loc'])
+                    history = trace.get(field_path)
+                    if history:
+                        from dracon.composition_trace import _via_style
+                        prov = Text("\n    Provenance: ", style=COLOR_DIM)
+                        for i, entry in enumerate(history):
+                            if i > 0:
+                                prov.append(" → ", style=COLOR_DIM)
+                            src = str(entry.source) if entry.source else "?"
+                            prov.append(f"{entry.value!r}", style=COLOR_YELLOW)
+                            prov.append(f" ({src})", style=COLOR_DIM)
+                        all_error_text_segments.append(prov)
                 all_error_text_segments.append(Text("\n"))
 
         if all_error_text_segments and all_error_text_segments[-1].plain == "\n":
@@ -1059,13 +1085,19 @@ class Program(BaseModel, Generic[T]):
             else Text("No specific error details to display.", style=COLOR_DIM)
         )
 
+        # add trace hint if no trace was available
+        if not trace:
+            hint = Text("\n\nTip: ", style=COLOR_DIM)
+            hint.append("run with --trace-all or DRACON_TRACE=1 for provenance details", style=f"{COLOR_DIM} italic")
+            final_content = Text.assemble(final_content, hint)
+
         error_panel = Panel(
             final_content,
-            # title=Text("Errors", style="bold red"),
+            title="[bold red]Validation Error[/]",
             box=ROUNDED,
             border_style=COLOR_RED,
             expand=False,
-            padding=(1, 5),
+            padding=(1, 2),
         )
 
         console.print(error_panel)
@@ -1293,6 +1325,11 @@ class Program(BaseModel, Generic[T]):
 
         from dracon.composer import CompositionResult
 
+        # extract trace meta-flags (not model fields)
+        trace_path = raw_args.pop('__trace__', None)
+        trace_all = raw_args.pop('__trace_all__', False)
+        trace_enabled = bool(trace_path or trace_all)
+
         # parse defined_vars values as YAML so e.g. "[[5,60]]" becomes list, not string
         from io import StringIO
         from ruamel.yaml import YAML as _YAML
@@ -1312,7 +1349,8 @@ class Program(BaseModel, Generic[T]):
         tracked_context.update(parsed_defined_vars)
 
         loader = DraconLoader(
-            enable_interpolation=True, base_dict_type=dict, base_list_type=list, **kwargs
+            enable_interpolation=True, base_dict_type=dict, base_list_type=list,
+            trace=trace_enabled, **kwargs
         )
         loader.update_context(tracked_context)
         loader.yaml.representer.exclude_defaults = False
@@ -1445,6 +1483,15 @@ class Program(BaseModel, Generic[T]):
                 current_composition, nested_args_composition, merge_key=MergeKey(raw="<<{<+}[<~]")
             )
 
+        # store for error enrichment
+        loader._last_composition = current_composition
+        self._last_loader = loader
+
+        # display trace and exit if requested
+        if trace_enabled and current_composition.trace is not None:
+            self._print_trace(current_composition.trace, trace_path, trace_all)
+            sys.exit(0)
+
         res = loader.load_node(current_composition.root)
         res = self.conf_type.model_validate(res)
 
@@ -1501,6 +1548,21 @@ class Program(BaseModel, Generic[T]):
             table.add_row(name, val_repr, "config (!define)")
 
         console.print(table)
+
+    @staticmethod
+    def _print_trace(trace, trace_path, trace_all):
+        """print composition trace and exit."""
+        try:
+            if trace_all:
+                console.print(trace.format_all_rich())
+            elif trace_path:
+                console.print(trace.format_path_rich(trace_path))
+        except Exception:
+            # fallback to plain text
+            if trace_all:
+                print(trace.format_all())
+            elif trace_path:
+                print(trace.format_path(trace_path))
 
 
 def make_program(conf_type: type, **kwargs):

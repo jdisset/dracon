@@ -47,6 +47,12 @@ def make_source_context(start_mark, include_trace=None, keypath=None) -> Optiona
     return SourceContext.from_mark(start_mark, include_trace or (), keypath=keypath)
 
 
+def node_source(node) -> Optional["SourceContext"]:
+    """Extract source context from a node, handling missing start_mark."""
+    mark = getattr(node, 'start_mark', None)
+    return make_source_context(mark) if mark else None
+
+
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 

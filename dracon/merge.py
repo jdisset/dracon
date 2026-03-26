@@ -20,7 +20,9 @@ from dracon.nodes import (
     DraconMappingNode,
     DraconSequenceNode,
     IncludeNode,
+    node_source,
 )
+from dracon.diagnostics import CompositionError
 from ruamel.yaml.nodes import Node
 from dracon.keypath import KeyPath
 from functools import lru_cache
@@ -66,30 +68,28 @@ def process_merges(comp_res):
             node_key = merge_path[-1]
             parent_node = parent_path.get_obj(comp_res.root)
 
-            # Validate parent node is a dictionary
             if not dict_like(parent_node):
-                raise ValueError(
-                    'While processing merge node',
-                    merge_node.start_mark,
-                    'Parent of merge node must be a dictionary',
-                    f'but got {type(parent_node)} at {parent_node.start_mark}',
+                raise CompositionError(
+                    f"Parent of merge node must be a dictionary, got {type(parent_node).__name__}",
+                    context=node_source(merge_node),
                 )
 
-            # Get the merge key node and validate
-            assert node_key in parent_node, f'Key {node_key} not found in parent node'
+            if node_key not in parent_node:
+                raise CompositionError(f"Merge key '{node_key}' not found in parent node", context=node_source(merge_node))
             key_node = parent_node.get_key(node_key)
-            assert isinstance(key_node, MergeNode), (
-                f'Invalid merge node type: {type(key_node)} at {node_key}. {merge_path=}'
-            )
+            if not isinstance(key_node, MergeNode):
+                raise CompositionError(
+                    f"Expected merge node, got {type(key_node).__name__} at key '{node_key}'",
+                    context=node_source(key_node),
+                )
 
             try:
                 merge_key = MergeKey(raw=key_node.merge_key_raw)
             except Exception as e:
-                raise ValueError(
-                    'While processing merge node',
-                    merge_node.start_mark,
-                    f'Error: {str(e)}',
-                ) from None
+                raise CompositionError(
+                    f"Invalid merge key '{key_node.merge_key_raw}': {e}",
+                    context=node_source(merge_node),
+                ) from e
 
             del parent_node[node_key]
 
@@ -98,9 +98,32 @@ def process_merges(comp_res):
 
             new_parent = parent_path.get_obj(comp_res.root)
             new_parent = merged(new_parent, merge_node, merge_key)
-            assert isinstance(new_parent, Node)
+            if not isinstance(new_parent, Node):
+                raise CompositionError(f"Merge produced {type(new_parent).__name__} instead of a Node")
 
             comp_res.set_at(parent_path, new_parent)
+
+            # record merge trace
+            if comp_res.trace is not None:
+                from dracon.composition_trace import TraceEntry, keypath_to_dotted
+                priority_str = "new wins" if merge_key.dict_priority == MergePriority.NEW else "existing wins"
+                _detail = f"{merge_key.raw}: {priority_str}"
+
+                from dracon.loader import _get_node_source
+
+                def _record_merge(node, path):
+                    if isinstance(node, (DraconMappingNode, DraconSequenceNode)):
+                        return
+                    path_str = keypath_to_dotted(path)
+                    if path_str:
+                        comp_res.trace.record(path_str, TraceEntry(
+                            value=getattr(node, 'value', None),
+                            source=_get_node_source(node),
+                            via="merge",
+                            detail=_detail,
+                        ))
+
+                walk_node(new_parent, _record_merge, start_path=parent_path)
 
             # propagate defined_vars to all nodes in new_parent if context propagation enabled
             if merge_key.context_propagation and comp_res.defined_vars:

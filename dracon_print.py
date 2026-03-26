@@ -12,7 +12,7 @@ import sys
 from io import StringIO
 from typing import Any, Dict, List, Optional
 
-from dracon import DraconLoader, KeyPath, dump, resolve_all_lazy
+from dracon import DraconLoader, DraconError, KeyPath, dump, resolve_all_lazy
 from dracon.utils import build_nested_dict
 
 VERSION = "0.2.0"
@@ -73,6 +73,8 @@ class DraconPrint:
         verbose: bool = False,
         context: Optional[Dict[str, Any]] = None,
         overrides: Optional[Dict[str, Any]] = None,
+        trace: Optional[str] = None,
+        trace_all: bool = False,
     ):
         self.config_files = config_files
         self.resolve = resolve
@@ -84,27 +86,43 @@ class DraconPrint:
         self.verbose = verbose
         self.context = context or {}
         self.overrides = overrides or {}
+        self.trace = trace
+        self.trace_all = trace_all
         # -r and -j imply -c (resolve/json need constructed objects)
         self.construct = construct or resolve or json_output
 
     def run(self) -> str:
         """Load, process, and format config. Returns output string."""
-        loader = DraconLoader(context=self.context.copy())
+        trace_enabled = self.trace is not None or self.trace_all
+        loader = DraconLoader(context=self.context.copy(), trace=trace_enabled)
         cr = None
 
         try:
-            if self.construct and not self.overrides:
+            # when tracing, always compose (need CompositionResult for trace)
+            if self.construct and not self.overrides and not trace_enabled:
                 res = loader.load(self.config_files)
             else:
                 cr = loader.compose(self.config_files)
                 if self.overrides:
                     cr = _apply_overrides(loader, cr, self.overrides)
+                    # record CLI override trace
+                    if cr.trace is not None:
+                        from dracon.composition_trace import TraceEntry
+                        for dotted_path, value in self.overrides.items():
+                            cr.trace.record(dotted_path, TraceEntry(
+                                value=value, source=None,
+                                via="cli_override",
+                                detail=f"--{dotted_path}={value}",
+                            ))
                 if self.construct:
                     res = loader.load_node(cr.root)
                 else:
                     res = cr.root
         except FileNotFoundError as e:
             self._error(f"File not found: {e}")
+        except DraconError as e:
+            from dracon.diagnostics import handle_dracon_error
+            handle_dracon_error(e, exit_code=1)
         except Exception as e:
             self._error(f"Failed to load config: {e}")
 
@@ -124,7 +142,32 @@ class DraconPrint:
         if self.show_vars:
             self._print_vars(loader, cr)
 
+        # handle trace output — return rich renderable directly for TTY, plain text otherwise
+        if trace_enabled and cr is not None and cr.trace is not None:
+            if self.trace_all:
+                return cr.trace.format_all()
+            elif self.trace:
+                return cr.trace.format_path(self.trace)
+            return ""
+
         return self._format(res, loader)
+
+    def run_rich_trace(self):
+        """Run and return rich trace renderable (for TTY output). Returns None if no trace."""
+        trace_enabled = self.trace is not None or self.trace_all
+        if not trace_enabled:
+            return None
+        loader = DraconLoader(context=self.context.copy(), trace=True)
+        cr = loader.compose(self.config_files)
+        if self.overrides:
+            cr = _apply_overrides(loader, cr, self.overrides)
+        if cr.trace is None:
+            return None
+        if self.trace_all:
+            return cr.trace.format_all_rich()
+        elif self.trace:
+            return cr.trace.format_path_rich(self.trace)
+        return None
 
     def _error(self, msg: str):
         print(msg, file=sys.stderr)
@@ -284,9 +327,10 @@ def parse_argv(argv: List[str]) -> DraconPrint:
         '--str-output': 'str_output',
         '--show-vars': 'show_vars',
         '--verbose': 'verbose',
+        '--trace-all': 'trace_all',
     }
     SHORT_OPTIONS = {'s': 'select', 'f': 'file'}  # options that take a value
-    LONG_OPTIONS = {'--select': 'select', '--file': 'file'}
+    LONG_OPTIONS = {'--select': 'select', '--file': 'file', '--trace': 'trace'}
 
     config_files: List[str] = []
     context: Dict[str, Any] = {}
@@ -441,6 +485,8 @@ def parse_argv(argv: List[str]) -> DraconPrint:
         verbose=flags.get('verbose', False),
         context=context,
         overrides=overrides,
+        trace=flags.get('trace'),
+        trace_all=flags.get('trace_all', False),
     )
 
 
@@ -471,6 +517,10 @@ Context Variables:
   ++name=value          Equals form
   --define.name value   Long form
 
+Tracing:
+  --trace PATH          Show provenance chain for a config path
+  --trace-all           Show provenance for all values
+
 Config Overrides:
   --path.to.key value   Override a config value at a dotted keypath
   --path.to.key=value   Equals form
@@ -482,7 +532,9 @@ Examples:
   dracon-print config.yaml -s database          Select subtree
   dracon-print config.yaml ++env=prod -cj       Inject var, JSON output
   dracon-print +base.yaml +prod.yaml -r         Dracon-style +file syntax
-  dracon-print config.yaml --db.port=9999       Override nested config value"""
+  dracon-print config.yaml --db.port=9999       Override nested config value
+  dracon-print base.yaml prod.yaml --trace db.port  Trace a single path
+  dracon-print config.yaml --trace-all              Trace all values"""
 
 
 def _print_help(file=None):
@@ -507,14 +559,28 @@ def _setup_logging(verbose: bool):
 def main():
     printer = parse_argv(sys.argv[1:])
     _setup_logging(printer.verbose)
+
+    is_tty = sys.stdout.isatty()
+    no_color = os.environ.get("NO_COLOR", "")
+    trace_mode = printer.trace is not None or printer.trace_all
+
+    # rich trace output when on TTY
+    if trace_mode and is_tty and not no_color:
+        try:
+            from rich.console import Console
+            renderable = printer.run_rich_trace()
+            if renderable is not None:
+                Console().print(renderable)
+                return
+        except ImportError:
+            pass
+
     output = printer.run()
     if not output:
         return
 
     # syntax highlight when outputting to a TTY
-    is_tty = sys.stdout.isatty()
-    no_color = os.environ.get("NO_COLOR", "")
-    if is_tty and not no_color and not printer.str_output:
+    if is_tty and not no_color and not printer.str_output and not trace_mode:
         try:
             from rich.console import Console
             from rich.syntax import Syntax

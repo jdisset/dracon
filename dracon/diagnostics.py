@@ -98,9 +98,11 @@ class SourceContext:
 
 
 class DraconError(Exception):
-    def __init__(self, message: str, context: Optional[SourceContext] = None, cause: Optional[Exception] = None):
+    def __init__(self, message: str, context: Optional[SourceContext] = None, cause: Optional[Exception] = None,
+                 trace_history: Optional[list] = None):
         super().__init__(message)
         self.context = context
+        self.trace_history = trace_history  # list[TraceEntry] if tracing was enabled
         if cause is not None:
             self.__cause__ = cause
 
@@ -270,6 +272,16 @@ def format_error(error: DraconError, source_lines: Optional[dict[str, Sequence[s
             r = repr(error.actual_value)
             lines.append(f"  Got: {r[:47] + '...' if len(r) > 50 else r}")
 
+    if error.trace_history:
+        lines.append("  Provenance:")
+        for i, entry in enumerate(error.trace_history, 1):
+            src = str(entry.source) if entry.source else "?"
+            detail = f" ({entry.detail})" if entry.detail else ""
+            marker = " <- ERROR" if i == len(error.trace_history) else ""
+            lines.append(f"    {i}. {entry.value!r}  <- {src}  {entry.via}{detail}{marker}")
+    else:
+        lines.append("  Tip: run with --trace-all or DRACON_TRACE=1 for provenance details")
+
     return "\n".join(lines)
 
 
@@ -416,6 +428,28 @@ def format_error_rich(error: DraconError, source_lines: Optional[dict[str, Seque
             r = repr(error.actual_value)
             t.append("Got: ", style="bold")
             t.append(f"{r[:77] + '...' if len(r) > 80 else r}\n", style="red")
+
+    if error.trace_history:
+        from dracon.composition_trace import _via_style
+        t.append("\nProvenance:\n", style="bold cyan")
+        for i, entry in enumerate(error.trace_history, 1):
+            is_last = i == len(error.trace_history)
+            t.append(f"  {i}. ", style="dim")
+            t.append(repr(entry.value), style="yellow" if is_last else "dim")
+            t.append("  ← ", style="dim")
+            src = str(entry.source) if entry.source else "?"
+            t.append(src, style="cyan" if is_last else "dim")
+            t.append("  ")
+            t.append(entry.via, style=_via_style(entry.via))
+            if entry.detail:
+                t.append(f" ({entry.detail})", style="dim")
+            if is_last:
+                t.append("  ← ERROR", style="bold red")
+            t.append("\n")
+    else:
+        t.append("\n")
+        t.append("Tip: ", style="dim bold")
+        t.append("run with --trace-all or DRACON_TRACE=1 for provenance details\n", style="dim italic")
 
     return Panel(t, title="[bold red]Configuration Error[/]", box=ROUNDED, border_style="red", expand=False, padding=(1, 2))
 

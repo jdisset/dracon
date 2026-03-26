@@ -32,6 +32,7 @@ from typing import Optional, List, Literal, Final
 
 from dracon.interpolation import InterpolableNode
 from dracon.interpolation_utils import outermost_interpolation_exprs
+from dracon.composition_trace import CompositionTrace, TraceEntry, keypath_to_dotted
 
 import logging
 
@@ -60,6 +61,7 @@ class CompositionResult(BaseModel):
     node_map: Optional[dict[KeyPath, Node]] = None
     defined_vars: dict[str, Any] = {}
     default_vars: set[str] = set()  # vars set via !set_default (soft; overridable by !define)
+    trace: Optional[CompositionTrace] = None
 
     def __deepcopy__(self, memo=None):
         cr = CompositionResult(
@@ -68,6 +70,7 @@ class CompositionResult(BaseModel):
             anchor_paths=deepcopy(self.anchor_paths, memo),
             defined_vars=deepcopy(self.defined_vars, memo),
             default_vars=set(self.default_vars),
+            trace=deepcopy(self.trace, memo) if self.trace is not None else None,
         )
         cr.make_map()
         return cr
@@ -148,6 +151,10 @@ class CompositionResult(BaseModel):
                 self.default_vars.add(k)
             else:
                 self.default_vars.discard(k)
+        # merge child trace into parent
+        if self.trace is not None and new_comp.trace is not None:
+            prefix = keypath_to_dotted(at_path) or ""
+            self.trace.merge_from(new_comp.trace, prefix=prefix)
 
     def merged(self, other: Union['CompositionResult', Node], key: MergeKey):
         other_node = other
@@ -174,12 +181,17 @@ class CompositionResult(BaseModel):
                 combined_defaults.add(k)
             else:
                 combined_defaults.discard(k)
+        # propagate trace: prefer self's trace (the accumulator)
+        new_trace = self.trace
+        if new_trace is None and isinstance(other, CompositionResult):
+            new_trace = other.trace
         return CompositionResult(
             root=new_root,
             special_nodes=self.special_nodes,
             anchor_paths=self.anchor_paths,
             defined_vars=combined_vars,
             default_vars=combined_defaults,
+            trace=new_trace,
         )
 
     def pop_all_special(self, category: SpecialNodeCategory, index=0):
@@ -252,6 +264,16 @@ class CompositionResult(BaseModel):
         for path, node in self.node_map.items():
             if hasattr(node, 'context'):
                 print(f'{path}: {", ".join(node.context.keys())}')
+
+    # ── trace query wrappers ────────────────────────────────────────────────
+    def trace_path(self, path: str) -> list:
+        return self.trace.get(path) if self.trace else []
+
+    def trace_all(self) -> dict:
+        return self.trace.all() if self.trace else {}
+
+    def trace_tree(self) -> str:
+        return self.trace.format_all() if self.trace else ""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

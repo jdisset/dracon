@@ -95,6 +95,90 @@ def construct(node_or_val, resolve=True, **kwargs):
     return n
 
 
+## {{{              --     composition trace helpers     --
+
+def _get_node_source(node) -> 'Optional[SourceContext]':
+    """Get source context from a node, enriching with FILE_PATH from context if available."""
+    from dracon.diagnostics import SourceContext
+    src = getattr(node, '_source_context', None)
+    if src is None and hasattr(node, 'source_context'):
+        src = node.source_context
+    # enrich with actual file path from context when source shows <unicode string>
+    if src and src.file_path in ('<unicode string>', '<unknown>') and hasattr(node, 'context'):
+        fp = node.context.get('FILE_PATH') or node.context.get('FILE')
+        if fp:
+            src = SourceContext(
+                file_path=fp, line=src.line, column=src.column,
+                keypath=src.keypath, include_trace=src.include_trace,
+                operation_context=src.operation_context,
+            )
+    return src
+
+
+def _record_initial_definitions(comp: CompositionResult):
+    """Walk the tree and record a 'definition' entry for every leaf node."""
+    from dracon.composition_trace import TraceEntry, keypath_to_dotted
+    if comp.trace is None or comp.node_map is None:
+        return
+    for path, node in comp.node_map.items():
+        if isinstance(node, (DraconMappingNode, DraconSequenceNode)):
+            continue
+        path_str = keypath_to_dotted(path)
+        if path_str:
+            comp.trace.record(path_str, TraceEntry(
+                value=getattr(node, 'value', None),
+                source=_get_node_source(node),
+                via="definition",
+                detail="local key",
+            ))
+
+
+def _record_file_layer_trace(comp: CompositionResult, layer_comp: CompositionResult, layer_idx: int, layer_path: str):
+    """Record trace entries for nodes that came from a file layer merge."""
+    from dracon.composition_trace import TraceEntry, keypath_to_dotted
+    if comp.trace is None or layer_comp.node_map is None:
+        return
+    for path, layer_node in layer_comp.node_map.items():
+        if isinstance(layer_node, (DraconMappingNode, DraconSequenceNode)):
+            continue
+        path_str = keypath_to_dotted(path)
+        if path_str:
+            comp.trace.record(path_str, TraceEntry(
+                value=getattr(layer_node, 'value', None),
+                source=_get_node_source(layer_node),
+                via="file_layer",
+                detail=f"file layer {layer_idx} ({layer_path})",
+            ))
+
+
+def _record_subtree_trace(comp: CompositionResult, subtree_root_path: 'KeyPath', via: str, detail: str):
+    """Walk a subtree and record trace for all leaves."""
+    from dracon.composition_trace import TraceEntry, keypath_to_dotted
+    from dracon.composer import walk_node
+    if comp.trace is None:
+        return
+
+    def _record(node, path):
+        if isinstance(node, (DraconMappingNode, DraconSequenceNode)):
+            return
+        path_str = keypath_to_dotted(path)
+        if path_str:
+            comp.trace.record(path_str, TraceEntry(
+                value=getattr(node, 'value', None),
+                source=_get_node_source(node),
+                via=via,
+                detail=detail,
+            ))
+
+    try:
+        subtree = subtree_root_path.get_obj(comp.root)
+    except (KeyError, IndexError, TypeError):
+        return
+    walk_node(subtree, _record, start_path=subtree_root_path)
+
+##────────────────────────────────────────────────────────────────────────────}}}
+
+
 class DraconLoader:
     def __init__(
         self,
@@ -108,6 +192,7 @@ class DraconLoader:
         deferred_paths: Optional[list[KeyPath | str]] = None,
         enable_shorthand_vars: bool = True,
         use_cache: bool = True,
+        trace: bool = False,
     ):
         self.custom_loaders = DEFAULT_LOADERS.copy()
         self.custom_loaders.update(custom_loaders or {})
@@ -121,11 +206,16 @@ class DraconLoader:
         self.use_cache = use_cache
         self.enable_shorthand_vars = enable_shorthand_vars
 
+        from dracon.composition_trace import trace_enabled_from_env
+        self._trace_enabled = trace or trace_enabled_from_env()
+
         if interpolation_engine not in ['asteval', 'eval', 'none']:
             raise ValueError(
                 f"Invalid interpolation_engine: {interpolation_engine}. Choose 'asteval', 'eval', or 'none'."
             )
         self.interpolation_engine = interpolation_engine
+
+        self._last_composition: Optional[CompositionResult] = None
 
         self._init_yaml()
 
@@ -184,6 +274,7 @@ class DraconLoader:
             enable_interpolation=self._enable_interpolation,
             enable_shorthand_vars=self.enable_shorthand_vars,
             context=None,  # set context separately to preserve type
+            trace=self._trace_enabled,
         )
         # preserve context type (e.g. TrackedContext) instead of wrapping in ShallowDict
         if self.context is not None:
@@ -211,6 +302,12 @@ class DraconLoader:
             composed_content = compose_config_from_str(self.yaml, content)
         return self.post_process_composed(composed_content)
 
+    def _trace_for_path(self, keypath: Optional[str]) -> Optional[list]:
+        """Look up trace history for a dotted keypath from the last composition."""
+        if not keypath or not self._last_composition or not self._last_composition.trace:
+            return None
+        return self._last_composition.trace.get(keypath) or None
+
     def load_node(self, node, target_type: Optional[Type] = None):
         from pydantic import ValidationError
         from dracon.diagnostics import SourceContext
@@ -222,7 +319,10 @@ class DraconLoader:
             return self.yaml.constructor.construct_object(node, target_type=target_type)
         except ValidationError:
             raise
-        except DraconError:
+        except DraconError as e:
+            # enrich existing DraconError with trace if available
+            if not e.trace_history and e.context:
+                e.trace_history = self._trace_for_path(getattr(e.context, 'keypath', None))
             raise
         except Exception as e:
             ctx = getattr(node, 'source_context', None) or getattr(node, '_source_context', None)
@@ -237,11 +337,13 @@ class DraconLoader:
 
             node_str = node_repr(node, max_depth=3)
             msg = f"Error loading config node{tag_info}: {type(e).__name__}: {e}\n{node_str}"
-            raise DraconError(msg, context=ctx, cause=e) from e
+            trace_history = self._trace_for_path(getattr(ctx, 'keypath', None) if ctx else None)
+            raise DraconError(msg, context=ctx, cause=e, trace_history=trace_history) from e
 
     def load_composition_result(self, compres: CompositionResult, post_process=True):
         if post_process:
             compres = self.post_process_composed(compres)
+        self._last_composition = compres
         return self.load_node(compres.root)
 
     def compose(
@@ -291,13 +393,19 @@ class DraconLoader:
             self, processed_paths[0], custom_loaders=self.custom_loaders
         )
 
+        # trace is initialized inside post_process_composed (called by compose_from_include_str)
+        # no need to re-init here
+
         mkey = MergeKey(raw=merge_key)
 
-        for next_path in processed_paths[1:]:
+        for layer_idx, next_path in enumerate(processed_paths[1:], 2):
             next_comp_res = compose_from_include_str(
                 self, next_path, custom_loaders=self.custom_loaders
             )
+            prev_comp = base_comp_res
             base_comp_res = base_comp_res.merged(next_comp_res, mkey)
+            if base_comp_res.trace is not None:
+                _record_file_layer_trace(base_comp_res, next_comp_res, layer_idx, next_path)
 
         final_comp_res = self.post_process_composed(base_comp_res)
         return final_comp_res
@@ -322,7 +430,11 @@ class DraconLoader:
         if isinstance(merge_key, str):
             merge_key = MergeKey(raw=merge_key)
 
-        cres = comp_res_1.merged(comp_res_2, merge_key)
+        comp2 = comp_res_2 if isinstance(comp_res_2, CompositionResult) else CompositionResult(root=comp_res_2)
+        cres = comp_res_1.merged(comp2, merge_key)
+        # record merge trace for the new layer
+        if cres.trace is not None:
+            _record_file_layer_trace(cres, comp2, layer_idx=2, layer_path="merge")
         final_comp_res = self.post_process_composed(cres)
         return final_comp_res
 
@@ -346,7 +458,7 @@ class DraconLoader:
             The loaded and potentially merged configuration object.
         """
         final_comp_res = self.compose(config_paths, merge_key=merge_key)
-
+        self._last_composition = final_comp_res
         return self.load_node(final_comp_res.root)
 
     @ftrace(watch=[])
@@ -357,6 +469,12 @@ class DraconLoader:
 
     @ftrace(watch=[])
     def post_process_composed(self, comp: CompositionResult):
+        # init tracing for paths that skip compose() (e.g. loads())
+        _needs_initial_trace = self._trace_enabled and comp.trace is None
+        if _needs_initial_trace:
+            from dracon.composition_trace import CompositionTrace
+            comp.trace = CompositionTrace()
+
         ser_debug(self, operation='deepcopy')
         ser_debug(comp, operation='deepcopy')
         comp = preprocess_references(comp)
@@ -364,6 +482,10 @@ class DraconLoader:
         comp.walk_no_path(
             callback=partial(add_to_context, self.context, merge_key=MergeKey(raw='{>~}[>~]'))
         )
+
+        # record initial definitions after context propagation (so FILE_PATH is available)
+        if _needs_initial_trace:
+            _record_initial_definitions(comp)
         comp = self.update_deferred_nodes(comp)
         comp = process_instructions(comp, self)
         comp = self.process_includes(comp)
@@ -488,6 +610,14 @@ class DraconLoader:
                 self._propagate_include_trace(include_composed.root, include_loc, file_path=file_path)
 
             comp_res.set_composition_at(inode_path, include_composed)
+
+            # record include trace
+            if comp_res.trace is not None:
+                _record_subtree_trace(
+                    comp_res, inode_path,
+                    via="include",
+                    detail=f"!include {inode.value}",
+                )
 
         return self.process_includes(comp_res)
 
