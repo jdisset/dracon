@@ -154,6 +154,7 @@ class IncludeNode(ContextNode):
         anchor=None,
         comment=None,
         context=None,
+        optional=False,
     ):
         ContextNode.__init__(
             self,
@@ -165,6 +166,21 @@ class IncludeNode(ContextNode):
             anchor=anchor,
             context=context,
         )
+        self.optional = optional
+
+    def copy(self):
+        node = ContextNode.copy(self)
+        node.optional = self.optional
+        return node
+
+    def __getstate__(self):
+        state = ContextNode.__getstate__(self)
+        state['optional'] = self.optional
+        return state
+
+    def __setstate__(self, state):
+        ContextNode.__setstate__(self, state)
+        self.optional = state.get('optional', False)
 
 
 class MergeNode(DraconScalarNode):

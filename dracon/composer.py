@@ -47,6 +47,7 @@ INTERPOLABLE: Final = 'interpolable'
 INSTRUCTION: Final = 'instruction'
 
 INCLUDE_TAG = '!include'
+OPTIONAL_INCLUDE_TAG = '!include?'
 
 DEFAULT_COMPOSITION_MERGE_HEY = MergeKey(raw="<<{<+}[<~]")
 
@@ -329,8 +330,8 @@ class DraconComposer(Composer):
 
             self.resolver.descend_resolver(parent, index)
             if self.parser.check_event(ScalarEvent):
-                if event.ctag == INCLUDE_TAG:
-                    node = self.compose_include_node()
+                if event.ctag == INCLUDE_TAG or event.ctag == OPTIONAL_INCLUDE_TAG:
+                    node = self.compose_include_node(optional=(event.ctag == OPTIONAL_INCLUDE_TAG))
                 elif event.style is None and is_merge_key(event.value) and self.merging_enabled:
                     node = self.compose_merge_node()
                 else:
@@ -452,7 +453,7 @@ class DraconComposer(Composer):
                 )
         return node
 
-    def compose_include_node(self) -> Node:
+    def compose_include_node(self, optional=False) -> Node:
         normal_node = self.compose_scalar_node()
         node = IncludeNode(
             value=normal_node.value,
@@ -460,6 +461,7 @@ class DraconComposer(Composer):
             end_mark=normal_node.end_mark,
             comment=normal_node.comment,
             anchor=normal_node.anchor,
+            optional=optional,
         )
         return node
 

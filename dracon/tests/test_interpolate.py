@@ -1276,3 +1276,65 @@ def test_numpy_available_in_interpolation():
     assert config.array_mean == 3.0
     assert config.linspace_len == 5
     assert config.zeros_shape == [2, 3]
+
+
+def test_instruction_tag_with_trailing_colon_raises():
+    """!set_default: (with colon) should raise a clear error about YAML tag syntax"""
+    yaml_content = """
+    !set_default: a: null
+    bval: 1
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    with pytest.raises(ValueError, match="trailing colon"):
+        loader.loads(yaml_content)
+
+
+def test_instruction_define_with_trailing_colon_raises():
+    """!define: (with colon) should raise a clear error about YAML tag syntax"""
+    yaml_content = """
+    !define: x: ${42}
+    result: ${x}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    with pytest.raises(ValueError, match="trailing colon"):
+        loader.loads(yaml_content)
+
+
+def test_isfile_builtin(tmp_path):
+    f = tmp_path / "exists.txt"
+    f.write_text("hello")
+    yaml_content = f"""
+    exists: ${{isfile('{f}')}}
+    missing: ${{isfile('/nonexistent_dracon_test_file')}}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+    assert config.exists is True
+    assert config.missing is False
+
+
+def test_isdir_builtin(tmp_path):
+    yaml_content = f"""
+    exists: ${{isdir('{tmp_path}')}}
+    missing: ${{isdir('/nonexistent_dracon_test_dir')}}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+    assert config.exists is True
+    assert config.missing is False
+
+
+def test_isfile_with_if_instruction(tmp_path):
+    f = tmp_path / "override.yaml"
+    f.write_text("override_val: 42")
+    yaml_content = f"""
+    !define file_path: "{f}"
+    !if ${{isfile(file_path)}}:
+      found: true
+    !if ${{not isfile("/nonexistent_dracon_test")}}:
+      not_found: true
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+    assert config.found is True
+    assert config.not_found is True

@@ -69,6 +69,8 @@ DEFAULT_CONTEXT = {
     'basename': os.path.basename,
     'dirname': os.path.dirname,
     'expanduser': os.path.expanduser,
+    'isfile': os.path.isfile,
+    'isdir': os.path.isdir,
     # pathlib
     'Path': Path,
     # datetime
@@ -454,14 +456,26 @@ class DraconLoader:
                     include_loc = loc
 
             new_loader = self.copy()
-            include_composed = compose_from_include_str(
-                new_loader,
-                include_str=inode.value,
-                include_node_path=inode_path,
-                composition_result=comp_res,
-                custom_loaders=self.custom_loaders,
-                node=inode,
-            )
+            try:
+                include_composed = compose_from_include_str(
+                    new_loader,
+                    include_str=inode.value,
+                    include_node_path=inode_path,
+                    composition_result=comp_res,
+                    custom_loaders=self.custom_loaders,
+                    node=inode,
+                )
+            except FileNotFoundError:
+                if not inode.optional:
+                    raise
+                # optional include — silently remove the entry
+                if inode_path == ROOTPATH:
+                    comp_res.root = DraconMappingNode(tag='', value=[])
+                else:
+                    parent = inode_path.parent.get_obj(comp_res.root)
+                    del parent[inode_path[-1]]
+                comp_res.make_map()
+                continue
 
             # propagate include trace to all nodes from the included file
             if include_loc is not None:
