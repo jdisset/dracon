@@ -51,6 +51,17 @@ Values are parsed as YAML, so `++count=5` becomes an integer, `++tags="[a,b,c]"`
 | **Resolve** | `-r` | Like construct, but also forces evaluation of all remaining lazy values. |
 | **Permissive** | `-rp` | Resolve what can be resolved, leave the rest as `${...}` strings. |
 
+## Tracing
+
+| Flag | Description |
+|------|-------------|
+| `--trace PATH` | Show the provenance chain for a specific config path (e.g., `db.port`) |
+| `--trace-all` | Show provenance for all values |
+
+Tracing reveals **where each value came from** — which file defined it, what overrode it, and through which operation (include, merge, file layer, `!if` branch, etc.). When outputting to a terminal, trace output uses colored rich panels/tables.
+
+Can also be enabled via the `DRACON_TRACE=1` environment variable.
+
 ## Output Formats
 
 | Format | Flag | Notes |
@@ -91,6 +102,12 @@ dracon-print +defaults.yaml +env/prod.yaml +local.yaml
 
 # Pipe JSON subtree to jq
 dracon-print config.yaml -cjs database | jq '.host'
+
+# Trace where a value came from across layers
+dracon-print base.yaml prod.yaml --trace db.port
+
+# Trace all values
+dracon-print base.yaml prod.yaml --trace-all
 ```
 
 ## Python API

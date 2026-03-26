@@ -16,6 +16,7 @@ DraconLoader(
     deferred_paths: Optional[List[KeyPath | str]] = None,
     enable_shorthand_vars: bool = True,
     use_cache: bool = True,
+    trace: bool = False,
 )
 ```
 
@@ -41,6 +42,8 @@ DraconLoader(
 - **`enable_shorthand_vars`**: When `True`, automatically converts `$VAR` to `${VAR}` during composition. Default: `True`.
 
 - **`use_cache`**: Enable LRU caching of composition results (128 items). Default: `True`.
+
+- **`trace`**: Enable composition tracing. When `True`, the `CompositionResult` returned by `compose()` records where every value came from. Also enabled by the `DRACON_TRACE=1` environment variable. Default: `False`.
 
 ## Methods
 
@@ -86,6 +89,36 @@ result = loader.compose(['base.yaml', 'override.yaml'])
 # result.root — the composed YAML root node
 # result.defined_vars — variables defined via !define
 ```
+
+### Composition Tracing
+
+When `trace=True`, `compose()` returns a `CompositionResult` with a `.trace` attribute containing the full provenance of every value.
+
+```python
+loader = DraconLoader(trace=True)
+cr = loader.compose(['base.yaml', 'prod.yaml'])
+
+# query a single path
+history = cr.trace.get("db.port")
+# → [TraceEntry(via="definition", value="5432", ...), TraceEntry(via="file_layer", value="5433", ...)]
+
+# query all paths
+all_traces = cr.trace_all()
+# → {"db.port": [...], "db.host": [...], ...}
+
+# pretty-print
+print(cr.trace_tree())
+```
+
+Each `TraceEntry` has:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `value` | `Any` | The value at this step |
+| `source` | `SourceContext \| None` | File, line, column |
+| `via` | `ViaKind` | Operation type: `"definition"`, `"file_layer"`, `"include"`, `"merge"`, `"if_branch"`, `"each_expansion"`, `"cli_override"`, etc. |
+| `detail` | `str` | Human-readable context (e.g., merge strategy, include path) |
+| `replaced` | `TraceEntry \| None` | What this value replaced |
 
 ### `merge(comp_res_1, comp_res_2, merge_key)`
 

@@ -596,3 +596,22 @@ workers: Annotated[int, Arg(help="Worker processes")] = Field(
     description="Defaults to CPU count"
 )
 ```
+
+## Built-in Flags
+
+Every `@dracon_program` CLI automatically includes these flags (you don't need to define them in your model):
+
+| Flag | Description |
+|------|-------------|
+| `-h`, `--help` | Show help message and exit |
+| `--trace PATH` | Show provenance chain for a config keypath and exit |
+| `--trace-all` | Show provenance for all config values and exit |
+
+Trace flags are useful for debugging which config file (or CLI override) set a particular value:
+
+```bash
+my-program +base.yaml +prod.yaml --trace db.port
+my-program +base.yaml +prod.yaml --trace-all
+```
+
+Tracing can also be enabled globally via the `DRACON_TRACE=1` environment variable — when enabled, error messages include the provenance chain showing where bad values came from.

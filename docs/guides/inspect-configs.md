@@ -149,3 +149,66 @@ dracon-print config.yaml -cr -s problematic.path
 ```bash
 dracon-print config.yaml --show-vars ++my_var=test
 ```
+
+## Composition Tracing
+
+When you have multiple config layers and a value isn't what you expect, tracing tells you exactly where each value came from and what it replaced.
+
+### Trace a single path
+
+```bash
+dracon-print base.yaml prod.yaml --trace db.port
+# db.port = '5433'
+#   1. = '5432'  <- base.yaml:3 (local key)
+#   2. = '5433'  <- prod.yaml:3 (file layer 2)
+```
+
+### Trace all values
+
+```bash
+dracon-print base.yaml prod.yaml --trace-all
+```
+
+Shows every leaf value with its provenance. Values with multiple sources show the full chain.
+
+### Tracing in @dracon_program CLIs
+
+Every program built with `@dracon_program` gets `--trace` and `--trace-all` built in:
+
+```bash
+my-program +base.yaml +prod.yaml --trace-all
+my-program +base.yaml --trace server.port
+```
+
+### Tracing via Python API
+
+```python
+from dracon import DraconLoader
+
+loader = DraconLoader(trace=True)
+cr = loader.compose(['base.yaml', 'prod.yaml'])
+
+# single path
+for entry in cr.trace.get("db.port"):
+    print(f"{entry.value} <- {entry.source} ({entry.via})")
+
+# all paths
+for path, entries in cr.trace_all().items():
+    print(f"{path}: {len(entries)} steps")
+```
+
+### Tracing via environment variable
+
+Set `DRACON_TRACE=1` to enable tracing globally without changing code or CLI flags. When tracing is enabled and an error occurs, error messages include the provenance chain showing where the bad value came from.
+
+### What gets traced
+
+| Operation | `via` value | What it records |
+|-----------|-------------|-----------------|
+| Value defined in file | `definition` | File, line |
+| File layer merge (`load([a, b])`) | `file_layer` | Layer index, source file |
+| `!include` | `include` | Include path |
+| `<<:` merge | `merge` | Merge strategy, winner/loser |
+| `!if` branch | `if_branch` | Which branch, condition |
+| `!each` expansion | `each_expansion` | Loop variable |
+| CLI override (`--key=val`) | `cli_override` | Flag used |
