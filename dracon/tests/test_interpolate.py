@@ -1338,3 +1338,64 @@ def test_isfile_with_if_instruction(tmp_path):
     config = loader.loads(yaml_content)
     assert config.found is True
     assert config.not_found is True
+
+
+# {{{ directive key coexistence tests
+
+def test_set_default_coexists_with_same_named_key():
+    """!set_default db: val + db: override should not raise duplicate key error"""
+    yaml_content = """
+    !set_default db: mysql
+    db: postgres
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+    assert config.db == 'postgres'
+
+
+def test_define_coexists_with_same_named_key():
+    """!define x: 5 + x: 10 should not raise duplicate key error"""
+    yaml_content = """
+    !define x: ${5}
+    x: 10
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+    assert config.x == 10
+
+
+def test_set_default_interpolated_in_same_named_key():
+    """!set_default db: mysql + db: ${db}_config should resolve correctly"""
+    yaml_content = """
+    !set_default db: mysql
+    db: ${db}_config
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+    assert config.db == 'mysql_config'
+
+
+def test_duplicate_regular_keys_still_raises():
+    """Two regular keys with the same name should still raise ValueError"""
+    yaml_content = """
+    a: 1
+    a: 2
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    with pytest.raises(ValueError, match="Duplicate key"):
+        loader.loads(yaml_content)
+
+
+def test_set_default_alone_still_works():
+    """!set_default without a same-named key should work as before"""
+    yaml_content = """
+    !set_default db: mysql
+    greeting: hello_${db}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+    assert config.greeting == 'hello_mysql'
+    assert 'db' not in config
+
+
+# }}}

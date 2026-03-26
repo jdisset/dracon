@@ -14,6 +14,7 @@ from dracon.nodes import (
     MergeNode,
     UnsetNode,
     DRACON_UNSET_VALUE,
+    _is_directive_key,
 )
 
 from ruamel.yaml.events import (
@@ -276,9 +277,17 @@ def walk_node(node, callback, start_path=None):
         callback(node, path)
         path = path.removed_mapping_key()
         if isinstance(node, DraconMappingNode):
+            directive_count = {}
             for k_node, v_node in node.value:
-                __walk_node(k_node, path.with_added_parts(MAPPING_KEY, k_node.value))
-                __walk_node(v_node, path.with_added_parts(k_node.value))
+                if _is_directive_key(k_node):
+                    key_val = k_node.value
+                    n = directive_count.get(key_val, 0)
+                    directive_count[key_val] = n + 1
+                    path_key = f'__directive_{n}_{key_val}'
+                else:
+                    path_key = k_node.value
+                __walk_node(k_node, path.with_added_parts(MAPPING_KEY, path_key))
+                __walk_node(v_node, path.with_added_parts(path_key))
         elif isinstance(node, DraconSequenceNode):
             for i, v in enumerate(node.value):
                 __walk_node(v, path.with_added_parts(str(i)))

@@ -17,6 +17,15 @@ MERGE_TAG = Tag(suffix='tag:yaml.org,2002:merge')
 STR_TAG = Tag(suffix='tag:yaml.org,2002:str')
 
 DRACON_UNSET_VALUE = '__!DRACON_UNSET_VALUE!__'
+DIRECTIVE_TAGS = frozenset({'!set_default', '!define'})
+
+def _is_directive_key(key_node):
+    """Check if a key node has a directive tag (consumed during instruction processing)."""
+    tag = getattr(key_node, 'tag', None)
+    if tag is None:
+        return False
+    return str(tag) in DIRECTIVE_TAGS
+
 DEFAULT_MAP_TAG = 'tag:yaml.org,2002:map'
 DEFAULT_SEQ_TAG = 'tag:yaml.org,2002:seq'
 DEFAULT_SCALAR_TAG = 'tag:yaml.org,2002:str'
@@ -247,13 +256,20 @@ class DraconMappingNode(MappingNode):
 
     def _recompute_map(self):
         self.map = {}  # key value -> index
+        directive_count = {}
         for idx, (key, _) in enumerate(self.value):
             if not hasattr(key, 'value'):
                 raise ValueError(f'Key {key!r} has no value attribute')
             key_val = str(key.value)
-            if key_val in self.map:
+            if _is_directive_key(key):
+                n = directive_count.get(key_val, 0)
+                directive_count[key_val] = n + 1
+                map_key = f'__directive_{n}_{key_val}'
+            else:
+                map_key = key_val
+            if map_key in self.map:
                 raise ValueError(f'Duplicate key: {key_val!r}')
-            self.map[key_val] = idx
+            self.map[map_key] = idx
 
     # and implement a get[] (and set) method
     def __getitem__(self, key: Hashable) -> Node:
@@ -341,12 +357,8 @@ class DraconMappingNode(MappingNode):
         return n
 
     def append(self, newvalue: tuple[Node, Node]):
-        key, _ = newvalue
         self.value.append(newvalue)
-        key_str = str(key.value)
-        if key_str in self.map:
-            raise ValueError(f'Duplicate key: {key_str}')
-        self.map[key_str] = len(self.value) - 1
+        self._recompute_map()
 
     def clear(self):
         self.value = []

@@ -138,7 +138,7 @@ class Define(Instruction):
             f"Invalid variable name in {self.__class__.__name__} instruction: {var_name}"
         )
 
-        del parent_node[var_name]
+        del parent_node[str(path[-1])]
 
         return var_name, value, parent_node
 
@@ -564,4 +564,16 @@ def match_instruct(value: str) -> Optional[Instruction]:
     for match in matches:
         if match:
             return match
+    # check if stripping a trailing colon would match — common YAML syntax mistake
+    # e.g. `!set_default: a: null` parses the tag as `!set_default:` (colon in tag name)
+    if value.endswith(':'):
+        stripped = value.rstrip(':')
+        near_matches = [inst.match(stripped) for inst in AVAILABLE_INSTRUCTIONS]
+        for m in near_matches:
+            if m:
+                raise ValueError(
+                    f"tag '{value}' looks like instruction '{stripped}' but has a trailing colon. "
+                    f"YAML interprets `{value} key: val` as a tag named '{value}' (colon is part "
+                    f"of the tag). Use `{stripped} key: val` (space, no colon after tag) instead."
+                )
     return None
