@@ -108,3 +108,20 @@ def test_optional_include_multiple(tmp_path):
     assert config.a.val == "found"
     assert not hasattr(config, 'b')
     assert config.c == "kept"
+
+
+def test_optional_include_in_sequence(tmp_path):
+    """!include? inside a sequence should drop the item silently."""
+    exists = tmp_path / "item.yaml"
+    exists.write_text("name: found\n")
+    yaml_content = f"""
+    entries:
+      - !include? file:{exists}
+      - !include? file:{tmp_path}/missing.yaml
+      - plain_item
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+    assert len(config.entries) == 2
+    assert config.entries[0].name == "found"
+    assert config.entries[1] == "plain_item"

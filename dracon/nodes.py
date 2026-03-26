@@ -178,9 +178,17 @@ class IncludeNode(ContextNode):
         self.optional = optional
 
     def copy(self):
-        node = ContextNode.copy(self)
-        node.optional = self.optional
-        return node
+        return self.__class__(
+            value=self.value,
+            start_mark=self.start_mark,
+            end_mark=self.end_mark,
+            tag=self.tag,
+            anchor=self.anchor,
+            comment=self.comment,
+            context=self.context.copy(),
+            source_context=self._source_context,
+            optional=self.optional,
+        )
 
     def __getstate__(self):
         state = ContextNode.__getstate__(self)

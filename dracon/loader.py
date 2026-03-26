@@ -42,7 +42,7 @@ from dracon.merge import process_merges, add_to_context, merged, MergeKey
 from dracon.instructions import process_instructions
 from dracon.deferred import DeferredNode, process_deferred
 from dracon.representer import DraconRepresenter
-from dracon.nodes import MergeNode, DraconMappingNode  # Added MergeNode, DraconMappingNode
+from dracon.nodes import MergeNode, DraconMappingNode, DraconSequenceNode
 
 from dracon.lazy import DraconError, resolve_all_lazy
 
@@ -468,12 +468,14 @@ class DraconLoader:
             except FileNotFoundError:
                 if not inode.optional:
                     raise
-                # optional include — silently remove the entry
                 if inode_path == ROOTPATH:
-                    comp_res.root = DraconMappingNode(tag='', value=[])
+                    comp_res.root = DraconMappingNode.make_empty()
                 else:
                     parent = inode_path.parent.get_obj(comp_res.root)
-                    del parent[inode_path[-1]]
+                    if isinstance(parent, DraconSequenceNode):
+                        del parent[int(inode_path[-1])]
+                    else:
+                        del parent[inode_path[-1]]
                 comp_res.make_map()
                 continue
 
