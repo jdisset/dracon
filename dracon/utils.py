@@ -200,6 +200,9 @@ def clean_context_keys(context: DictLike) -> DictLike:
     """returns a new dict with leading '$' removed from keys."""
     if not context:
         return context
+    # fast path: if no keys start with '$', return as-is (avoids dict rebuild)
+    if not any(isinstance(k, str) and k.startswith('$') for k in context):
+        return context
     cleaned = {}
 
     for key, value in context.items():

@@ -60,15 +60,15 @@ class Instruction:
 
 @ftrace()
 def process_instructions(comp_res: CompositionResult, loader) -> CompositionResult:
-    # then all other instructions
     instruction_nodes = []
     seen_paths = set()
 
     def find_instruction_nodes(node: Node, path: KeyPath):
         nonlocal instruction_nodes
         nonlocal seen_paths
-        if hasattr(node, 'tag') and node.tag:
-            if (path not in seen_paths) and (inst := match_instruct(node.tag)):
+        tag = getattr(node, 'tag', None)
+        if tag:
+            if (path not in seen_paths) and (inst := match_instruct(tag)):
                 instruction_nodes.append((inst, path))
 
     def refresh_instruction_nodes():
@@ -598,10 +598,11 @@ class If(Instruction):
 AVAILABLE_INSTRUCTIONS = [SetDefault, Define, Each, If]
 
 
-def match_instruct(value: str) -> Optional[Instruction]:
-    matches = [inst.match(value) for inst in AVAILABLE_INSTRUCTIONS]
-    # need to refresh
-    for match in matches:
+def match_instruct(value) -> Optional[Instruction]:
+    # convert Tag to str once (avoids repeated Tag.__str__ in each match)
+    value = str(value) if not isinstance(value, str) else value
+    for inst in AVAILABLE_INSTRUCTIONS:
+        match = inst.match(value)
         if match:
             return match
     # check if stripping a trailing colon would match — common YAML syntax mistake

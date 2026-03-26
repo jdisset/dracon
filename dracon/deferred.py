@@ -417,6 +417,18 @@ def process_deferred(
     # force deferred_at is a list where each elt can be a path, or a tuple of (path, target_type)
 
     force_deferred_at = force_deferred_at or []
+    # early exit: no deferred paths requested, skip the expensive tree walk
+    if not force_deferred_at:
+        # still need to check for !deferred tags in the tree, but only walk if any exist
+        has_deferred_tag = False
+        if comp.node_map:
+            for node in comp.node_map.values():
+                tag = getattr(node, 'tag', None)
+                if tag and isinstance(tag, str) and tag.startswith('!deferred'):
+                    has_deferred_tag = True
+                    break
+        if not has_deferred_tag:
+            return comp
     deferred_paths = {}
     for elt in force_deferred_at:
         _path = None

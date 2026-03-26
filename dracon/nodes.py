@@ -18,13 +18,16 @@ STR_TAG = Tag(suffix='tag:yaml.org,2002:str')
 
 DRACON_UNSET_VALUE = '__!DRACON_UNSET_VALUE!__'
 DIRECTIVE_TAGS = frozenset({'!set_default', '!define'})
+_DIRECTIVE_SUFFIXES = frozenset({'!set_default', '!define'})
 
 def _is_directive_key(key_node):
     """Check if a key node has a directive tag (consumed during instruction processing)."""
     tag = getattr(key_node, 'tag', None)
     if tag is None:
         return False
-    return str(tag) in DIRECTIVE_TAGS
+    # fast path: check suffix directly, avoiding Tag.__str__() → trval → uri_decoded_suffix chain
+    suffix = getattr(tag, 'suffix', None)
+    return suffix in _DIRECTIVE_SUFFIXES if suffix else str(tag) in DIRECTIVE_TAGS
 
 DEFAULT_MAP_TAG = 'tag:yaml.org,2002:map'
 DEFAULT_SEQ_TAG = 'tag:yaml.org,2002:seq'
