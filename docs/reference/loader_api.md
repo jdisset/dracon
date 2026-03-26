@@ -16,7 +16,7 @@ DraconLoader(
     deferred_paths: Optional[List[KeyPath | str]] = None,
     enable_shorthand_vars: bool = True,
     use_cache: bool = True,
-    trace: bool = False,
+    trace: bool = True,
 )
 ```
 
@@ -43,7 +43,7 @@ DraconLoader(
 
 - **`use_cache`**: Enable LRU caching of composition results (128 items). Default: `True`.
 
-- **`trace`**: Enable composition tracing. When `True`, the `CompositionResult` returned by `compose()` records where every value came from. Also enabled by the `DRACON_TRACE=1` environment variable. Default: `False`.
+- **`trace`**: Enable composition tracing. When `True`, the `CompositionResult` returned by `compose()` records where every value came from. Default: `True`. Set to `False` to disable. Also controllable via the `DRACON_TRACE` environment variable.
 
 ## Methods
 

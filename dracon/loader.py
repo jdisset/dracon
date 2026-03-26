@@ -100,55 +100,55 @@ def construct(node_or_val, resolve=True, **kwargs):
 def _get_node_source(node) -> 'Optional[SourceContext]':
     """Get source context from a node, enriching with FILE_PATH from context if available."""
     from dracon.diagnostics import SourceContext
-    src = getattr(node, '_source_context', None)
-    if src is None and hasattr(node, 'source_context'):
-        src = node.source_context
-    # enrich with actual file path from context when source shows <unicode string>
-    if src and src.file_path in ('<unicode string>', '<unknown>') and hasattr(node, 'context'):
-        fp = node.context.get('FILE_PATH') or node.context.get('FILE')
+    src = getattr(node, 'source_context', None) or getattr(node, '_source_context', None)
+    if src and src.file_path in ('<unicode string>', '<unknown>'):
+        fp = getattr(node, 'context', {}).get('FILE_PATH') or getattr(node, 'context', {}).get('FILE')
         if fp:
             src = SourceContext(
                 file_path=fp, line=src.line, column=src.column,
                 keypath=src.keypath, include_trace=src.include_trace,
-                operation_context=src.operation_context,
             )
     return src
 
 
+def _record_leaves(trace, node_map, via, detail):
+    """Fast-path: record trace entries for all leaf nodes in a node_map."""
+    from dracon.composition_trace import TraceEntry, MAPPING_KEY
+    from dracon.keypath import KeyPathToken
+    _container = (DraconMappingNode, DraconSequenceNode)
+    _record = trace.record
+    for path, node in node_map.items():
+        if isinstance(node, _container):
+            continue
+        parts = path.parts
+        if MAPPING_KEY in parts:
+            continue
+        # inline keypath_to_dotted
+        segs = []
+        for p in parts:
+            if not isinstance(p, KeyPathToken):
+                segs.append(str(p))
+        if not segs:
+            continue
+        path_str = '.'.join(segs)
+        src = getattr(node, 'source_context', None) or getattr(node, '_source_context', None)
+        _record(path_str, TraceEntry(
+            value=getattr(node, 'value', None), source=src, via=via, detail=detail,
+        ))
+
+
 def _record_initial_definitions(comp: CompositionResult):
     """Walk the tree and record a 'definition' entry for every leaf node."""
-    from dracon.composition_trace import TraceEntry, keypath_to_dotted
     if comp.trace is None or comp.node_map is None:
         return
-    for path, node in comp.node_map.items():
-        if isinstance(node, (DraconMappingNode, DraconSequenceNode)):
-            continue
-        path_str = keypath_to_dotted(path)
-        if path_str:
-            comp.trace.record(path_str, TraceEntry(
-                value=getattr(node, 'value', None),
-                source=_get_node_source(node),
-                via="definition",
-                detail="local key",
-            ))
+    _record_leaves(comp.trace, comp.node_map, "definition", "local key")
 
 
 def _record_file_layer_trace(comp: CompositionResult, layer_comp: CompositionResult, layer_idx: int, layer_path: str):
     """Record trace entries for nodes that came from a file layer merge."""
-    from dracon.composition_trace import TraceEntry, keypath_to_dotted
     if comp.trace is None or layer_comp.node_map is None:
         return
-    for path, layer_node in layer_comp.node_map.items():
-        if isinstance(layer_node, (DraconMappingNode, DraconSequenceNode)):
-            continue
-        path_str = keypath_to_dotted(path)
-        if path_str:
-            comp.trace.record(path_str, TraceEntry(
-                value=getattr(layer_node, 'value', None),
-                source=_get_node_source(layer_node),
-                via="file_layer",
-                detail=f"file layer {layer_idx} ({layer_path})",
-            ))
+    _record_leaves(comp.trace, layer_comp.node_map, "file_layer", f"file layer {layer_idx} ({layer_path})")
 
 
 def _record_subtree_trace(comp: CompositionResult, subtree_root_path: 'KeyPath', via: str, detail: str):
@@ -192,7 +192,7 @@ class DraconLoader:
         deferred_paths: Optional[list[KeyPath | str]] = None,
         enable_shorthand_vars: bool = True,
         use_cache: bool = True,
-        trace: bool = False,
+        trace: bool = True,
     ):
         self.custom_loaders = DEFAULT_LOADERS.copy()
         self.custom_loaders.update(custom_loaders or {})

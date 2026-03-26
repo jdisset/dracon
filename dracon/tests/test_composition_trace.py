@@ -16,11 +16,11 @@ def tmp_yaml(tmp_path):
 
 # ── basics ───────────────────────────────────────────────────────────────────
 
-def test_trace_disabled_by_default(tmp_yaml):
+def test_trace_enabled_by_default(tmp_yaml):
     f = tmp_yaml("a.yaml", "x: 1\n")
     loader = DraconLoader()
     cr = loader.compose(str(f))
-    assert cr.trace is None
+    assert isinstance(cr.trace, CompositionTrace)
 
 
 def test_trace_enabled_via_kwarg(tmp_yaml):
@@ -209,13 +209,11 @@ def test_trace_tree_format(tmp_yaml):
 
 # ── zero overhead ────────────────────────────────────────────────────────────
 
-def test_trace_zero_overhead(tmp_yaml):
+def test_trace_can_be_disabled(tmp_yaml):
     f = tmp_yaml("a.yaml", "x: 1\n")
     loader = DraconLoader(trace=False)
     cr = loader.compose(str(f))
     assert cr.trace is None
-    # no TraceEntry objects should exist anywhere
-    assert not hasattr(cr, '_trace') or cr.trace is None
 
 
 # ── CLI override tracing ─────────────────────────────────────────────────────

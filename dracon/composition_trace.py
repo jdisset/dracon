@@ -15,7 +15,7 @@ if __name__ != '____always_import__':
 
 def keypath_to_dotted(kp: KeyPath) -> Optional[str]:
     """Convert a KeyPath to dotted notation (e.g. 'db.port'), skipping MAPPING_KEY paths."""
-    parts = kp.simplified().parts
+    parts = kp.parts
     if MAPPING_KEY in parts:
         return None
     result = []
