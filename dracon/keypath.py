@@ -186,6 +186,7 @@ class KeyPath:
         self, path: Union[str, List[Union[Hashable, KeyPathToken]]], simplify: bool = True
     ):
         self.is_simple = False
+        self._hash = None
         if isinstance(path, (list, tuple)) and not isinstance(path, str):
             self.parts = list(path)  # Create a copy to avoid modifying the input
         else:
@@ -198,6 +199,7 @@ class KeyPath:
 
     def clear(self) -> 'KeyPath':
         self.parts = []
+        self._hash = None
         return self
 
     def rootless(self) -> 'KeyPath':
@@ -208,6 +210,7 @@ class KeyPath:
 
     def up(self, simplify=True) -> 'KeyPath':
         self.is_simple = False
+        self._hash = None
         self.parts.append(KeyPathToken.UP)
         if simplify:
             return self.simplify()
@@ -219,18 +222,23 @@ class KeyPath:
         return self.copy().up()
 
     def pop(self) -> Union[Hashable, KeyPathToken]:
+        self._hash = None
         return self.parts.pop()
 
     def front_pop(self) -> Union[Hashable, KeyPathToken]:
+        self._hash = None
         return self.parts.pop(0)
 
     def with_added_parts(self, *parts) -> 'KeyPath':
-        kcopy = self.copy()
-        kcopy.parts.extend(parts)
-        return kcopy
+        kc = KeyPath.__new__(KeyPath)
+        kc.parts = self.parts + list(parts)
+        kc.is_simple = False
+        kc._hash = None
+        return kc
 
     def down(self, path: "str | KeyPath | KeyPathToken") -> 'KeyPath':
         self.is_simple = False
+        self._hash = None
         if isinstance(path, int):
             path = str(path)
         if isinstance(path, KeyPathToken):
@@ -300,9 +308,10 @@ class KeyPath:
         return self.copy().down(other)
 
     def copy(self) -> 'KeyPath':
-        kc = KeyPath([], simplify=False)
+        kc = KeyPath.__new__(KeyPath)
         kc.parts = self.parts.copy()
         kc.is_simple = self.is_simple
+        kc._hash = None
         return kc
 
     def __deepcopy__(self, memo) -> 'KeyPath':
@@ -313,6 +322,7 @@ class KeyPath:
             return self
         self.parts = list(simplify_parts(self.parts))
         self.is_simple = True
+        self._hash = None
         return self
 
     def simplified(self) -> 'KeyPath':
@@ -356,7 +366,11 @@ class KeyPath:
         return self.parts == other.parts
 
     def __hash__(self) -> int:
-        return hash(tuple(self.parts))
+        h = self._hash
+        if h is None:
+            h = hash(tuple(self.parts))
+            self._hash = h
+        return h
 
     def __getitem__(self, index) -> Union[Hashable, KeyPathToken]:
         return self.parts[index]
@@ -427,9 +441,11 @@ class KeyPath:
     def removed_mapping_key(self) -> 'KeyPath':
         if not self.is_mapping_key():
             return self
-        kcopy = self.copy()
-        kcopy.parts.pop(-2)
-        return kcopy
+        kc = KeyPath.__new__(KeyPath)
+        kc.parts = self.parts[:-2] + self.parts[-1:]
+        kc.is_simple = self.is_simple
+        kc._hash = None
+        return kc
 
 
 def _get_obj_impl(

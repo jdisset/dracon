@@ -13,7 +13,7 @@ from dracon.composer import (
 )
 from dracon.interpolation_utils import resolve_interpolable_variables, transform_dollar_vars
 from dracon.interpolation import evaluate_expression
-from dracon.merge import merged, MergeKey
+from dracon.merge import merged, MergeKey, cached_merge_key
 from dracon.utils import deepcopy, ftrace
 from dracon.deferred import DeferredNode
 
@@ -192,7 +192,7 @@ def compose_from_include_str(
                 )
             new_loader = draconloader.copy()
             if node is not None:
-                merged_context = merged(node.context, new_context, MergeKey(raw="{<~}[<~]"))
+                merged_context = merged(node.context, new_context, cached_merge_key("{<~}[<~]"))
                 add_to_context(merged_context, new_loader)
 
             result = new_loader.compose_config_from_str(result)
@@ -204,8 +204,8 @@ def compose_from_include_str(
         if isinstance(result, CompositionResult) and node is not None:
             result.make_map()
             merged_context = merged(
-                node.context, file_context, MergeKey(raw="{<~}[~<]")
+                node.context, file_context, cached_merge_key("{<~}[~<]")
             )  # Changed to +>
             result.walk_no_path(
-                callback=partial(add_to_context, merged_context, merge_key=MergeKey(raw='{>~}[~>]'))
+                callback=partial(add_to_context, merged_context, merge_key=cached_merge_key('{>~}[~>]'))
             )

@@ -475,7 +475,7 @@ def evaluate_expression(
     source_context: Optional[SourceContext] = None,
     permissive: bool = False,
 ) -> Any:
-    from dracon.merge import merged, MergeKey
+    from dracon.merge import merged, cached_merge_key
 
     if enable_shorthand_vars:
         expr = transform_dollar_vars(expr)
@@ -497,7 +497,7 @@ def evaluate_expression(
         if isinstance(expr, LazyProtocol):
             expr.current_path = current_path
             expr.root_obj = root_obj
-            expr.context = merged(expr.context, context, MergeKey(raw='{<+}'))
+            expr.context = merged(expr.context, context, cached_merge_key('{<+}'))
             expr = expr.resolve()
         return expr
 

@@ -16,13 +16,14 @@ if __name__ != '____always_import__':
 def keypath_to_dotted(kp: KeyPath) -> Optional[str]:
     """Convert a KeyPath to dotted notation (e.g. 'db.port'), skipping MAPPING_KEY paths."""
     parts = kp.parts
-    if MAPPING_KEY in parts:
+    # fast check: MAPPING_KEY only appears at parts[-2] in valid keypaths
+    if len(parts) >= 2 and parts[-2] is MAPPING_KEY:
         return None
     result = []
     for p in parts:
-        if isinstance(p, KeyPathToken):
+        if p.__class__ is not str:  # skip KeyPathToken (ROOT, etc.)
             continue
-        result.append(str(p))
+        result.append(p)
     return '.'.join(result) if result else None
 
 

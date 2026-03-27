@@ -19,7 +19,7 @@ from dracon.nodes import (
 from dracon.diagnostics import SourceContext, DraconError
 
 from dracon.keypath import KeyPath, ROOTPATH
-from dracon.merge import add_to_context, merged, MergeKey, reset_context
+from dracon.merge import add_to_context, merged, MergeKey, cached_merge_key, reset_context
 
 from functools import partial
 import logging
@@ -167,20 +167,20 @@ class DeferredNode(ContextNode, Generic[T]):
         ser_debug(self.context, operation='deepcopy')
 
         logger.debug(f"composing deferred node at {self.path}. context={context}")
-        merged_context = merged(self.context, context or {}, MergeKey(raw="{<~}[<~]"))
+        merged_context = merged(self.context, context or {}, cached_merge_key("{<~}[<~]"))
         merged_context = ShallowDict(merged_context)
 
         composition.set_at(self.path, value)
 
         composition.walk_no_path(
             callback=partial(
-                add_to_context, self._loader.context, merge_key=MergeKey(raw='{<~}[<~]')
+                add_to_context, self._loader.context, merge_key=cached_merge_key('{<~}[<~]')
             )
         )
         # overwrite this node's existing context with the new merged context
         walk_node(
             node=self.path.get_obj(composition.root),
-            callback=partial(add_to_context, merged_context, merge_key=MergeKey(raw='{<~}[<~]')),
+            callback=partial(add_to_context, merged_context, merge_key=cached_merge_key('{<~}[<~]')),
         )
 
         compres = self._loader.post_process_composed(composition)

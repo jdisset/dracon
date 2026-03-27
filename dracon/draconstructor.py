@@ -6,7 +6,7 @@ import sys
 import importlib
 from ruamel.yaml.nodes import MappingNode, SequenceNode
 from ruamel.yaml.constructor import ConstructorError
-from dracon.merge import merged, MergeKey
+from dracon.merge import merged, MergeKey, cached_merge_key
 from dracon.keypath import KeyPath, ROOTPATH
 from pydantic import (
     TypeAdapter,
@@ -107,30 +107,40 @@ def get_origin_type(t):
     return orig
 
 
+_TYPE_BASES = (type, typing._GenericAlias, typing._SpecialForm, typing._SpecialGenericAlias)
+
+
 def get_all_types(items):
     return {
         name: obj
         for name, obj in items.items()
-        if isinstance(
-            obj,
-            (
-                type,
-                typing._GenericAlias,
-                typing._SpecialForm,
-                typing._SpecialGenericAlias,
-            ),
-        )
+        if isinstance(obj, _TYPE_BASES)
     }
+
+
+# cache per module name — module dicts don't change during composition
+_module_types_cache: dict[str, dict] = {}
 
 
 def get_all_types_from_module(module):
     if isinstance(module, str):
+        name = module
+        if name in _module_types_cache:
+            return _module_types_cache[name]
         try:
-            module = importlib.import_module(module)
+            module = importlib.import_module(name)
         except ImportError:
-            print(f"WARNING: could not import module {module}")
+            print(f"WARNING: could not import module {name}")
+            _module_types_cache[name] = {}
             return {}
-    return get_all_types(module.__dict__)
+    else:
+        name = getattr(module, '__name__', None)
+        if name and name in _module_types_cache:
+            return _module_types_cache[name]
+    result = get_all_types(module.__dict__)
+    if name:
+        _module_types_cache[name] = result
+    return result
 
 
 def get_globals_up_to_frame(frame_n):
@@ -153,13 +163,24 @@ def parse_resolvable_tag(tag):
     return Any
 
 
+_collect_cache: dict[tuple, dict] = {}
+
+
 def collect_all_types(modules, capture_globals=True, globals_at_frame=15):
+    if not capture_globals:
+        cache_key = tuple(modules)
+        if cache_key in _collect_cache:
+            return dict(_collect_cache[cache_key])  # copy — caller mutates
+        types = {}
+        for module in modules:
+            types.update(get_all_types_from_module(module))
+        _collect_cache[cache_key] = types
+        return dict(types)
     types = {}
     for module in modules:
         types.update(get_all_types_from_module(module))
-    if capture_globals:
-        globalns = get_globals_up_to_frame(globals_at_frame)
-        types.update(get_all_types(globalns))
+    globalns = get_globals_up_to_frame(globals_at_frame)
+    types.update(get_all_types(globalns))
     return types
 
 
@@ -339,7 +360,7 @@ class Draconstructor(Constructor):
 
             validator = partial(validator_f)
 
-        context = ShallowDict(merged(current_loader_context, node.context, MergeKey(raw='{<+}')))
+        context = ShallowDict(merged(current_loader_context, node.context, cached_merge_key('{<+}')))
         context['__DRACON_NODES'] = {
             i: Resolvable(node=n, ctor=self.copy()) for i, n in self.referenced_nodes.items()
         }

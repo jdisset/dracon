@@ -103,11 +103,17 @@ def metadata_dict_like(obj) -> bool:
     return isinstance(obj, MetadataDictLike)
 
 
+_DICT_METHODS = ('keys', 'values', 'items', '__getitem__', '__contains__', '__setitem__')
+
+
 def dict_like(obj) -> bool:
-    return all(
-        callable(getattr(obj, method, None))
-        for method in ('keys', 'values', 'items', '__getitem__', '__contains__', '__setitem__')
-    )
+    # fast path: most dict-like objects are dict or MutableMapping subclasses
+    if type(obj) is dict or isinstance(obj, MutableMapping):
+        return True
+    # fast reject: scalars and nodes that are never dict-like
+    if isinstance(obj, (str, bytes, int, float, bool, type(None))):
+        return False
+    return all(callable(getattr(obj, m, None)) for m in _DICT_METHODS)
 
 
 @runtime_checkable
@@ -147,14 +153,18 @@ class ListLike(Generic[E], metaclass=ListLikeMeta):
     def __iter__(self) -> Iterator[E]: ...
 
 
+_LIST_METHODS = ('__getitem__', '__add__', '__iter__', '__len__')
+
+
 def list_like(obj) -> bool:
+    # fast reject: strings and dicts are not list-like
+    if isinstance(obj, (str, bytes, dict, MutableMapping)):
+        return False
+    if isinstance(obj, (list, tuple)):
+        return True
     return (
-        all(
-            callable(getattr(obj, method, None))
-            for method in ('__getitem__', '__add__', '__iter__', '__len__')
-        )
+        all(callable(getattr(obj, m, None)) for m in _LIST_METHODS)
         and not dict_like(obj)
-        and not isinstance(obj, str)
     )
 
 
@@ -200,8 +210,13 @@ def clean_context_keys(context: DictLike) -> DictLike:
     """returns a new dict with leading '$' removed from keys."""
     if not context:
         return context
-    # fast path: if no keys start with '$', return as-is (avoids dict rebuild)
-    if not any(isinstance(k, str) and k.startswith('$') for k in context):
+    # fast path: scan for $ keys without generator/any() overhead
+    needs_clean = False
+    for k in context:
+        if k.__class__ is str and len(k) > 0 and k[0] == '$':
+            needs_clean = True
+            break
+    if not needs_clean:
         return context
     cleaned = {}
 

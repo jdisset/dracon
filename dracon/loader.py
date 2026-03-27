@@ -38,7 +38,7 @@ from dracon.utils import (
 )
 
 from dracon.interpolation import InterpolableNode, preprocess_references
-from dracon.merge import process_merges, add_to_context, merged, MergeKey
+from dracon.merge import process_merges, add_to_context, merged, MergeKey, cached_merge_key
 from dracon.instructions import process_instructions
 from dracon.deferred import DeferredNode, process_deferred
 from dracon.representer import DraconRepresenter
@@ -396,7 +396,7 @@ class DraconLoader:
         # trace is initialized inside post_process_composed (called by compose_from_include_str)
         # no need to re-init here
 
-        mkey = MergeKey(raw=merge_key)
+        mkey = cached_merge_key(merge_key)
 
         for layer_idx, next_path in enumerate(processed_paths[1:], 2):
             next_comp_res = compose_from_include_str(
@@ -428,7 +428,7 @@ class DraconLoader:
             A new CompositionResult that is the result of merging the two inputs.
         """
         if isinstance(merge_key, str):
-            merge_key = MergeKey(raw=merge_key)
+            merge_key = cached_merge_key(merge_key)
 
         comp2 = comp_res_2 if isinstance(comp_res_2, CompositionResult) else CompositionResult(root=comp_res_2)
         cres = comp_res_1.merged(comp2, merge_key)
@@ -480,7 +480,7 @@ class DraconLoader:
         comp = preprocess_references(comp)
         comp = process_deferred(comp, force_deferred_at=self.deferred_paths)  # type: ignore
         comp.walk_no_path(
-            callback=partial(add_to_context, self.context, merge_key=MergeKey(raw='{>~}[>~]'))
+            callback=partial(add_to_context, self.context, merge_key=cached_merge_key('{>~}[>~]'), skip_clean=True)
         )
 
         # record initial definitions after context propagation (so FILE_PATH is available)
@@ -548,7 +548,7 @@ class DraconLoader:
                     referenced_nodes[i] = deepcopy(n)
 
         self.referenced_nodes = ShallowDict(
-            merged(self.referenced_nodes, referenced_nodes, MergeKey(raw='{<~}[<~]'))
+            merged(self.referenced_nodes, referenced_nodes, cached_merge_key('{<~}[<~]'))
         )
         return comp_res
 

@@ -64,7 +64,8 @@ class CompositionResult(BaseModel):
     trace: Optional[CompositionTrace] = None
 
     def __deepcopy__(self, memo=None):
-        cr = CompositionResult(
+        # model_post_init will call make_map() since node_map is not passed (None)
+        return CompositionResult(
             root=deepcopy(self.root, memo),
             special_nodes={},
             anchor_paths=deepcopy(self.anchor_paths, memo),
@@ -72,8 +73,6 @@ class CompositionResult(BaseModel):
             default_vars=set(self.default_vars),
             trace=deepcopy(self.trace, memo) if self.trace is not None else None,
         )
-        cr.make_map()
-        return cr
 
     def __hash__(self):
         return hash(self.root)
@@ -295,10 +294,18 @@ def walk_node(node, callback, start_path=None):
             for v in node.value:
                 __walk_node_no_path(v)
 
+    _new = KeyPath.__new__
+    _KP = KeyPath
+
     def __walk_node(node, path):
         callback(node, path)
-        path = path.removed_mapping_key()
+        # defer removed_mapping_key — only needed for container nodes with children
         if isinstance(node, DraconMappingNode):
+            # strip mapping key marker before building child paths
+            if len(path.parts) >= 2 and path.parts[-2] is MAPPING_KEY:
+                parts = path.parts[:-2] + path.parts[-1:]
+            else:
+                parts = path.parts
             directive_count = {}
             for k_node, v_node in node.value:
                 if _is_directive_key(k_node):
@@ -308,11 +315,27 @@ def walk_node(node, callback, start_path=None):
                     path_key = f'__directive_{n}_{key_val}'
                 else:
                     path_key = k_node.value
-                __walk_node(k_node, path.with_added_parts(MAPPING_KEY, path_key))
-                __walk_node(v_node, path.with_added_parts(path_key))
+                kp = _new(_KP)
+                kp.parts = parts + [MAPPING_KEY, path_key]
+                kp.is_simple = False
+                kp._hash = None
+                __walk_node(k_node, kp)
+                vp = _new(_KP)
+                vp.parts = parts + [path_key]
+                vp.is_simple = False
+                vp._hash = None
+                __walk_node(v_node, vp)
         elif isinstance(node, DraconSequenceNode):
+            if len(path.parts) >= 2 and path.parts[-2] is MAPPING_KEY:
+                parts = path.parts[:-2] + path.parts[-1:]
+            else:
+                parts = path.parts
             for i, v in enumerate(node.value):
-                __walk_node(v, path.with_added_parts(str(i)))
+                vp = _new(_KP)
+                vp.parts = parts + [str(i)]
+                vp.is_simple = False
+                vp._hash = None
+                __walk_node(v, vp)
 
     if start_path is not None:
         __walk_node(node, start_path)

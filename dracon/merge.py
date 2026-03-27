@@ -84,7 +84,7 @@ def process_merges(comp_res):
                 )
 
             try:
-                merge_key = MergeKey(raw=key_node.merge_key_raw)
+                merge_key = cached_merge_key(key_node.merge_key_raw)
             except Exception as e:
                 raise CompositionError(
                     f"Invalid merge key '{key_node.merge_key_raw}': {e}",
@@ -271,6 +271,17 @@ class MergeKey(BaseModel):
 
 DEFAULT_ADD_TO_CONTEXT_MERGE_KEY = MergeKey(raw='<<{~<}[~<]')
 
+# cache parsed MergeKey instances — same raw string always produces same result
+_merge_key_cache: dict[str, MergeKey] = {}
+
+
+def cached_merge_key(raw: str) -> MergeKey:
+    mk = _merge_key_cache.get(raw)
+    if mk is None:
+        mk = MergeKey(raw=raw)
+        _merge_key_cache[raw] = mk
+    return mk
+
 
 def merged(existing: Any, new: Any, k: MergeKey = DEFAULT_ADD_TO_CONTEXT_MERGE_KEY) -> DictLike:
     from dracon.deferred import DeferredNode
@@ -334,11 +345,12 @@ def merged(existing: Any, new: Any, k: MergeKey = DEFAULT_ADD_TO_CONTEXT_MERGE_K
     return merge_value(existing, new)
 
 
-def add_to_context(new_context, existing_item, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
+def add_to_context(new_context, existing_item, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY, skip_clean=False):
     """
     Add context to the item context, if it exists.
     """
-    new_context = clean_context_keys(new_context)
+    if not skip_clean:
+        new_context = clean_context_keys(new_context)
 
     if hasattr(existing_item, 'context'):
         existing_item.context = context_add(existing_item.context, new_context, merge_key)
@@ -368,7 +380,7 @@ def context_add(existing, new, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
         # Context propagation is enabled with (<) - new context should win
         # Create a modified merge key that uses new priority for dicts
         mode_char = '+' if merge_key.dict_mode == MergeMode.APPEND else '~'
-        modified_key = MergeKey(raw=f"{{{mode_char}<}}")
+        modified_key = cached_merge_key(f"{{{mode_char}<}}")
         m = merged(existing, new, modified_key)
     else:
         # No context propagation - use the merge key as is

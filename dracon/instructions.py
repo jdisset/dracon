@@ -15,7 +15,7 @@ from dracon.utils import ShallowDict, values_equal
 from ruamel.yaml.nodes import Node
 from dracon.keypath import KeyPath, KeyPathToken, MAPPING_KEY
 from dracon.nodes import node_source
-from dracon.merge import merged, MergeKey, add_to_context
+from dracon.merge import merged, MergeKey, cached_merge_key, add_to_context
 from dracon.interpolation import evaluate_expression, InterpolableNode
 from dracon.deferred import DeferredNode
 from functools import partial
@@ -194,7 +194,7 @@ class SetDefault(Define):
         walk_node(
             node=parent_node,
             callback=partial(
-                add_to_context, {var_name: value}, merge_key=MergeKey(raw='<<{>~}[>~]')
+                add_to_context, {var_name: value}, merge_key=cached_merge_key('<<{>~}[>~]')
             ),
         )
 
@@ -305,7 +305,7 @@ class Each(Instruction):
             source_context=key_node.source_context,
         )
 
-        mkey = MergeKey(raw='{<~}[~<]')
+        mkey = cached_merge_key('{<~}[~<]')
 
         # Check if we're a single-key mapping inside a sequence (auto-splice case)
         in_sequence, grandparent, seq_idx = self._is_inside_sequence(comp_res, path)
@@ -353,7 +353,7 @@ class Each(Instruction):
                 all_results = []
 
                 for item in list_like:
-                    item_ctx = merged(key_node.context, {self.var_name: item}, MergeKey(raw='{<~}'))
+                    item_ctx = merged(key_node.context, {self.var_name: item}, cached_merge_key('{<~}'))
                     new_inner_vnode = deepcopy(inner_vnode)
                     new_inner_knode = deepcopy(inner_knode)
                     add_to_context(item_ctx, new_inner_knode, mkey)
@@ -402,7 +402,7 @@ class Each(Instruction):
                             new_parent.append((k, v))
             else:
                 for item in list_like:
-                    item_ctx = merged(key_node.context, {self.var_name: item}, MergeKey(raw='{<~}'))
+                    item_ctx = merged(key_node.context, {self.var_name: item}, cached_merge_key('{<~}'))
                     for knode, vnode in value_node.items():
                         new_vnode = deepcopy(vnode)
                         new_knode = deepcopy(knode)
@@ -550,7 +550,7 @@ class If(Instruction):
             from dracon.merge import merged, MergeKey
 
             eval_context = merged(
-                key_node.context or {}, loader.context or {}, MergeKey(raw='{<+}')
+                key_node.context or {}, loader.context or {}, cached_merge_key('{<+}')
             )
             result = evaluate_expression(
                 key_node.value,
