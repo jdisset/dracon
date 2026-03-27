@@ -23,12 +23,16 @@ loader = DraconLoader(
     context={"func": my_func},          # Available in ${...} and !Tags
     interpolation_engine='asteval',     # 'asteval' (safe) or 'eval' (unsafe)
     deferred_paths=['/secrets/**'],     # Force paths to be DeferredNodes
-    enable_shorthand_vars=True          # Allow $VAR alongside ${VAR}
+    enable_shorthand_vars=True,         # Allow $VAR alongside ${VAR}
+    trace=True,                         # Composition tracing (default: True)
 )
 cfg = loader.load("config.yaml")
 
 # 3. Composition Only (Inspect the graph before construction)
 comp_result = loader.compose("config.yaml") # Returns CompositionResult
+
+# 4. Merge two CompositionResults
+merged = loader.merge(comp_res_1, comp_res_2, merge_key="<<{<+}[<~]")
 ```
 
 ### 2.2. Return Types
@@ -123,7 +127,11 @@ Dracon extends the standard YAML merge key (`<<:`) to provide precise control ov
 - **Mode:** `~` (**Replace**, Default) or `+` (**Concatenate**).
 - **Priority:** `>` (**Existing First**, Default) or `<` (**New First**).
 
-### 4.3. Examples
+### 4.3. Context Propagation
+
+- `(<)` in the merge key propagates the source's context variables upward to the parent. Only works with `<` priority.
+
+### 4.4. Examples
 
 | Syntax     | Semantics  | Use Case                                                     |
 | :--------- | :--------- | :----------------------------------------------------------- |
@@ -140,13 +148,23 @@ Inject external content at the current node.
 
 ### 5.1. Schemes
 
-- **`file:`** (Default): Filesystem. Context adds `$DIR`, `$FILE`, `$FILE_STEM`.
-- **`pkg:`**: Python resources (`pkg:package_name:path/inside/package.yaml`).
+- **`file:`** (Default): Filesystem. Context adds `$DIR`, `$FILE`, `$FILE_STEM`, `$FILE_PATH`, `$FILE_EXT`, `$FILE_SIZE`, `$FILE_LOAD_TIME_UNIX`.
+- **`pkg:`**: Python resources (`pkg:package_name:path/inside/package.yaml`). Context adds `$PACKAGE_NAME`.
 - **`env:`**: Environment variable string.
 - **`var:`**: Dracon context variable (in-memory node).
+- **`raw:`**: Load file as plain text string (bypasses YAML parsing). `raw:/path/to/file.txt`.
+- **`rawpkg:`**: Load package resource as plain text. `rawpkg:package_name:file.txt`.
 - **Custom:** Register via `custom_loaders` in `DraconLoader`.
 
-### 5.2. Selectors (`@`)
+### 5.2. Optional Includes
+
+`!include?` is a soft include that silently produces nothing if the file is missing (instead of erroring):
+
+```yaml
+<<: !include? file:local_overrides.yaml  # no error if file doesn't exist
+```
+
+### 5.3. Selectors (`@`)
 
 Select a specific subtree from the target. Uses KeyPath syntax.
 
@@ -162,12 +180,33 @@ Expressions are strings enclosed in `${...}` (Runtime/Lazy) or `$(...)` (Parse-t
   - Example: `url: "http://${@/server.host}"`.
 - **`&path` (Node Copy)**: Retrieves the **raw YAML node** at composition time. Performs a **deep copy**.
   - Example: `new_obj: ${&/templates.base_obj}`.
+  - _Parameterized copy:_ `${&/template:var=value}` copies and rebinds context variables.
 
 ### 6.2. KeyPath Syntax
 
 Used in `@` references, `@` merges, include selectors, and API calls.
 
 - Separator: `.`. Root: `/`. Escape: `\.`. Wildcards: `*` (matching only).
+
+### 6.3. Default Expression Context
+
+These are available in all `${...}` expressions without explicit definition:
+
+| Function | Source |
+|----------|--------|
+| `getenv(name)` | `os.getenv` |
+| `getcwd()` | `os.getcwd` |
+| `listdir(path)` | `os.listdir` |
+| `join(a, b, ...)` | `os.path.join` |
+| `basename(path)` | `os.path.basename` |
+| `dirname(path)` | `os.path.dirname` |
+| `expanduser(path)` | `os.path.expanduser` |
+| `isfile(path)` | `os.path.isfile` |
+| `isdir(path)` | `os.path.isdir` |
+| `Path(...)` | `pathlib.Path` |
+| `now(fmt)` | `datetime.now().strftime(fmt)` |
+
+Additionally, file loaders inject `$DIR`, `$FILE`, `$FILE_PATH`, `$FILE_EXT`, `$FILE_SIZE`, `$FILE_LOAD_TIME_UNIX` for the current file.
 
 ## 7. Tags & Type Resolution
 
@@ -241,6 +280,9 @@ config = AppConfig.load("config.yaml")       # Load as dict (before validation)
 | `context_types` | List of types to add to context |
 | `deferred_paths` | Paths to keep as `DeferredNode` |
 | `auto_context` | Capture types from caller's namespace |
+| `config_files` | List of `ConfigFile(...)` for auto-discovery |
+| `sections` | List of `HelpSection(title, body)` for extra help content |
+| `epilog` | Footer text for help output |
 
 ### 9.3. Alternative: `make_program`
 
@@ -260,11 +302,28 @@ config, raw_args = program.parse_args()
 3.  **Context Vars (`++`):** Arguments starting with `++` (`++k=v`) define context variables.
 4.  **CLI Flags:** Direct overrides (`--env prod`, `--db.host localhost`).
 
-### 9.5. Advanced CLI Syntax
+### 9.5. Auto-Discovered Config Files
+
+Declare config files that are automatically loaded as the base layer (below `+file.yaml` and `--flag` overrides):
+
+```python
+@dracon_program(
+    config_files=[
+        ConfigFile("~/.myapp/config.yaml"),                    # home-dir defaults
+        ConfigFile(".myapp.yaml", search_parents=True),        # walk up from CWD
+        ConfigFile("required.yaml", required=True),            # error if missing
+        ConfigFile("db.yaml", selector="database.primary"),    # extract sub-key
+    ],
+)
+class AppConfig(BaseModel): ...
+```
+
+### 9.6. Advanced CLI Syntax
 
 - **Explicit File Load:** `--field +config.yaml`.
 - **Reference Load:** `--field +config.yaml@sub.key`.
 - **Collections:** `--tags a b c` (List), `--opts k=v a.b=c` (Dict).
+- **Trace:** `--trace-all` enables composition tracing (also via `DRACON_TRACE=1`).
 
 ## 10. Callable Configs (`make_callable`)
 
@@ -302,28 +361,92 @@ create_model = make_callable(cfg["model"])
 model = create_model(name="custom")
 ```
 
-## 11. Debugging & Tooling
+## 11. Composition Tracing
 
-- **`dracon-print <file>`**: Load and print composed configuration tree.
-- **`resolve_all_lazy(obj)`**: Recursively force evaluation.
-- **Env Vars:** `ENABLE_FTRACE=1` (trace), `ENABLE_SER_DEBUG=1` (pickle debug).
+Dracon tracks the provenance of every config value through composition. Tracing is **enabled by default** (`DraconLoader(trace=True)`).
+
+### 11.1. Accessing Traces
+
+```python
+# Via CompositionResult
+comp = loader.compose("config.yaml")
+comp.trace.format_path("db.port")       # single path history
+comp.trace.format_all()                  # full provenance tree
+comp.trace.format_path_rich("db.port")   # rich-formatted Panel
+comp.trace.format_all_rich()             # rich-formatted Table
+
+# Trace entries
+entries = comp.trace.get("db.port")      # list[TraceEntry]
+all_entries = comp.trace.all()           # dict[str, list[TraceEntry]]
+```
+
+### 11.2. ViaKind (Provenance Types)
+
+Each `TraceEntry` records a `via` field indicating how the value arrived:
+
+| ViaKind | Meaning |
+|---------|---------|
+| `definition` | Local key definition in the YAML tree |
+| `file_layer` | Loaded from a config file layer |
+| `include` | Included from another source |
+| `merge` | Merged from another value |
+| `if_branch` | Selected by an `!if` branch |
+| `each_expansion` | Created by an `!each` loop |
+| `cli_override` | Set via CLI argument |
+| `set_default` | Set by `!set_default` |
+| `define` | Set by `!define` |
+| `context_variable` | From a context variable |
+
+### 11.3. TraceEntry Structure
+
+```python
+@dataclass
+class TraceEntry:
+    value: Any                          # the value at this step
+    source: Optional[SourceContext]     # file/line/column
+    via: ViaKind                        # how it got here
+    detail: str                         # human-readable context
+    replaced: Optional[TraceEntry]      # previous value (auto-linked)
+```
+
+## 12. Debugging & Tooling
+
+- **`dracon-print <file>`**: Load and print composed configuration tree with filtering.
+- **`resolve_all_lazy(obj)`**: Recursively force evaluation of all `LazyInterpolable` values.
+- **`--trace-all`** (CLI flag): Enable composition tracing for `@dracon_program` apps.
+- **Env Vars:**
+  - `DRACON_TRACE=1`: Enable composition tracing (also enabled by default in DraconLoader).
+  - `ENABLE_FTRACE=1`: Enable function-level execution tracing (colored entry/exit/args).
+  - `ENABLE_SER_DEBUG=1`: Enable pickle/serialization debug output.
+
+### 12.1. Error Diagnostics
+
+Dracon provides rich, structured error messages with source context:
+
+- `DraconError`: Base error with file/line/column context and trace history.
+- `CompositionError`: Errors during the composition phase.
+- `EvaluationError`: Expression evaluation failures in `${...}`.
+- `UndefinedNameError`: Undefined variable in expression context.
+- `SchemaError`: Pydantic validation failures.
+
+All errors carry `SourceContext` (file, line, column, keypath, include trace chain) and auto-attach composition trace history when available.
 
 ---
 
-## 12. Real-World Architecture Example: "The Dynamic Skeleton"
+## 13. Real-World Architecture Example: "The Dynamic Skeleton"
 
 _Based on `biocompiler/biocomp-jobs/train`._
 
 This pattern separates the **topology** of the experiment (what files are involved) from the **hyperparameters** (what values are used) and the **runtime execution** (loggers, deferred jobs). It relies heavily on **dynamic includes** and **context injection**.
 
-### 12.1. The Components
+### 13.1. The Components
 
 1.  **The Skeleton (`start.yaml`)**: The entry point. It defines _logic_, not just data. It declares variables (`!set_default`) that the CLI is expected to fill, acting as an interface contract.
 2.  **The Payload (`training_sets/`)**: A library of composable configurations. Files here are often Unions or Differences of other files.
 3.  **The Logic (`training_configs/`)**: Hyperparameter presets (e.g., `regression-nolayerinfo.yaml`).
 4.  **The Python Bridge (`run_training.py`)**: The runtime environment that injects live objects (like `best_model`) into deferred nodes.
 
-### 12.2. `start.yaml`: The Hub
+### 13.2. `start.yaml`: The Hub
 
 The skeleton uses interpolation _inside_ include paths. This allows the CLI to swap entire dataset definitions by changing a single string variable.
 
@@ -352,7 +475,7 @@ loggers:
   - <<: !include file:$DIR/loggers/plot_inner_nodes
 ```
 
-### 12.3. Execution Example
+### 13.3. Execution Example
 
 The CLI command injects the "flesh" onto the "skeleton".
 
@@ -375,7 +498,7 @@ biocomp-train \
 4.  **Construction**: The `TrainingProgram` model (from `run_training.py`) validates the final structure.
 5.  **Runtime**: The Python script loops. At specific steps, it calls `construct(logger_node, context={'model': current_model})`, activating the deferred plotters defined in `start.yaml`.
 
-### 12.4. Why this pattern?
+### 13.4. Why this pattern?
 
 - **Combinatorial Power**: You can test $M$ datasets against $N$ hyperparameter sets with $M+N$ config files (plus one skeleton), rather than $M \times N$ files.
 - **Context Awareness**: Configs know where they live (`$DIR`). You can move the entire folder structure, and relative includes inside `basic_sets/*.yaml` still work.
