@@ -85,6 +85,35 @@ If only `<<:` is used without any `{}` or `[]` options and no `@target_path`, th
 - Dictionaries: Append/Recurse, Existing Wins.
 - Lists: Replace, Existing Wins.
 
+## Multiple Merge Keys
+
+You can use multiple merge keys at the same level in a single mapping. They are processed **in source order**, top to bottom.
+
+**Bare duplicates** -- identical `<<` keys work directly:
+
+```yaml
+config:
+  <<{<+}: !include file:base.yaml
+  <<{<+}: !include file:override.yaml
+  local_key: value
+```
+
+Both merges are applied sequentially. With `{<+}` (new wins), `override.yaml` values take precedence over `base.yaml` values.
+
+**Suffix disambiguation** -- for YAML purists who prefer traditionally unique keys, you can append an arbitrary suffix after the `<<` and any merge options. The suffix has no semantic meaning; it's purely for disambiguation:
+
+```yaml
+config:
+  <<{<+}base: !include file:base.yaml
+  <<{<+}override: !include file:override.yaml
+  local_key: value
+```
+
+This produces the same result as the bare duplicate version. The suffixes `base` and `override` are just labels for readability.
+
+!!! tip
+    Both approaches are equivalent. Bare duplicates are more concise; suffixed keys are more self-documenting and compatible with strict YAML linters.
+
 ## Examples
 
 | Syntax        | Dictionary Behavior                      | List Behavior                       | Description                                               |

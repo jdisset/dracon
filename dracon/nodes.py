@@ -279,6 +279,7 @@ class DraconMappingNode(MappingNode):
     def _recompute_map(self):
         self.map = {}  # key value -> index
         directive_count = {}
+        merge_count = 0
         for idx, (key, _) in enumerate(self.value):
             if not hasattr(key, 'value'):
                 raise ValueError(f'Key {key!r} has no value attribute')
@@ -287,6 +288,9 @@ class DraconMappingNode(MappingNode):
                 n = directive_count.get(key_val, 0)
                 directive_count[key_val] = n + 1
                 map_key = f'__directive_{n}_{key_val}'
+            elif isinstance(key, MergeNode):
+                map_key = f'__merge_{merge_count}_{key_val}'
+                merge_count += 1
             else:
                 map_key = key_val
             if map_key in self.map:

@@ -307,12 +307,16 @@ def walk_node(node, callback, start_path=None):
             else:
                 parts = path.parts
             directive_count = {}
+            merge_count = 0
             for k_node, v_node in node.value:
                 if _is_directive_key(k_node):
                     key_val = k_node.value
                     n = directive_count.get(key_val, 0)
                     directive_count[key_val] = n + 1
                     path_key = f'__directive_{n}_{key_val}'
+                elif isinstance(k_node, MergeNode):
+                    path_key = f'__merge_{merge_count}_{k_node.value}'
+                    merge_count += 1
                 else:
                     path_key = k_node.value
                 kp = _new(_KP)

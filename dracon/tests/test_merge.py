@@ -285,3 +285,92 @@ def test_sequential_merge_order_existing_wins(merge_order_files):
         "final_key": "final_value",  # Original key in main map
     }
     assert config == expected
+
+
+# ── bare duplicate merge keys ──────────────────────────────────────────────
+
+
+@pytest.fixture(scope="module")
+def bare_merge_files(tmp_path_factory):
+    tmp = tmp_path_factory.mktemp("bare_merge")
+    (tmp / "base.yaml").write_text("value: base\nlevel1:\n  nested: base_nested\n")
+    (tmp / "override1.yaml").write_text("value: override1\nlevel1:\n  nested: override1_nested\nnew_key1: val1\n")
+    (tmp / "override2.yaml").write_text("value: override2\nlevel1:\n  nested: override2_nested\nnew_key2: val2\n")
+    return tmp
+
+
+def test_bare_duplicate_merge_keys(bare_merge_files):
+    """Two bare <<{<+}: keys (identical key strings) should both be processed."""
+    p = bare_merge_files
+    main = p / "main.yaml"
+    main.write_text(
+        f"<<{{<+}}: !include file:{p / 'base.yaml'}\n"
+        f"<<{{<+}}: !include file:{p / 'override1.yaml'}\n"
+        f"final: done\n"
+    )
+    config = dr.load(main, raw_dict=True)
+    assert config == {
+        "value": "override1",
+        "level1": {"nested": "override1_nested"},
+        "new_key1": "val1",
+        "final": "done",
+    }
+
+
+def test_bare_duplicate_merge_keys_default(bare_merge_files):
+    """Two bare <<: keys with default merge semantics (existing wins)."""
+    p = bare_merge_files
+    main = p / "main_default.yaml"
+    main.write_text(
+        f"<<: !include file:{p / 'base.yaml'}\n"
+        f"<<: !include file:{p / 'override1.yaml'}\n"
+        f"final: done\n"
+    )
+    config = dr.load(main, raw_dict=True)
+    # default is {+>} (existing wins), so base values are kept for conflicts
+    assert config == {
+        "value": "base",
+        "level1": {"nested": "base_nested"},
+        "new_key1": "val1",
+        "final": "done",
+    }
+
+
+def test_bare_duplicate_merge_keys_ordering(bare_merge_files):
+    """Three bare <<{<+}: keys -- last one wins on conflicts."""
+    p = bare_merge_files
+    main = p / "main_three.yaml"
+    main.write_text(
+        f"<<{{<+}}: !include file:{p / 'base.yaml'}\n"
+        f"<<{{<+}}: !include file:{p / 'override1.yaml'}\n"
+        f"<<{{<+}}: !include file:{p / 'override2.yaml'}\n"
+        f"final: done\n"
+    )
+    config = dr.load(main, raw_dict=True)
+    assert config == {
+        "value": "override2",
+        "level1": {"nested": "override2_nested"},
+        "new_key1": "val1",
+        "new_key2": "val2",
+        "final": "done",
+    }
+
+
+def test_mixed_bare_and_suffixed_merge_keys(bare_merge_files):
+    """Bare <<{<+}: and suffixed <<{<+}extra: coexist in the same mapping."""
+    p = bare_merge_files
+    main = p / "main_mixed.yaml"
+    main.write_text(
+        f"<<{{<+}}: !include file:{p / 'base.yaml'}\n"
+        f"<<{{<+}}: !include file:{p / 'override1.yaml'}\n"
+        f"<<{{<+}}extra: !include file:{p / 'override2.yaml'}\n"
+        f"final: done\n"
+    )
+    config = dr.load(main, raw_dict=True)
+    assert config == {
+        "value": "override2",
+        "level1": {"nested": "override2_nested"},
+        "new_key1": "val1",
+        "new_key2": "val2",
+        "final": "done",
+    }

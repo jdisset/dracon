@@ -50,84 +50,89 @@ def process_merges(comp_res):
     any_merges = False
 
     while True:
-        # Find all merge nodes
+        # find all merge nodes (re-discover each iteration so paths are fresh
+        # after deletions that may renumber internal __merge_N_ keys)
         comp_res.find_special_nodes('merge', lambda n: isinstance(n, MergeNode))
         comp_res.sort_special_nodes('merge')
 
-        # Check if we found any merge nodes
         if not comp_res.special_nodes['merge']:
             break
 
         any_merges = True
 
-        for merge_path in comp_res.pop_all_special('merge'):
-            # Get value path (remove mapping key)
-            merge_path = merge_path.removed_mapping_key()
-            merge_node = merge_path.get_obj(comp_res.root)
-            parent_path = merge_path.copy().up()
-            node_key = merge_path[-1]
-            parent_node = parent_path.get_obj(comp_res.root)
+        # process one merge at a time then re-discover, matching the pattern
+        # used by process_instructions -- this avoids stale paths when bare
+        # duplicate merge keys (e.g. two `<<:`) share the same raw value and
+        # deleting one causes renumbering in _recompute_map()
+        merge_path = next(comp_res.pop_all_special('merge'))
 
-            if not dict_like(parent_node):
-                raise CompositionError(
-                    f"Parent of merge node must be a dictionary, got {type(parent_node).__name__}",
-                    context=node_source(merge_node),
-                )
+        # get value path (remove mapping key)
+        merge_path = merge_path.removed_mapping_key()
+        merge_node = merge_path.get_obj(comp_res.root)
+        parent_path = merge_path.copy().up()
+        node_key = merge_path[-1]
+        parent_node = parent_path.get_obj(comp_res.root)
 
-            if node_key not in parent_node:
-                raise CompositionError(f"Merge key '{node_key}' not found in parent node", context=node_source(merge_node))
-            key_node = parent_node.get_key(node_key)
-            if not isinstance(key_node, MergeNode):
-                raise CompositionError(
-                    f"Expected merge node, got {type(key_node).__name__} at key '{node_key}'",
-                    context=node_source(key_node),
-                )
+        if not dict_like(parent_node):
+            raise CompositionError(
+                f"Parent of merge node must be a dictionary, got {type(parent_node).__name__}",
+                context=node_source(merge_node),
+            )
 
-            try:
-                merge_key = cached_merge_key(key_node.merge_key_raw)
-            except Exception as e:
-                raise CompositionError(
-                    f"Invalid merge key '{key_node.merge_key_raw}': {e}",
-                    context=node_source(merge_node),
-                ) from e
+        if node_key not in parent_node:
+            raise CompositionError(f"Merge key '{node_key}' not found in parent node", context=node_source(merge_node))
+        key_node = parent_node.get_key(node_key)
+        if not isinstance(key_node, MergeNode):
+            raise CompositionError(
+                f"Expected merge node, got {type(key_node).__name__} at key '{node_key}'",
+                context=node_source(key_node),
+            )
 
-            del parent_node[node_key]
+        try:
+            merge_key = cached_merge_key(key_node.merge_key_raw)
+        except Exception as e:
+            raise CompositionError(
+                f"Invalid merge key '{key_node.merge_key_raw}': {e}",
+                context=node_source(merge_node),
+            ) from e
 
-            if merge_key.keypath:
-                parent_path = parent_path + KeyPath(merge_key.keypath)
+        del parent_node[node_key]
 
-            new_parent = parent_path.get_obj(comp_res.root)
-            new_parent = merged(new_parent, merge_node, merge_key)
-            if not isinstance(new_parent, Node):
-                raise CompositionError(f"Merge produced {type(new_parent).__name__} instead of a Node")
+        if merge_key.keypath:
+            parent_path = parent_path + KeyPath(merge_key.keypath)
 
-            comp_res.set_at(parent_path, new_parent)
+        new_parent = parent_path.get_obj(comp_res.root)
+        new_parent = merged(new_parent, merge_node, merge_key)
+        if not isinstance(new_parent, Node):
+            raise CompositionError(f"Merge produced {type(new_parent).__name__} instead of a Node")
 
-            # record merge trace
-            if comp_res.trace is not None:
-                from dracon.composition_trace import TraceEntry, keypath_to_dotted
-                priority_str = "new wins" if merge_key.dict_priority == MergePriority.NEW else "existing wins"
-                _detail = f"{merge_key.raw}: {priority_str}"
+        comp_res.set_at(parent_path, new_parent)
 
-                from dracon.loader import _get_node_source
+        # record merge trace
+        if comp_res.trace is not None:
+            from dracon.composition_trace import TraceEntry, keypath_to_dotted
+            priority_str = "new wins" if merge_key.dict_priority == MergePriority.NEW else "existing wins"
+            _detail = f"{merge_key.raw}: {priority_str}"
 
-                def _record_merge(node, path):
-                    if isinstance(node, (DraconMappingNode, DraconSequenceNode)):
-                        return
-                    path_str = keypath_to_dotted(path)
-                    if path_str:
-                        comp_res.trace.record(path_str, TraceEntry(
-                            value=getattr(node, 'value', None),
-                            source=_get_node_source(node),
-                            via="merge",
-                            detail=_detail,
-                        ))
+            from dracon.loader import _get_node_source
 
-                walk_node(new_parent, _record_merge, start_path=parent_path)
+            def _record_merge(node, path):
+                if isinstance(node, (DraconMappingNode, DraconSequenceNode)):
+                    return
+                path_str = keypath_to_dotted(path)
+                if path_str:
+                    comp_res.trace.record(path_str, TraceEntry(
+                        value=getattr(node, 'value', None),
+                        source=_get_node_source(node),
+                        via="merge",
+                        detail=_detail,
+                    ))
 
-            # propagate defined_vars to all nodes in new_parent if context propagation enabled
-            if merge_key.context_propagation and comp_res.defined_vars:
-                walk_node(new_parent, partial(add_to_context, comp_res.defined_vars))
+            walk_node(new_parent, _record_merge, start_path=parent_path)
+
+        # propagate defined_vars to all nodes in new_parent if context propagation enabled
+        if merge_key.context_propagation and comp_res.defined_vars:
+            walk_node(new_parent, partial(add_to_context, comp_res.defined_vars))
 
         comp_res.make_map()
 

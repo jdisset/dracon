@@ -62,4 +62,7 @@ config:
 
 If the merge keys were `<<{>+}` (existing wins), the result would be `{ setting: base_value, new: override_new, final: final_value }`.
 
+!!! tip "Suffix disambiguation"
+    The example above uses bare duplicate `<<{<+}:` keys. If you prefer each key to be visually distinct (or need to satisfy strict YAML linters), you can append an arbitrary suffix: `<<{<+}base:`, `<<{<+}override:`. The suffix is ignored by Dracon -- it's purely for readability.
+
 Understanding this composition process—includes resolving recursively, then merges applying according to specified strategies and order—is key to mastering Dracon's configuration layering capabilities.
