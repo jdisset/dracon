@@ -261,6 +261,42 @@ class Each(Instruction):
                 result.append(new_value_node)
         return result
 
+    @staticmethod
+    def _all_each_with_seq_values(parent_node):
+        """True iff every key in parent is an !each instruction with a sequence value."""
+        if len(parent_node) == 0:
+            return False
+        for k, v in parent_node.items():
+            tag = getattr(k, 'tag', None)
+            if not tag:
+                return False
+            inst = match_instruct(str(tag) if not isinstance(tag, str) else tag)
+            if not isinstance(inst, Each) or not isinstance(v, DraconSequenceNode):
+                return False
+        return True
+
+    def _expand_all_each_siblings(self, parent_node, current_key_node, current_list_like,
+                                  comp_res, path, loader, mkey):
+        """Batch-expand all !each siblings with sequence values, in mapping order."""
+        all_expanded = []
+        for k_node, v_node in parent_node.items():
+            if k_node is current_key_node:
+                each_inst = self
+                list_like = current_list_like
+            else:
+                tag_str = str(k_node.tag) if not isinstance(k_node.tag, str) else k_node.tag
+                each_inst = Each.match(tag_str)
+                list_like = evaluate_expression(
+                    k_node.value,
+                    current_path=path,
+                    root_obj=comp_res.root,
+                    engine=loader.interpolation_engine,
+                    context=k_node.context,
+                    source_context=k_node.source_context,
+                )
+            all_expanded.extend(each_inst._generate_sequence_items(list_like, v_node, k_node, mkey))
+        return all_expanded
+
     def _is_inside_sequence(self, comp_res, path):
         """Check if this !each's parent mapping is an item inside a sequence."""
         parent_path = path.parent
@@ -307,15 +343,14 @@ class Each(Instruction):
 
         mkey = cached_merge_key('{<~}[~<]')
 
-        # Check if we're a single-key mapping inside a sequence (auto-splice case)
         in_sequence, grandparent, seq_idx = self._is_inside_sequence(comp_res, path)
-        should_splice = (
-            in_sequence and len(parent_node) == 1 and isinstance(value_node, DraconSequenceNode)
-        )
+        all_each_seq = self._all_each_with_seq_values(parent_node)
 
-        if should_splice:
-            # Auto-splice: expand items directly into grandparent sequence
-            expanded = self._generate_sequence_items(list_like, value_node, key_node, mkey)
+        # auto-splice: all-!each-seq mapping inside a sequence
+        if in_sequence and all_each_seq:
+            expanded = self._expand_all_each_siblings(
+                parent_node, key_node, list_like, comp_res, path, loader, mkey
+            )
             new_value = grandparent.value[:seq_idx] + expanded + grandparent.value[seq_idx + 1 :]
             new_grandparent = DraconSequenceNode(
                 tag=grandparent.tag,
@@ -329,19 +364,25 @@ class Each(Instruction):
             comp_res.set_at(path.parent.parent, new_grandparent)
             return comp_res
 
-        # Standard case: remove original and build new parent
-        new_parent = parent_node.copy()
-        del new_parent[key_node.value]
-
         if isinstance(value_node, DraconSequenceNode):
-            if len(parent_node) != 1:
+            # all sibling keys must also be !each with sequence values
+            if not all_each_seq:
                 ctx = node_source(key_node)
-                raise CompositionError("!each with sequence value must be the only key in its mapping", context=ctx)
+                raise CompositionError(
+                    "!each with sequence value must be the only key in its mapping "
+                    "(or all keys must be !each with sequence values)",
+                    context=ctx,
+                )
+            expanded = self._expand_all_each_siblings(
+                parent_node, key_node, list_like, comp_res, path, loader, mkey
+            )
             new_parent = DraconSequenceNode.from_mapping(parent_node, empty=True)
-            for node in self._generate_sequence_items(list_like, value_node, key_node, mkey):
+            for node in expanded:
                 new_parent.append(node)
 
         elif isinstance(value_node, DraconMappingNode):
+            new_parent = parent_node.copy()
+            del new_parent[key_node.value]
             value_items = list(value_node.items())
             has_single_instruction_child = len(value_items) == 1 and match_instruct(
                 value_items[0][0].tag

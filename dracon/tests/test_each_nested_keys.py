@@ -225,3 +225,114 @@ result:
     assert "G_2" in config["result"]
     assert "G_inner_1" in config["result"]["G_1"]
     assert "G_inner_2" in config["result"]["G_2"]
+
+
+# ── Multiple !each in same mapping ──────────────────────────────────────────
+
+
+def test_multiple_each_seq_values():
+    """Multiple !each with sequence values in the same mapping produce a combined list."""
+    yaml = """
+!define items1: [a, b]
+!define items2: [x, y]
+
+result:
+  !each(i) ${items1}:
+    - val_${i}
+  !each(j) ${items2}:
+    - val_${j}
+"""
+    config = loads(yaml, raw_dict=True)
+    resolve_all_lazy(config)
+    assert config["result"] == ["val_a", "val_b", "val_x", "val_y"]
+
+
+def test_multiple_each_auto_splice():
+    """Multiple !each in same mapping auto-splice into parent sequence."""
+    yaml = """
+!define items1: [a, b]
+!define items2: [x, y]
+
+result:
+  - start
+  - !each(i) ${items1}:
+      - ${i}
+    !each(j) ${items2}:
+      - ${j}
+  - end
+"""
+    config = loads(yaml, raw_dict=True)
+    resolve_all_lazy(config)
+    assert config["result"] == ["start", "a", "b", "x", "y", "end"]
+
+
+def test_multiple_each_mixed_with_regular_key_raises():
+    """!each with seq value mixed with a regular key should raise."""
+    from dracon.diagnostics import CompositionError
+    yaml = """
+!define items: [1, 2]
+
+result:
+  !each(i) ${items}:
+    - val_${i}
+  regular_key: some_value
+"""
+    with pytest.raises(CompositionError, match="!each with sequence value"):
+        loads(yaml, raw_dict=True)
+
+
+def test_multiple_each_order_preserved():
+    """Items from multiple !each preserve mapping key order."""
+    yaml = """
+!define first: [1, 2, 3]
+!define second: [a, b]
+!define third: [x]
+
+result:
+  !each(i) ${first}:
+    - f_${i}
+  !each(j) ${second}:
+    - s_${j}
+  !each(k) ${third}:
+    - t_${k}
+"""
+    config = loads(yaml, raw_dict=True)
+    resolve_all_lazy(config)
+    assert config["result"] == ["f_1", "f_2", "f_3", "s_a", "s_b", "t_x"]
+
+
+def test_multiple_each_one_empty():
+    """Empty list in one !each produces no items; non-empty still works."""
+    yaml = """
+!define items1: []
+!define items2: [a, b]
+
+result:
+  !each(i) ${items1}:
+    - val_${i}
+  !each(j) ${items2}:
+    - val_${j}
+"""
+    config = loads(yaml, raw_dict=True)
+    resolve_all_lazy(config)
+    assert config["result"] == ["val_a", "val_b"]
+
+
+def test_multiple_each_mapping_values():
+    """Multiple !each with mapping values in the same mapping produce combined keys."""
+    yaml = """
+!define colors: [red, blue]
+!define sizes: [sm, lg]
+
+result:
+  !each(c) ${colors}:
+    color_${c}: ${c}
+  !each(s) ${sizes}:
+    size_${s}: ${s}
+"""
+    config = loads(yaml, raw_dict=True)
+    resolve_all_lazy(config)
+    assert config["result"]["color_red"] == "red"
+    assert config["result"]["color_blue"] == "blue"
+    assert config["result"]["size_sm"] == "sm"
+    assert config["result"]["size_lg"] == "lg"
