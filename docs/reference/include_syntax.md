@@ -74,6 +74,76 @@ Reference variables defined with `!define` or `!set_default`:
 config: !include var:user_type
 ```
 
+## Cascade Includes
+
+The `cascade:` loader finds **all** files matching a name by walking up the directory tree from the current working directory, then merges them in order -- root-level files form the base, closest files have the highest priority. This is the same pattern used by `.gitconfig`, `.editorconfig`, and similar tools.
+
+```yaml
+# Find and merge all config.yaml files from cwd up to /
+settings: !include cascade:config.yaml
+
+# With @keypath -- extract a subtree from the merged result
+db: !include cascade:app.yaml@database
+
+# Optional -- no error if nothing found
+overrides: !include? cascade:local.yaml
+```
+
+### Start Directory
+
+By default, the cascade walks up from the current working directory. Use `${DIR}` to start from the including file's directory instead:
+
+```yaml
+settings: !include cascade:${DIR}/config.yaml
+```
+
+The path is resolved identically to `file:` before the walk begins, so interpolation and `~` expansion work as expected.
+
+### Custom Merge Strategy
+
+By default, cascaded files are merged with `<<{<+}[<~]` (recursive dict append, new wins; list replace, new wins). You can override this by prefixing the path with a merge key spec:
+
+```yaml
+# Existing (root) values win for dicts
+settings: !include cascade:{>+}[>~]:config.yaml
+
+# Append lists instead of replacing them
+plugins: !include cascade:{<+}[+>]:plugins.yaml
+
+# Dict-only spec (list behavior stays default)
+settings: !include cascade:{<~}:config.yaml
+```
+
+The merge key spec uses the same `{dict}[list]` syntax as [merge keys](merge_syntax.md), without the `<<` prefix. A `:` separates it from the file path.
+
+### Extension Probing
+
+Like `file:`, the cascade loader probes extensions automatically. `cascade:config` will match `config`, `config.yaml`, or `config.yml` at each directory level (first match wins per level).
+
+### Example
+
+Given this directory structure:
+
+```
+/home/user/.tool.yaml          # theme: dark, fontsize: 12
+/home/user/projects/.tool.yaml # fontsize: 16, plugins: [lint]
+```
+
+And a config file at `/home/user/projects/myapp/main.yaml`:
+
+```yaml
+settings: !include cascade:.tool.yaml
+```
+
+Running from `/home/user/projects/myapp/`, the cascade finds both files. The result:
+
+```yaml
+settings:
+  theme: dark      # inherited from /home/user/
+  fontsize: 16     # overridden by /home/user/projects/
+  plugins: [lint]  # added by /home/user/projects/
+```
+
 ## Advanced Include Patterns
 
 ### Conditional Includes

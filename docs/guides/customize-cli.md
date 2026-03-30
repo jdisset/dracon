@@ -339,7 +339,7 @@ class Config(BaseModel):
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `path` | `str` | _(required)_ | File path (`~` is expanded) |
-| `search_parents` | `bool` | `False` | Walk up from CWD to find the file |
+| `search_parents` | `bool` | `False` | Walk up from CWD, cascade-merge all matching files |
 | `required` | `bool` | `False` | Error if not found |
 | `selector` | `str \| None` | `None` | Extract a subtree via `@keypath` |
 
@@ -354,21 +354,27 @@ Auto-discovered configs are prepended as `+file` args before any user-provided a
 3. Explicit CLI `+file.yaml`
 4. CLI `--flag` / `--nested.path` overrides
 
-### Parent Directory Search
+### Parent Directory Search (Cascade)
 
-With `search_parents=True`, dracon walks up from the current working directory toward root, looking for the first match. This lets projects drop a config file at any level:
+With `search_parents=True`, dracon walks up from the current working directory toward root, collects **all** matching files, and merges them with the closest file winning. This is the same behavior as `.gitconfig` or `.editorconfig` -- defaults from higher-level directories show through, while closer files override specific values.
 
 ```
-~/projects/myapp/.my-tool.yaml    ← picked up when CWD is anywhere under myapp/
-~/.my-tool/config.yaml            ← always available (no search, just expanduser)
+~/.my-tool.yaml                   ← user-wide defaults (lowest priority)
+~/projects/.my-tool.yaml          ← project defaults (medium priority)
+~/projects/myapp/.my-tool.yaml    ← app-specific overrides (highest priority)
 ```
+
+All three files are discovered and merged when CWD is anywhere under `myapp/`.
+
+This uses the [`cascade:` include loader](../reference/include_syntax.md#cascade-includes) under the hood.
 
 ### Example: Multi-Layer Tool Config
 
 ```yaml
-# ~/.my-tool/config.yaml — user defaults
+# ~/.my-tool.yaml — user defaults
 host: my-server.local
 port: 443
+theme: dark
 
 # ~/projects/dev-env/.my-tool.yaml — project override
 host: localhost
@@ -376,7 +382,10 @@ port: 8080
 ```
 
 ```bash
-my-tool status                           # uses both configs, project wins
+cd ~/projects/dev-env/subdir
+my-tool status
+# Result: host=localhost, port=8080, theme=dark (inherited from user defaults)
+
 my-tool --port 9999 status               # CLI flag wins over everything
 my-tool +/tmp/special.yaml status        # explicit +file layers between auto and flags
 ```

@@ -23,6 +23,7 @@ from dracon.loaders.pkg import read_from_pkg
 from dracon.loaders.env import read_from_env
 from dracon.loaders.var import read_from_var
 from dracon.loaders.raw import read_raw, read_rawpkg
+from dracon.loaders.cascade import read_cascade
 
 
 DEFAULT_LOADERS: Dict[str, Callable] = {
@@ -32,6 +33,7 @@ DEFAULT_LOADERS: Dict[str, Callable] = {
     'var': read_from_var,
     'raw': read_raw,
     'rawpkg': read_rawpkg,
+    'cascade': read_cascade,
 }
 
 
@@ -177,7 +179,7 @@ def compose_from_include_str(
             available = ', '.join(sorted(custom_loaders.keys()))
             raise CompositionError(f"Unknown loader '{loader_name}'. Available: {available}")
 
-        result, new_context = custom_loaders[loader_name](path, node=node)
+        result, new_context = custom_loaders[loader_name](path, node=node, draconloader=draconloader)
         file_context = new_context
         draconloader.update_context(new_context)
 

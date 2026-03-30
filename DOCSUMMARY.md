@@ -154,6 +154,7 @@ Inject external content at the current node.
 - **`var:`**: Dracon context variable (in-memory node).
 - **`raw:`**: Load file as plain text string (bypasses YAML parsing). `raw:/path/to/file.txt`.
 - **`rawpkg:`**: Load package resource as plain text. `rawpkg:package_name:file.txt`.
+- **`cascade:`**: Walk up from CWD (or resolved path) collecting all matching files, merge root-first (closest wins). `cascade:config.yaml`. Supports optional merge key prefix: `cascade:{>+}[>~]:config.yaml`. Use `${DIR}` to start from the current file's directory.
 - **Custom:** Register via `custom_loaders` in `DraconLoader`.
 
 ### 5.2. Optional Includes
@@ -310,7 +311,7 @@ Declare config files that are automatically loaded as the base layer (below `+fi
 @dracon_program(
     config_files=[
         ConfigFile("~/.myapp/config.yaml"),                    # home-dir defaults
-        ConfigFile(".myapp.yaml", search_parents=True),        # walk up from CWD
+        ConfigFile(".myapp.yaml", search_parents=True),        # cascade: walk up from CWD, merge all matches
         ConfigFile("required.yaml", required=True),            # error if missing
         ConfigFile("db.yaml", selector="database.primary"),    # extract sub-key
     ],

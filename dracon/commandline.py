@@ -110,19 +110,24 @@ class ConfigFile:
 
 def _discover_config_files(config_files: List[ConfigFile]) -> List[str]:
     """resolve ConfigFile declarations to actual file paths."""
+    from dracon.loaders.cascade import find_cascade_files
+
     found = []
     for cf in config_files:
         expanded = Path(cf.path).expanduser()
+        path_str = None
+
         if cf.search_parents:
             if expanded.is_absolute():
                 raise ValueError(
                     f"search_parents is meaningless with absolute path: {cf.path}"
                 )
-            resolved = _search_parents(expanded)
-        else:
-            resolved = expanded if expanded.exists() else None
-        if resolved:
-            path_str = str(resolved)
+            if find_cascade_files(cf.path):
+                path_str = f"cascade:{cf.path}"
+        elif expanded.exists():
+            path_str = str(expanded)
+
+        if path_str is not None:
             if cf.selector:
                 path_str += f"@{cf.selector}"
             found.append(path_str)
@@ -134,7 +139,8 @@ def _discover_config_files(config_files: List[ConfigFile]) -> List[str]:
 
 
 def _search_parents(relative: Path) -> Optional[Path]:
-    """walk up from CWD looking for a file matching `relative`."""
+    """walk up from CWD looking for a file matching `relative`.
+    Deprecated: use dracon.loaders.cascade.find_cascade_files instead."""
     current = Path.cwd()
     while True:
         candidate = current / relative

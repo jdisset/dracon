@@ -19,6 +19,7 @@ The `!include` directive fetches content from a specified source and inserts it 
 
 - **Copying (Anchors/Paths):** When including via anchors (`*anchor`) or relative/absolute paths (`/path`, `./sibling`), Dracon performs a **deep copy** of the target node structure. This prevents modifications in one part of the config from accidentally affecting another part that included the same anchor.
 - **Recursion:** Includes are processed recursively until no `!include` directives remain. Dracon detects and prevents circular includes.
+- **Cascade (`cascade:`):** The cascade loader is a special include scheme that walks up the directory tree from a starting point, collects _all_ matching files, and merges them in root-first order (furthest ancestor = base, closest = highest priority). Each discovered file goes through the full composition pipeline, so cascaded files can themselves contain includes, instructions, and merges. The cascade uses the same merge strategy as multi-file loading by default (`<<{<+}[<~]`), but this can be overridden inline: `!include cascade:{>+}[>~]:config.yaml`. This is the mechanism behind `ConfigFile(search_parents=True)` in `@dracon_program` -- see the [cascade reference](../reference/include_syntax.md#cascade-includes) for full syntax.
 
 ## Merging (`<<:`)
 

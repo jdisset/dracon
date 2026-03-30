@@ -2620,7 +2620,7 @@ def test_config_file_optional_missing():
 
 
 def test_config_file_search_parents(tmp_path):
-    """search_parents=True walks up from CWD to find the config."""
+    """search_parents=True emits cascade: include string for all matching files."""
     cfg_file = tmp_path / ".tool.yaml"
     cfg_file.write_text("host: found-it\n")
     child = tmp_path / "a" / "b" / "c"
@@ -2631,7 +2631,7 @@ def test_config_file_search_parents(tmp_path):
         os.chdir(str(child))
         found = _discover_config_files([ConfigFile(".tool.yaml", search_parents=True)])
         assert len(found) == 1
-        assert found[0] == str(cfg_file)
+        assert found[0] == "cascade:.tool.yaml"
     finally:
         os.chdir(old_cwd)
 

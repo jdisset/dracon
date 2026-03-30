@@ -138,4 +138,57 @@ env_settings: !include file:./config/settings_${ENV}.yaml
 versioned_api: !include pkg:my_api:v${API_VERSION}/config.yaml
 ```
 
+## Cascading Config Files
+
+When you have config files scattered at different directory levels (home dir, project root, subdirectory), use `cascade:` to find and layer them all automatically. This is the same pattern as `.gitconfig` or `.editorconfig` -- closer files override further ones.
+
+```yaml
+# main.yaml
+settings: !include cascade:defaults.yaml
+```
+
+If your directory tree looks like this:
+
+```
+~/.config/defaults.yaml         # base defaults
+~/projects/defaults.yaml        # project-level overrides
+~/projects/myapp/defaults.yaml  # app-specific overrides
+```
+
+Running from `~/projects/myapp/`, cascade finds all three files and merges them. The app-specific file wins for any conflicting keys, but values only defined at higher levels are preserved.
+
+### Starting from the Current File's Directory
+
+By default, cascade walks up from the current working directory. To walk up from the file that contains the `!include` directive:
+
+```yaml
+settings: !include cascade:${DIR}/settings.yaml
+```
+
+### Controlling How Lists Merge
+
+By default, lists from closer files **replace** lists from further files. To **append** instead, add a merge key prefix:
+
+```yaml
+# Append plugins from all levels instead of replacing
+plugins: !include cascade:{<+}[+>]:plugins.yaml
+```
+
+### Extracting a Subtree
+
+Combine cascade with `@keypath` to extract just the part you need from the merged result:
+
+```yaml
+# Only grab the database section from cascaded app configs
+database: !include cascade:app.yaml@database
+```
+
+### Optional Cascade
+
+Use `!include?` if it's fine for no matching files to exist:
+
+```yaml
+local_overrides: !include? cascade:local.yaml
+```
+
 See [Includes Concepts](../concepts/composition.md#includes) for more background.
