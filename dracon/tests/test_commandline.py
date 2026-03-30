@@ -2738,3 +2738,104 @@ def test_subcommand_nested_override_with_config_file(tmp_path):
     prog = make_program(CLI, name="tool")
     conf, _ = prog.parse_args(["run", f"+{config_file}", "--inner.value", "10"])
     assert conf.command.inner.value == 10
+
+
+# ---- raw=True Arg tests ----
+
+
+class RawArgConfig(BaseModel):
+    body: Annotated[str, Arg(positional=True, raw=True)]
+    name: str = "default"
+
+
+class RawKeywordConfig(BaseModel):
+    command: Annotated[str, Arg(raw=True, help="a command string")]
+    count: int = 1
+
+
+class MixedRawConfig(BaseModel):
+    body: Annotated[str, Arg(positional=True, raw=True)]
+    workers: Annotated[int, Arg(help="worker count")] = 4
+    tag: str = "default"
+
+
+@pytest.fixture
+def raw_positional_program():
+    return make_program(RawArgConfig, name="raw-test")
+
+
+@pytest.fixture
+def raw_keyword_program():
+    return make_program(RawKeywordConfig, name="raw-kw-test")
+
+
+@pytest.fixture
+def mixed_raw_program():
+    return make_program(MixedRawConfig, name="mixed-raw-test")
+
+
+def test_raw_positional_json_string(raw_positional_program):
+    """raw=True positional receives JSON string as-is, not parsed as dict."""
+    json_str = '{"type":"question","question":"merge?"}'
+    config, _ = raw_positional_program.parse_args([json_str])
+    assert config.body == json_str
+    assert isinstance(config.body, str)
+
+
+def test_raw_positional_dollar_sign(raw_positional_program):
+    """raw=True positional preserves dollar signs without interpolation."""
+    config, _ = raw_positional_program.parse_args(["echo $PATH"])
+    assert config.body == "echo $PATH"
+
+
+def test_raw_positional_colon_yaml(raw_positional_program):
+    """raw=True positional keeps 'key: value' as string, not parsed as YAML mapping."""
+    config, _ = raw_positional_program.parse_args(["key: value"])
+    assert config.body == "key: value"
+    assert isinstance(config.body, str)
+
+
+def test_raw_keyword_json_string(raw_keyword_program):
+    """raw=True keyword arg receives JSON string as-is."""
+    json_str = '{"cmd":"run","args":[1,2]}'
+    config, _ = raw_keyword_program.parse_args(["--command", json_str])
+    assert config.command == json_str
+
+
+def test_raw_keyword_dollar_sign(raw_keyword_program):
+    """raw=True keyword arg preserves dollar signs."""
+    config, _ = raw_keyword_program.parse_args(["--command", "echo $HOME"])
+    assert config.command == "echo $HOME"
+
+
+def test_raw_keyword_colon_yaml(raw_keyword_program):
+    """raw=True keyword arg keeps colon strings as-is."""
+    config, _ = raw_keyword_program.parse_args(["--command", "host: localhost"])
+    assert config.command == "host: localhost"
+
+
+def test_raw_keyword_equals_syntax(raw_keyword_program):
+    """raw=True works with --arg=value equals syntax."""
+    config, _ = raw_keyword_program.parse_args(["--command=echo $PATH"])
+    assert config.command == "echo $PATH"
+
+
+def test_raw_alongside_normal_fields(mixed_raw_program):
+    """raw=True field works alongside normal (non-raw) parsed fields."""
+    config, _ = mixed_raw_program.parse_args([
+        '{"data": true}', "--workers", "8", "--tag", "prod"
+    ])
+    assert config.body == '{"data": true}'
+    assert config.workers == 8
+    assert config.tag == "prod"
+
+
+def test_raw_false_still_parses_normally():
+    """raw=False (default) still goes through normal YAML composition."""
+    class NormalConfig(BaseModel):
+        count: Annotated[int, Arg(positional=True)]
+
+    prog = make_program(NormalConfig, name="normal-test")
+    config, _ = prog.parse_args(["42"])
+    assert config.count == 42
+    assert isinstance(config.count, int)

@@ -90,6 +90,7 @@ class Arg:
     resolvable: bool = False
     is_file: bool = False
     is_flag: Optional[bool] = None  # none means auto-detect
+    raw: bool = False  # skip YAML composition, pass value as-is
     auto_dash_alias: Optional[bool] = None  # none means overridden by the program
     subcommand: bool = False
 
@@ -185,6 +186,11 @@ def _get_arg_resolvable_status(arg_type: Optional[Type[Any]]) -> bool:
 
 class _RawStr(str):
     """Sentinel: a string value that should skip YAML composition."""
+    pass
+
+
+class _FullRawStr(str):
+    """Sentinel: raw=True field, skip all composition including interpolation."""
     pass
 
 
@@ -1158,7 +1164,9 @@ class Program(BaseModel, Generic[T]):
 
             # handle collection positional arguments
             collection_type = self._get_collection_type(arg_obj)
-            if collection_type == "list_like":
+            if arg_obj.raw:
+                raw_args[arg_obj.real_name] = _FullRawStr(argstr)
+            elif collection_type == "list_like":
                 value, i = self._collect_list_values(argv, i)
                 raw_args[arg_obj.real_name] = value
             elif collection_type == "dict_like":
@@ -1200,8 +1208,11 @@ class Program(BaseModel, Generic[T]):
                 if arg_obj and arg_obj.is_file and not v.startswith('+'):
                     v = f"+{v}"  # allow pkg:path etc. with is_file
 
+                # raw=True: full bypass of all composition
+                if arg_obj and arg_obj.raw:
+                    v = _FullRawStr(v)
                 # str-typed fields skip YAML composition — pass through raw
-                if arg_obj and _is_str_field(arg_obj.arg_type):
+                elif arg_obj and _is_str_field(arg_obj.arg_type):
                     v = _RawStr(v)
 
                 target_dict[real_name] = v
@@ -1426,6 +1437,8 @@ class Program(BaseModel, Generic[T]):
         from dracon.nodes import Node
 
         def compose_value(v, is_str=False):
+            if isinstance(v, _FullRawStr):
+                return loader.yaml.representer.represent_data(str(v))
             if isinstance(v, _RawStr):
                 is_str = True
                 v = str(v)
