@@ -17,9 +17,12 @@ MERGE_TAG = Tag(suffix='tag:yaml.org,2002:merge')
 STR_TAG = Tag(suffix='tag:yaml.org,2002:str')
 
 DRACON_UNSET_VALUE = '__!DRACON_UNSET_VALUE!__'
-DIRECTIVE_TAGS = frozenset({'!set_default', '!define'})
+DIRECTIVE_TAGS = frozenset({'!set_default', '!define', '!require', '!assert'})
 # Tag.suffix stores without '!' prefix; str tags include it
-_DIRECTIVE_SUFFIXES = frozenset({'!set_default', '!define', 'set_default', 'define'})
+_DIRECTIVE_SUFFIXES = frozenset({
+    '!set_default', '!define', '!require', '!assert',
+    'set_default', 'define', 'require', 'assert',
+})
 
 def _is_directive_key(key_node):
     """Check if a key node has a directive tag (consumed during instruction processing)."""

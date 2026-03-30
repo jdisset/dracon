@@ -39,7 +39,7 @@ from dracon.utils import (
 
 from dracon.interpolation import InterpolableNode, preprocess_references
 from dracon.merge import process_merges, add_to_context, merged, MergeKey, cached_merge_key
-from dracon.instructions import process_instructions
+from dracon.instructions import process_instructions, process_assertions, check_pending_requirements
 from dracon.deferred import DeferredNode, process_deferred
 from dracon.representer import DraconRepresenter
 from dracon.nodes import MergeNode, DraconMappingNode, DraconSequenceNode
@@ -489,6 +489,10 @@ class DraconLoader:
         comp = self.update_deferred_nodes(comp)
         comp = process_instructions(comp, self)
         comp = self.process_includes(comp)
+        # composition contracts: check pending !require, then run !assert
+        check_pending_requirements(comp, self)
+        comp = process_assertions(comp, self)
+        comp.make_map()
         comp, merge_changed = process_merges(comp)
         comp, delete_changed = delete_unset_nodes(comp)
         if merge_changed or delete_changed:

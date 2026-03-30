@@ -57,6 +57,23 @@ class Instruction:
     def process(self, comp_res: CompositionResult, path: KeyPath, loader) -> CompositionResult:
         raise NotImplementedError
 
+    def _unpack_mapping_key(self, comp_res, path, tag_name):
+        """Extract key_node, value_node, parent_node from a mapping-key instruction path.
+        Validates that path is a mapping key and parent is a DraconMappingNode."""
+        from dracon.diagnostics import CompositionError
+        if not path.is_mapping_key():
+            raise CompositionError(f"!{tag_name} must be a mapping key, got {path}")
+        key_node = path.get_obj(comp_res.root)
+        value_node = path.removed_mapping_key().get_obj(comp_res.root)
+        parent_node = path.parent.get_obj(comp_res.root)
+        if not isinstance(parent_node, DraconMappingNode):
+            ctx = node_source(key_node)
+            raise CompositionError(
+                f"!{tag_name} parent must be a mapping, got {type(parent_node).__name__}",
+                context=ctx,
+            )
+        return key_node, value_node, parent_node
+
 
 @ftrace()
 def process_instructions(comp_res: CompositionResult, loader) -> CompositionResult:
@@ -69,7 +86,9 @@ def process_instructions(comp_res: CompositionResult, loader) -> CompositionResu
         tag = getattr(node, 'tag', None)
         if tag:
             if (path not in seen_paths) and (inst := match_instruct(tag)):
-                instruction_nodes.append((inst, path))
+                # defer !assert to a separate pass after all other instructions
+                if not isinstance(inst, Assert):
+                    instruction_nodes.append((inst, path))
 
     def refresh_instruction_nodes():
         nonlocal instruction_nodes
@@ -88,6 +107,44 @@ def process_instructions(comp_res: CompositionResult, loader) -> CompositionResu
         refresh_instruction_nodes()
 
     return comp_res
+
+
+@ftrace()
+def process_assertions(comp_res: CompositionResult, loader) -> CompositionResult:
+    """Process all !assert instructions after other instructions have resolved."""
+    assert_nodes = []
+
+    def find_assert_nodes(node: Node, path: KeyPath):
+        tag = getattr(node, 'tag', None)
+        if tag:
+            inst = match_instruct(tag)
+            if isinstance(inst, Assert):
+                assert_nodes.append((inst, path))
+
+    comp_res.make_map()
+    comp_res.walk(find_assert_nodes)
+    assert_nodes = sorted(assert_nodes, key=lambda x: len(x[1]))
+
+    for inst, path in assert_nodes:
+        comp_res = inst.process(comp_res, path.copy(), loader)
+
+    return comp_res
+
+
+def check_pending_requirements(comp_res: CompositionResult, loader) -> None:
+    """Raise CompositionError for any unsatisfied !require vars."""
+    from dracon.diagnostics import CompositionError
+    unsatisfied = [
+        (var, hint, ctx)
+        for var, hint, ctx in comp_res.pending_requirements
+        if var not in loader.context and var not in comp_res.defined_vars
+    ]
+    if unsatisfied:
+        lines = []
+        for var, hint, ctx in unsatisfied:
+            loc = f"  required by: {ctx}" if ctx else ""
+            lines.append(f"required variable '{var}' not provided\n  hint: {hint}\n{loc}")
+        raise CompositionError("\n".join(lines))
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
@@ -114,19 +171,9 @@ class Define(Instruction):
 
     def get_name_and_value(self, comp_res, path, loader):
         from dracon.diagnostics import CompositionError
-        if not path.is_mapping_key():
-            raise CompositionError(
-                f"!{self.__class__.__name__.lower()} must be a mapping key, got {path}"
-            )
-        key_node = path.get_obj(comp_res.root)
-        value_node = path.removed_mapping_key().get_obj(comp_res.root)
-        parent_node = path.parent.get_obj(comp_res.root)
-        if not isinstance(parent_node, DraconMappingNode):
-            ctx = node_source(key_node)
-            raise CompositionError(
-                f"!{self.__class__.__name__.lower()} parent must be a mapping, got {type(parent_node).__name__}",
-                context=ctx,
-            )
+        key_node, value_node, parent_node = self._unpack_mapping_key(
+            comp_res, path, self.__class__.__name__.lower()
+        )
 
         if isinstance(value_node, InterpolableNode):
             value = evaluate_expression(
@@ -315,16 +362,7 @@ class Each(Instruction):
     @ftrace(inputs=False, watch=[])
     def process(self, comp_res: CompositionResult, path: KeyPath, loader):
         from dracon.diagnostics import CompositionError
-        if not path.is_mapping_key():
-            raise CompositionError(f"!each must be a mapping key, got {path}")
-
-        key_node = path.get_obj(comp_res.root)
-        value_node = path.removed_mapping_key().get_obj(comp_res.root)
-        parent_node = path.parent.get_obj(comp_res.root)
-
-        if not isinstance(parent_node, DraconMappingNode):
-            ctx = node_source(key_node)
-            raise CompositionError(f"!each parent must be a mapping, got {type(parent_node).__name__}", context=ctx)
+        key_node, value_node, parent_node = self._unpack_mapping_key(comp_res, path, 'each')
         if not isinstance(key_node, InterpolableNode):
             ctx = node_source(key_node)
             raise CompositionError(
@@ -635,8 +673,106 @@ class If(Instruction):
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
+## {{{                         --     require     --
 
-AVAILABLE_INSTRUCTIONS = [SetDefault, Define, Each, If]
+
+class Require(Instruction):
+    """
+    `!require var_name : "hint message"`
+
+    Declares that var_name must be provided by some outer scope (define, set_default, CLI ++).
+    If not satisfied by end of composition, raises CompositionError with the hint.
+    Removed from the final tree (pure validation).
+    """
+
+    @staticmethod
+    def match(value: Optional[str]) -> Optional['Require']:
+        if not value:
+            return None
+        if value == '!require':
+            return Require()
+        return None
+
+    @ftrace(watch=[])
+    def process(self, comp_res: CompositionResult, path: KeyPath, loader):
+        from dracon.diagnostics import CompositionError
+        key_node, value_node, parent_node = self._unpack_mapping_key(comp_res, path, 'require')
+
+        var_name = key_node.value
+        if not var_name.isidentifier():
+            ctx = node_source(key_node)
+            raise CompositionError(
+                f"Invalid variable name '{var_name}' in !require. Must be a valid Python identifier.",
+                context=ctx,
+            )
+
+        hint = value_node.value if hasattr(value_node, 'value') else str(value_node)
+        del parent_node[str(path[-1])]
+
+        if var_name in loader.context or var_name in comp_res.defined_vars:
+            return comp_res
+
+        ctx = node_source(key_node)
+        comp_res.pending_requirements.append((var_name, hint, ctx))
+        return comp_res
+
+
+##────────────────────────────────────────────────────────────────────────────}}}
+## {{{                          --     assert     --
+
+
+class Assert(Instruction):
+    """
+    `!assert ${expr} : "message"`
+
+    Validates an invariant on the composed tree. Evaluates the key expression;
+    if falsy, raises CompositionError with the message. Removed from the final tree.
+    Runs after all other instructions (separate pass).
+    """
+
+    @staticmethod
+    def match(value: Optional[str]) -> Optional['Assert']:
+        if not value:
+            return None
+        if value == '!assert':
+            return Assert()
+        return None
+
+    @ftrace(watch=[])
+    def process(self, comp_res: CompositionResult, path: KeyPath, loader):
+        from dracon.diagnostics import CompositionError
+        key_node, value_node, parent_node = self._unpack_mapping_key(comp_res, path, 'assert')
+
+        msg = value_node.value if hasattr(value_node, 'value') else str(value_node)
+
+        # evaluate condition expression
+        if isinstance(key_node, InterpolableNode):
+            eval_context = merged(
+                key_node.context or {}, loader.context or {}, cached_merge_key('{<+}')
+            )
+            result = evaluate_expression(
+                key_node.value,
+                current_path=path,
+                root_obj=comp_res.root,
+                engine=loader.interpolation_engine,
+                context=eval_context,
+            )
+            condition = bool(result)
+        else:
+            condition = as_bool(key_node.value)
+
+        del parent_node[str(path[-1])]
+
+        if not condition:
+            ctx = node_source(key_node)
+            raise CompositionError(f"assertion failed: {msg}", context=ctx)
+
+        return comp_res
+
+
+##────────────────────────────────────────────────────────────────────────────}}}
+
+AVAILABLE_INSTRUCTIONS = [SetDefault, Define, Each, If, Require, Assert]
 
 
 def match_instruct(value) -> Optional[Instruction]:

@@ -61,6 +61,7 @@ class CompositionResult(BaseModel):
     node_map: Optional[dict[KeyPath, Node]] = None
     defined_vars: dict[str, Any] = {}
     default_vars: set[str] = set()  # vars set via !set_default (soft; overridable by !define)
+    pending_requirements: list[tuple[str, str, Any]] = []  # (var_name, hint, source_context)
     trace: Optional[CompositionTrace] = None
 
     def __deepcopy__(self, memo=None):
@@ -71,6 +72,7 @@ class CompositionResult(BaseModel):
             anchor_paths=deepcopy(self.anchor_paths, memo),
             defined_vars=deepcopy(self.defined_vars, memo),
             default_vars=set(self.default_vars),
+            pending_requirements=list(self.pending_requirements),
             trace=deepcopy(self.trace, memo) if self.trace is not None else None,
         )
 
