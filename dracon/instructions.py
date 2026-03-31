@@ -49,6 +49,29 @@ def evaluate_nested_mapping_keys(node, engine, context):
             evaluate_nested_mapping_keys(item, engine, context)
 
 
+def unpack_mapping_key(
+    comp_res: CompositionResult, path: KeyPath, tag_name: str
+) -> tuple:
+    """Extract key_node, value_node, parent_node from a mapping-key instruction path.
+
+    Validates that path is a mapping key and parent is a DraconMappingNode.
+    Used by instruction handlers that operate on `!tag key: value` patterns.
+    """
+    from dracon.diagnostics import CompositionError
+    if not path.is_mapping_key():
+        raise CompositionError(f"!{tag_name} must be a mapping key, got {path}")
+    key_node = path.get_obj(comp_res.root)
+    value_node = path.removed_mapping_key().get_obj(comp_res.root)
+    parent_node = path.parent.get_obj(comp_res.root)
+    if not isinstance(parent_node, DraconMappingNode):
+        ctx = node_source(key_node)
+        raise CompositionError(
+            f"!{tag_name} parent must be a mapping, got {type(parent_node).__name__}",
+            context=ctx,
+        )
+    return key_node, value_node, parent_node
+
+
 class Instruction:
     deferred: bool = False  # if True, processed in the assertion pass instead
 
@@ -58,23 +81,6 @@ class Instruction:
 
     def process(self, comp_res: CompositionResult, path: KeyPath, loader) -> CompositionResult:
         raise NotImplementedError
-
-    def _unpack_mapping_key(self, comp_res, path, tag_name):
-        """Extract key_node, value_node, parent_node from a mapping-key instruction path.
-        Validates that path is a mapping key and parent is a DraconMappingNode."""
-        from dracon.diagnostics import CompositionError
-        if not path.is_mapping_key():
-            raise CompositionError(f"!{tag_name} must be a mapping key, got {path}")
-        key_node = path.get_obj(comp_res.root)
-        value_node = path.removed_mapping_key().get_obj(comp_res.root)
-        parent_node = path.parent.get_obj(comp_res.root)
-        if not isinstance(parent_node, DraconMappingNode):
-            ctx = node_source(key_node)
-            raise CompositionError(
-                f"!{tag_name} parent must be a mapping, got {type(parent_node).__name__}",
-                context=ctx,
-            )
-        return key_node, value_node, parent_node
 
 
 @ftrace()
@@ -173,7 +179,7 @@ class Define(Instruction):
 
     def get_name_and_value(self, comp_res, path, loader):
         from dracon.diagnostics import CompositionError
-        key_node, value_node, parent_node = self._unpack_mapping_key(
+        key_node, value_node, parent_node = unpack_mapping_key(
             comp_res, path, self.__class__.__name__.lower()
         )
 
@@ -369,7 +375,7 @@ class Each(Instruction):
     @ftrace(inputs=False, watch=[])
     def process(self, comp_res: CompositionResult, path: KeyPath, loader):
         from dracon.diagnostics import CompositionError
-        key_node, value_node, parent_node = self._unpack_mapping_key(comp_res, path, 'each')
+        key_node, value_node, parent_node = unpack_mapping_key(comp_res, path, 'each')
         if not isinstance(key_node, InterpolableNode):
             ctx = node_source(key_node)
             raise CompositionError(
@@ -703,7 +709,7 @@ class Require(Instruction):
     @ftrace(watch=[])
     def process(self, comp_res: CompositionResult, path: KeyPath, loader):
         from dracon.diagnostics import CompositionError
-        key_node, value_node, parent_node = self._unpack_mapping_key(comp_res, path, 'require')
+        key_node, value_node, parent_node = unpack_mapping_key(comp_res, path, 'require')
 
         var_name = key_node.value
         if not var_name.isidentifier():
@@ -749,7 +755,7 @@ class Assert(Instruction):
     @ftrace(watch=[])
     def process(self, comp_res: CompositionResult, path: KeyPath, loader):
         from dracon.diagnostics import CompositionError
-        key_node, value_node, parent_node = self._unpack_mapping_key(comp_res, path, 'assert')
+        key_node, value_node, parent_node = unpack_mapping_key(comp_res, path, 'assert')
 
         msg = value_node.value if hasattr(value_node, 'value') else str(value_node)
 
