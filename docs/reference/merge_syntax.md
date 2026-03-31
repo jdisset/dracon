@@ -3,7 +3,28 @@
 !!! abstract
 Dracon extends the standard YAML merge key (`<<:`) to provide fine-grained control over how dictionaries (mappings) and lists (sequences) are combined during configuration composition.
 
-## Syntax
+## Common Patterns
+
+Most use cases need one of these three:
+
+| Intent | Syntax | Dicts | Lists |
+| :--- | :--- | :--- | :--- |
+| **Use as defaults** -- pull in a base config, your local values take priority | `<<:` | deep merge, local wins | keep local |
+| **Apply overrides** -- incoming source should take priority over your values | `<<{<+}[<~]:` | deep merge, incoming wins | use incoming |
+| **Replace wholesale** -- swap in the source content entirely, no deep merging | `<<{~<}[~<]:` | shallow replace, incoming wins | use incoming |
+
+Less common but useful:
+
+| Intent | Syntax | Dicts | Lists |
+| :--- | :--- | :--- | :--- |
+| Defaults + concatenate lists | `<<[+>]:` | deep merge, local wins | concatenate (local first) |
+| Overrides + concatenate lists | `<<{<+}[+<]:` | deep merge, incoming wins | concatenate (incoming first) |
+| Import `!define` variables into scope | `<<(<):` | deep merge, local wins | keep local |
+| Merge into a sub-key (override by default) | `<<@path.to.key:` | deep merge, incoming wins | use incoming |
+
+For anything beyond these, compose the options using the full syntax below.
+
+## Full Syntax
 
 The extended merge key follows the pattern:
 
@@ -114,17 +135,21 @@ This produces the same result as the bare duplicate version. The suffixes `base`
 !!! tip
     Both approaches are equivalent. Bare duplicates are more concise; suffixed keys are more self-documenting and compatible with strict YAML linters.
 
-## Examples
+## All Combinations at a Glance
 
-| Syntax        | Dictionary Behavior                      | List Behavior                       | Description                                               |
-| :------------ | :--------------------------------------- | :---------------------------------- | :-------------------------------------------------------- |
-| `<<:`         | Append/Recurse, Existing Wins (`{+>}`)   | Replace, Existing Wins (`[~>]`)     | Default merge.                                            |
-| `<<{<+}:`     | Append/Recurse, New Wins                 | Replace, Existing Wins (`[~>]`)     | Common override pattern (new file wins dict keys)         |
-| `<<[+>]:`     | Append/Recurse, Existing Wins (`{+>}`)   | Concatenate, Existing first         | Append new list items to existing list                    |
-| `<<[+<]:`     | Append/Recurse, Existing Wins (`{+>}`)   | Concatenate, **New** first          | Prepend new list items to existing list                   |
-| `<<{~<}[~>]:` | Replace, New Wins                        | Replace, Existing Wins              | Dict values fully replaced (new wins), list kept existing |
-| `<<@target:`  | Append/Recurse, New Wins (`{+<}`)        | Replace, New Wins (`[~<]`)          | Default merge on specified target subkey (new wins)       |
-| `<<(<):`      | Append/Recurse, Existing Wins (`{+>}`)   | Replace, Existing Wins (`[~>]`)     | Default merge + propagate `!define` vars to parent scope  |
+The two key decisions are **priority** (who wins on conflict) and **mode** (deep merge vs replace for dicts, concatenate vs replace for lists). Here's every practical combination:
 
-!!! note
-The order of `{}`, `[]`, and `()` does not matter (e.g., `<<{+<}[+>](<)` is the same as `<<(<)[+>]{+<}`).
+| Syntax | Dict Priority | Dict Mode | List Priority | List Mode |
+| :--- | :--- | :--- | :--- | :--- |
+| `<<:` | existing wins (`>`) | recurse (`+`) | existing wins (`>`) | replace (`~`) |
+| `<<{<+}:` | incoming wins (`<`) | recurse (`+`) | existing wins (`>`) | replace (`~`) |
+| `<<{<+}[<~]:` | incoming wins (`<`) | recurse (`+`) | incoming wins (`<`) | replace (`~`) |
+| `<<{~<}[~<]:` | incoming wins (`<`) | shallow (`~`) | incoming wins (`<`) | replace (`~`) |
+| `<<[+>]:` | existing wins (`>`) | recurse (`+`) | existing wins (`>`) | concat (`+`) |
+| `<<[+<]:` | existing wins (`>`) | recurse (`+`) | incoming wins (`<`) | concat (`+`) |
+| `<<{<+}[+<]:` | incoming wins (`<`) | recurse (`+`) | incoming wins (`<`) | concat (`+`) |
+| `<<(<):` | existing wins (`>`) | recurse (`+`) | existing wins (`>`) | replace (`~`) |
+| `<<@target:` | incoming wins (`<`) | recurse (`+`) | incoming wins (`<`) | replace (`~`) |
+
+!!! tip
+    The order of `{}`, `[]`, and `()` does not matter (e.g., `<<{+<}[+>](<)` is the same as `<<(<)[+>]{+<}`).

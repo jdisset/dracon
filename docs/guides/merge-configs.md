@@ -2,6 +2,22 @@
 
 Dracon excels at layering configurations, applying overrides, and combining settings from multiple sources. This is primarily achieved through the extended YAML merge key (`<<:`).
 
+## Quick Reference
+
+Pick the pattern that matches your intent:
+
+| I want to... | Syntax | Example |
+| :--- | :--- | :--- |
+| Pull in defaults (my values win) | `<<:` | `<<: !include file:base.yaml` |
+| Apply overrides (incoming wins) | `<<{<+}[<~]:` | `<<{<+}[<~]: !include file:prod.yaml` |
+| Replace entirely (no deep merge) | `<<{~<}[~<]:` | `<<{~<}[~<]: !include file:generated.yaml` |
+| Defaults + concatenate lists | `<<[+>]:` | `<<[+>]: !include file:plugins.yaml` |
+| Override + concatenate lists | `<<{<+}[+<]:` | `<<{<+}[+<]: !include file:extra.yaml` |
+| Import `!define` variables | `<<(<):` | `<<(<): !include file:constants.yaml` |
+| Merge into a sub-key | `<<@path:` | `<<@app.db: !include file:db.yaml` |
+
+See the [Merge Key Reference](../reference/merge_syntax.md) for the full syntax and all options.
+
 ## Basic Merging (Multiple Files)
 
 When loading multiple files with `dracon.load`, they are merged sequentially.
