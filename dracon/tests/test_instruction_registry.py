@@ -1,10 +1,12 @@
 # tests for the extensible instruction registry (refactor 06)
+# and node copy/mixin correctness (refactor 05)
 import pytest
 from dracon.instructions import (
     Instruction,
     INSTRUCTION_REGISTRY,
     register_instruction,
     match_instruct,
+    unpack_mapping_key,
     Define,
     SetDefault,
     Each,
@@ -12,6 +14,7 @@ from dracon.instructions import (
     Require,
     Assert,
 )
+from dracon.nodes import IncludeNode, SourceContextMixin
 from dracon.loader import DraconLoader
 import dracon
 
@@ -135,3 +138,38 @@ class TestPublicAPI:
 
     def test_instruction_exported(self):
         assert hasattr(dracon, 'Instruction')
+
+    def test_unpack_mapping_key_exported(self):
+        assert hasattr(dracon, 'unpack_mapping_key')
+
+
+class TestIncludeNodeCopy:
+    """IncludeNode.copy() preserves source_context and optional flag."""
+
+    def test_copy_preserves_source_context(self):
+        node = IncludeNode(
+            value='file:test.yaml',
+            context={'FILE_NAME': 'test.yaml'},
+            optional=True,
+            source_context='fake_ctx',
+        )
+        copied = node.copy()
+        assert copied._source_context == 'fake_ctx'
+        assert copied.optional is True
+        assert copied.value == 'file:test.yaml'
+        assert copied.context is not node.context  # separate dict
+
+    def test_copy_without_source_context(self):
+        node = IncludeNode(value='file:a.yaml', context={})
+        copied = node.copy()
+        assert copied._source_context is None
+        assert copied.optional is False
+
+
+class TestSourceContextMixin:
+    """SourceContextMixin provides lazy source_context on all node types."""
+
+    def test_mixin_in_mro(self):
+        from dracon.nodes import DraconScalarNode, DraconMappingNode, DraconSequenceNode
+        for cls in (DraconScalarNode, DraconMappingNode, DraconSequenceNode):
+            assert issubclass(cls, SourceContextMixin)
