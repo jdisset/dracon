@@ -30,14 +30,14 @@ workers: ${max_workers}
 database: ${database_config}
 ```
 
-### `!set_default` - Conditional Definition
+### `!set_default` / `!define?` - Conditional Definition
 
-Set variables only if they don't already exist:
+Set variables only if they don't already exist. `!define?` is an alias for `!set_default` -- use whichever reads better in context:
 
 ```yaml
 # set default only if not already defined
 !set_default environment: development
-!set_default log_level: INFO
+!define? log_level: INFO              # same as !set_default
 
 # later definitions won't override
 !set_default environment: production  # ignored if already set
@@ -465,3 +465,33 @@ See the [templates guide](../guides/use-templates.md) for more patterns.
     then:
       ${feature}_config: !include file:features/${feature}.yaml
 ```
+
+## Custom Instructions
+
+Dracon's instruction system is extensible. You can register your own instruction tags that run during composition.
+
+### `register_instruction()`
+
+Register a custom instruction class:
+
+```python
+from dracon import Instruction, register_instruction
+
+class MyTag(Instruction):
+    """Custom instruction that runs during composition."""
+
+    @staticmethod
+    def match(value: str) -> bool:
+        return value == '!my_tag'
+
+    @staticmethod
+    def process(key_node, value_node, **kwargs):
+        # manipulate the node tree during composition
+        ...
+
+register_instruction('!my_tag', MyTag)
+```
+
+The `!` prefix is optional when calling `register_instruction` -- it's added automatically if missing. The class must subclass `Instruction` and implement `match()` and `process()`.
+
+Set `deferred = True` on your class to run the instruction after all other instructions (like `!assert` does).
