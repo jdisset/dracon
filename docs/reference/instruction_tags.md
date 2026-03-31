@@ -30,6 +30,35 @@ workers: ${max_workers}
 database: ${database_config}
 ```
 
+### `!define:type` - Typed Variable Definition
+
+Force a specific type on the defined value. Useful when YAML's implicit type inference doesn't match what you want -- for example, defining `1` as a float or `42` as a string:
+
+```yaml
+!define:float learning_rate: 1   # float 1.0, not int 1
+!define:int batch_size: 32.0     # int 32, not float
+!define:str zipcode: 02134       # string "2134", not int
+!define:bool verbose: 1          # True, not int 1
+```
+
+Supported types: `int`, `float`, `str`, `bool`, `list`, `dict`.
+
+Works with expressions too:
+
+```yaml
+!define:float total: ${2 + 3}    # float 5.0
+```
+
+!!! note
+    Plain `!define` already preserves YAML's natural type inference -- `1.2` is a float, `42` is an int, `true` is a bool. You only need `!define:type` when you want to **override** that inference.
+
+The typed syntax also works with `!define?` and `!set_default`:
+
+```yaml
+!define?:float default_rate: 1   # soft define, float 1.0
+!set_default:int retries: 3.0    # soft define, int 3
+```
+
 ### `!set_default` / `!define?` - Conditional Definition
 
 Set variables only if they don't already exist. `!define?` is an alias for `!set_default` -- use whichever reads better in context:

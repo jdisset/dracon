@@ -130,6 +130,123 @@ class TestDefineQuestionAlias:
         assert cfg.a == 2
 
 
+class TestTypedDefine:
+    """!define:type explicit type coercion syntax."""
+
+    # -- match_instruct recognition --
+
+    def test_match_define_float(self):
+        inst = match_instruct('!define:float')
+        assert isinstance(inst, Define)
+        assert inst.target_type is float
+
+    def test_match_define_int(self):
+        inst = match_instruct('!define:int')
+        assert isinstance(inst, Define)
+        assert inst.target_type is int
+
+    def test_match_define_str(self):
+        inst = match_instruct('!define:str')
+        assert isinstance(inst, Define)
+        assert inst.target_type is str
+
+    def test_match_define_bool(self):
+        inst = match_instruct('!define:bool')
+        assert isinstance(inst, Define)
+        assert inst.target_type is bool
+
+    def test_match_set_default_typed(self):
+        inst = match_instruct('!define?:float')
+        assert isinstance(inst, SetDefault)
+        assert inst.target_type is float
+
+    def test_match_set_default_typed_long(self):
+        inst = match_instruct('!set_default:int')
+        assert isinstance(inst, SetDefault)
+        assert inst.target_type is int
+
+    # -- end-to-end coercion --
+
+    def test_define_float_coerces_int_to_float(self):
+        loader = DraconLoader(enable_interpolation=True)
+        cfg = loader.loads("""
+        !define:float one: 1
+        a: ${one}
+        """)
+        cfg.resolve_all_lazy()
+        assert cfg.a == 1.0
+        assert isinstance(cfg.a, float)
+
+    def test_define_int_coerces_float_to_int(self):
+        loader = DraconLoader(enable_interpolation=True)
+        cfg = loader.loads("""
+        !define:int count: 1.9
+        a: ${count}
+        """)
+        cfg.resolve_all_lazy()
+        assert cfg.a == 1
+        assert isinstance(cfg.a, int)
+
+    def test_define_str_coerces_int_to_str(self):
+        loader = DraconLoader(enable_interpolation=True)
+        cfg = loader.loads("""
+        !define:str zipcode: 02134
+        a: ${zipcode}
+        """)
+        cfg.resolve_all_lazy()
+        assert cfg.a == '2134'  # YAML parses 02134 as int 2134, then str coercion
+        assert isinstance(cfg.a, str)
+
+    def test_define_bool_coerces_int_to_bool(self):
+        loader = DraconLoader(enable_interpolation=True)
+        cfg = loader.loads("""
+        !define:bool flag: 1
+        a: ${flag}
+        """)
+        cfg.resolve_all_lazy()
+        assert cfg.a is True
+
+    def test_define_float_with_interpolation_value(self):
+        loader = DraconLoader(enable_interpolation=True)
+        cfg = loader.loads("""
+        !define:float val: ${1 + 2}
+        a: ${val}
+        """)
+        cfg.resolve_all_lazy()
+        assert cfg.a == 3.0
+        assert isinstance(cfg.a, float)
+
+    def test_set_default_typed_coercion(self):
+        loader = DraconLoader(enable_interpolation=True)
+        cfg = loader.loads("""
+        !define?:float rate: 1
+        a: ${rate}
+        """)
+        cfg.resolve_all_lazy()
+        assert cfg.a == 1.0
+        assert isinstance(cfg.a, float)
+
+    def test_define_typed_overrides_set_default_typed(self, tmp_path):
+        defaults = tmp_path / "defaults.yaml"
+        defaults.write_text("!define?:str x: 1\nval: ${x}\n")
+        main = tmp_path / "main.yaml"
+        main.write_text(
+            f"<<: !include file:{defaults}\n"
+            f"!define:int x: 2\n"
+            f"a: ${{x}}\n"
+        )
+        loader = DraconLoader(enable_interpolation=True)
+        cfg = loader.load(str(main))
+        cfg.resolve_all_lazy()
+        assert cfg.a == 2
+        assert isinstance(cfg.a, int)
+
+    def test_trailing_colon_no_type_still_errors(self):
+        """!define: (colon, no type) is still a syntax error."""
+        with pytest.raises(ValueError, match="trailing colon"):
+            match_instruct('!define:')
+
+
 class TestPublicAPI:
     """register_instruction and Instruction are exported from dracon."""
 

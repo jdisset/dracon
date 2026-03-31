@@ -33,6 +33,19 @@ config:
 
 **Final `config` object:** `{ "version": "1.2.0", "debug_mode": ..., "logging": { "level": "INFO" } }` (The `!define` keys are gone).
 
+### Explicit Type Coercion (`!define:type`)
+
+YAML's implicit type inference usually does the right thing (`1.2` is a float, `42` is an int). But sometimes you need a different type than what YAML infers. The `!define:type` syntax applies explicit coercion:
+
+```yaml
+!define:float one: 1          # float 1.0, not int 1
+!define:str port: 8080         # string "8080", not int
+!define:bool enabled: 1        # True, not int 1
+!define:int threshold: 3.7     # int 3, not float
+```
+
+Supported types: `int`, `float`, `str`, `bool`, `list`, `dict`. This syntax also works with `!define?:type` and `!set_default:type`.
+
 ## Variable Contracts (`!require`)
 
 While `!define` and `!set_default` provide values, `!require` declares that a variable **must** be provided by an outer scope -- a parent file, cascade overlay, CLI `++var=value`, or another `!define`. If nobody provides it by end of composition, a clear error is raised.

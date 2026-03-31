@@ -23,6 +23,9 @@ _DIRECTIVE_SUFFIXES = frozenset({
     '!set_default', '!define', '!define?', '!require', '!assert',
     'set_default', 'define', 'define?', 'require', 'assert',
 })
+# prefixes that indicate a typed directive variant (e.g. !define:float, !set_default:int)
+_DIRECTIVE_TYPED_PREFIXES = ('!define:', '!define?:', '!set_default:')
+
 
 def _is_directive_key(key_node):
     """Check if a key node has a directive tag (consumed during instruction processing)."""
@@ -30,12 +33,19 @@ def _is_directive_key(key_node):
     if tag is None:
         return False
     # tag can be str or Tag object depending on ruamel.yaml context
-    if tag.__class__ is str:
-        return tag in DIRECTIVE_TAGS
-    try:
-        return tag.suffix in _DIRECTIVE_SUFFIXES
-    except AttributeError:
-        return str(tag) in DIRECTIVE_TAGS
+    tag_str = tag if tag.__class__ is str else str(tag)
+    if tag_str in DIRECTIVE_TAGS:
+        return True
+    # typed directive variants: !define:float, !define?:int, !set_default:str, ...
+    if any(tag_str.startswith(p) for p in _DIRECTIVE_TYPED_PREFIXES):
+        return True
+    if tag.__class__ is not str:
+        try:
+            suffix = tag.suffix
+            return suffix in _DIRECTIVE_SUFFIXES
+        except AttributeError:
+            pass
+    return False
 
 DEFAULT_MAP_TAG = 'tag:yaml.org,2002:map'
 DEFAULT_SEQ_TAG = 'tag:yaml.org,2002:seq'

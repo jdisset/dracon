@@ -154,17 +154,31 @@ def check_pending_requirements(comp_res: CompositionResult, loader) -> None:
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 ## {{{                          --     define     --
+_COERCE_TYPES: dict[str, type] = {
+    'int': int, 'float': float, 'str': str, 'bool': bool,
+    'list': list, 'dict': dict,
+}
+_TYPED_DEFINE_RE = re.compile(r'^!define:(\w+)$')
+_TYPED_SET_DEFAULT_RE = re.compile(r'^!(?:define\?|set_default):(\w+)$')
+
+
 class Define(Instruction):
     """
     `!define var_name : value`
+    `!define:type var_name : value`  (explicit type coercion)
 
     Define a variable var_name with the value of the node
     and add it to the parent node's context
     The node is then removed from the parent node
     (if you want to define and keep the node, use !define_keep)
 
+    Supported types for !define:type -- int, float, str, bool, list, dict.
+
     If value is an interpolation, this node triggers composition-time evaluation
     """
+
+    def __init__(self, target_type=None):
+        self.target_type = target_type
 
     @staticmethod
     def match(value: Optional[str]) -> Optional['Define']:
@@ -172,6 +186,16 @@ class Define(Instruction):
             return None
         if value == '!define':
             return Define()
+        m = _TYPED_DEFINE_RE.match(value)
+        if m:
+            type_name = m.group(1)
+            if type_name not in _COERCE_TYPES:
+                from dracon.diagnostics import CompositionError
+                raise CompositionError(
+                    f"unknown type '{type_name}' in {value}. "
+                    f"Supported types: {', '.join(_COERCE_TYPES)}"
+                )
+            return Define(target_type=_COERCE_TYPES[type_name])
         return None
 
     def get_name_and_value(self, comp_res, path, loader):
@@ -191,6 +215,16 @@ class Define(Instruction):
             )
         else:
             value = loader.load_composition_result(CompositionResult(root=value_node))
+
+        if self.target_type is not None:
+            try:
+                value = self.target_type(value)
+            except (ValueError, TypeError) as e:
+                ctx = node_source(key_node)
+                raise CompositionError(
+                    f"cannot coerce {value!r} to {self.target_type.__name__} in !define:{self.target_type.__name__}",
+                    context=ctx,
+                ) from e
 
         var_name = key_node.value
         if not var_name.isidentifier():
@@ -236,6 +270,16 @@ class SetDefault(Define):
             return None
         if value in ('!set_default', '!define?'):
             return SetDefault()
+        m = _TYPED_SET_DEFAULT_RE.match(value)
+        if m:
+            type_name = m.group(1)
+            if type_name not in _COERCE_TYPES:
+                from dracon.diagnostics import CompositionError
+                raise CompositionError(
+                    f"unknown type '{type_name}' in {value}. "
+                    f"Supported types: {', '.join(_COERCE_TYPES)}"
+                )
+            return SetDefault(target_type=_COERCE_TYPES[type_name])
         return None
 
     @ftrace(watch=[])
