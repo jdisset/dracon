@@ -3,7 +3,6 @@
 
 from typing import (
     Any,
-    Dict,
     Literal,
 )
 from pydantic.dataclasses import dataclass
@@ -17,8 +16,6 @@ from dracon.utils import ftrace, DictLike
 class InterpolationError(Exception):
     pass
 
-
-BASE_DRACON_SYMBOLS: Dict[str, Any] = {}
 
 ## {{{                    --     interpolation exprs     --
 

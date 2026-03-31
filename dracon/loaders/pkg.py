@@ -3,15 +3,8 @@ import time
 from importlib.resources import files, as_file
 from typing import ForwardRef, Optional
 from pathlib import Path
-from cachetools import cached, LRUCache
-from cachetools.keys import hashkey
 
 DraconLoader = ForwardRef('DraconLoader')
-
-
-@cached(LRUCache(maxsize=50))
-def read_from_pkg_cached(*args, **kwargs):
-    return read_from_pkg(*args, **kwargs)
 
 
 def read_from_pkg(path: str, **_):

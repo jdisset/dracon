@@ -2,7 +2,7 @@
 # MIT License - see LICENSE file for details.
 
 from dataclasses import dataclass
-from typing import Any, Optional, Dict, Tuple, Callable
+from typing import Any, Optional, Dict, Callable
 import dracon.utils as utils
 from functools import partial
 import re
@@ -64,25 +64,6 @@ def parse_include_str(include_str: str) -> IncludeComponents:
     else:
         main_path, key_path = include_str, ''
     return IncludeComponents(main_path, key_path)
-
-
-def handle_in_memory_include(
-    name: str, node: 'IncludeNode', key_path: str, dump_to_node_fn: Callable
-) -> CompositionResult:
-    """Handle an in-memory include (starting with $)."""
-    if name not in node.context:
-        from dracon.diagnostics import CompositionError
-        available = [k for k in node.context if not k.startswith('_')]
-        raise CompositionError(
-            f"In-memory include '{name}' not found. Available: {', '.join(sorted(available)[:10])}"
-        )
-
-    incl_node = node.context[name]
-    incl_node = dump_to_node_fn(incl_node)
-    if key_path:
-        incl_node = KeyPath(key_path).get_obj(incl_node)
-
-    return CompositionResult(root=incl_node)
 
 
 def handle_absolute_path(

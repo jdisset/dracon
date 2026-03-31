@@ -3,16 +3,9 @@ from typing import ForwardRef, TypeAlias
 from .load_utils import with_possible_ext
 from typing import Optional
 
-from cachetools import cached, LRUCache
-from cachetools.keys import hashkey
 import time
 
 DraconLoader = ForwardRef('DraconLoader')
-
-
-@cached(LRUCache(maxsize=50))
-def read_from_file_cached(*args, **kwargs):
-    return read_from_file(*args, **kwargs)
 
 
 def read_from_file(path: str, extra_paths=None, **_) -> tuple[str, dict]:
