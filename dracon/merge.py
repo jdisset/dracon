@@ -393,7 +393,12 @@ def add_to_context(new_context, existing_item, merge_key=DEFAULT_ADD_TO_CONTEXT_
 
     if hasattr(existing_item, 'context'):
         existing_item.context = _ensure_soft_dict(existing_item.context)
-        existing_item.context = context_add(existing_item.context, new_context, merge_key)
+        if merge_key.context_propagation:
+            mode_char = '+' if merge_key.dict_mode == MergeMode.APPEND else '~'
+            effective_key = cached_merge_key(f"{{{mode_char}<}}")
+        else:
+            effective_key = merge_key
+        existing_item.context = merged(existing_item.context, new_context, effective_key)
     else:
         existing_item.context = _ensure_soft_dict(new_context)
     
@@ -412,19 +417,6 @@ def reset_context(item, ignore_dracon_namespace=True):
                 newctx[k] = v
         item.context = newctx
 
-
-def context_add(existing, new, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY):
-    # Handle context propagation if specified
-    if hasattr(merge_key, 'context_propagation') and merge_key.context_propagation:
-        # Context propagation is enabled with (<) - new context should win
-        # Create a modified merge key that uses new priority for dicts
-        mode_char = '+' if merge_key.dict_mode == MergeMode.APPEND else '~'
-        modified_key = cached_merge_key(f"{{{mode_char}<}}")
-        m = merged(existing, new, modified_key)
-    else:
-        # No context propagation - use the merge key as is
-        m = merged(existing, new, merge_key)
-    return m
 
 
 def dict_diff(dict1, dict2):
