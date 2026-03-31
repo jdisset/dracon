@@ -395,6 +395,43 @@ model_config: !deferred:MyModel
 
 ## Common Patterns
 
+### Config Templates
+
+Define a reusable, parameterized config fragment using `__dracon__`, YAML anchors, and merge. Use `!require` for mandatory parameters and `!set_default` for optional ones:
+
+```yaml
+__dracon__: &service
+  !require name: "service name"
+  !require port: "port number"
+  !set_default replicas: 1
+  image: myapp/${name}:latest
+  port: ${port}
+  replicas: ${replicas}
+
+services:
+  auth:
+    !define name: auth
+    !define port: 8001
+    !define replicas: 3
+    <<: *service
+
+  api:
+    !define name: api
+    !define port: 8002
+    <<: *service     # replicas defaults to 1
+```
+
+`!set_default` values are "soft" -- they yield to the caller's `!define` values across merge boundaries. For file-based templates, use `!include` instead of anchors:
+
+```yaml
+auth:
+  !define name: auth
+  !define port: 8001
+  <<: !include file:templates/service.yaml
+```
+
+See the [templates guide](../guides/use-templates.md) for more patterns.
+
 ### Environment-based Configuration
 
 ```yaml
