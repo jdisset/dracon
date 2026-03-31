@@ -203,10 +203,13 @@ class Define(Instruction):
     def process(self, comp_res: CompositionResult, path: KeyPath, loader):
         var_name, value, parent_node = self.get_name_and_value(comp_res, path, loader)
 
-        walk_node(
-            node=parent_node,
-            callback=partial(add_to_context, {var_name: value}),
-        )
+        def _add_and_harden(node):
+            add_to_context({var_name: value}, node)
+            sk = getattr(getattr(node, 'context', None), '_soft_keys', None)
+            if sk is not None:
+                sk.discard(var_name)
+
+        walk_node(node=parent_node, callback=_add_and_harden)
 
         comp_res.defined_vars[var_name] = value
 
@@ -238,12 +241,14 @@ class SetDefault(Define):
         if var_name in loader.context:
             _ = loader.context[var_name]
 
-        walk_node(
-            node=parent_node,
-            callback=partial(
-                add_to_context, {var_name: value}, merge_key=cached_merge_key('<<{>~}[>~]')
-            ),
-        )
+        def _add_and_soften(node):
+            add_to_context({var_name: value}, node, merge_key=cached_merge_key('<<{>~}[>~]'))
+            ctx = getattr(node, 'context', None)
+            sk = getattr(ctx, '_soft_keys', None)
+            if sk is not None and var_name in ctx:
+                sk.add(var_name)
+
+        walk_node(node=parent_node, callback=_add_and_soften)
 
         comp_res.defined_vars.setdefault(var_name, value)
         if var_name not in comp_res.defined_vars or values_equal(comp_res.defined_vars[var_name], value):

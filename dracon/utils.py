@@ -42,6 +42,41 @@ E = TypeVar('E')
 T = TypeVar('T')
 
 
+class SoftPriorityDict(dict):
+    """Dict where some keys are 'soft' (from !set_default) and yield to hard values.
+
+    When merging two dicts, a hard value always overrides a soft value
+    regardless of the merge key's priority direction. This lets !set_default
+    values act as true defaults that any !define can override, even across
+    merge/include boundaries where instruction ordering can't guarantee it.
+    """
+    __slots__ = ('_soft_keys',)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._soft_keys = set()
+
+    def copy(self):
+        c = SoftPriorityDict(super().copy())
+        c._soft_keys = self._soft_keys.copy()
+        return c
+
+    def __copy__(self):
+        return self.copy()
+
+    def __deepcopy__(self, memo):
+        return self.copy()
+
+    def is_soft(self, key):
+        return key in self._soft_keys
+
+    def mark_soft(self, key):
+        self._soft_keys.add(key)
+
+    def mark_hard(self, key):
+        self._soft_keys.discard(key)
+
+
 # a dict that doesnt't allow deep copying (it always returns a shallow copy)
 class ShallowDict(MutableMapping, Generic[K, V]):
     def __init__(self, *args, **kwargs):
@@ -63,11 +98,14 @@ class ShallowDict(MutableMapping, Generic[K, V]):
         return len(self._dict)
 
     def __copy__(self):
-        # always return a shallow copy
-        return ShallowDict(self._dict)
+        c = ShallowDict(self._dict)
+        # preserve soft key tracking if present
+        sk = getattr(self, '_soft_keys', None)
+        if sk is not None:
+            c._soft_keys = sk.copy()
+        return c
 
     def __deepcopy__(self, memo):
-        # force deep copy to behave as a shallow copy
         return self.__copy__()
 
     def copy(self):

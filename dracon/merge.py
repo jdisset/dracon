@@ -14,6 +14,7 @@ from dracon.utils import (
     list_like,
     clean_context_keys,
     values_equal,
+    SoftPriorityDict,
 )
 from dracon.nodes import (
     MergeNode,
@@ -102,6 +103,15 @@ def process_merges(comp_res):
             parent_path = parent_path + KeyPath(merge_key.keypath)
 
         new_parent = parent_path.get_obj(comp_res.root)
+        # propagate parent context into merge source so hard values
+        # (!define) override soft values (!set_default) in the source.
+        # existing-wins preserves the include's own !define values;
+        # soft_keys logic in merged() still lets hard parent values beat soft ones.
+        parent_ctx = getattr(new_parent, 'context', None)
+        if parent_ctx and any(not k.startswith('__') for k in parent_ctx):
+            merge_node = deepcopy(merge_node)
+            from dracon.composer import walk_node as _walk
+            _walk(merge_node, partial(add_to_context, parent_ctx, merge_key=cached_merge_key('<<{>~}[>~]')))
         new_parent = merged(new_parent, merge_node, merge_key)
         if not isinstance(new_parent, Node):
             raise CompositionError(f"Merge produced {type(new_parent).__name__} instead of a Node")
@@ -330,10 +340,20 @@ def merged(existing: Any, new: Any, k: MergeKey = DEFAULT_ADD_TO_CONTEXT_MERGE_K
             elif other.tag.startswith('!'):
                 result.tag = other.tag
 
+        # soft priority: hard values always beat soft regardless of merge direction
+        pdict_soft = getattr(pdict, '_soft_keys', None)
+        other_soft = getattr(other, '_soft_keys', None)
+        result_soft = getattr(result, '_soft_keys', None)
 
         for key, value in other.items():
             if key not in result:
                 result[key] = value
+                if other_soft and key in other_soft and result_soft is not None:
+                    result_soft.add(key)
+            elif pdict_soft and key in pdict_soft and not (other_soft and key in other_soft):
+                result[key] = value
+                if result_soft is not None:
+                    result_soft.discard(key)
             elif k.dict_mode == MergeMode.APPEND:
                 result[key] = (
                     merge_value(result[key], value, depth + 1)
@@ -350,6 +370,20 @@ def merged(existing: Any, new: Any, k: MergeKey = DEFAULT_ADD_TO_CONTEXT_MERGE_K
     return merge_value(existing, new)
 
 
+def _ensure_soft_dict(ctx):
+    """Ensure context dict supports soft key tracking."""
+    if ctx is None:
+        return SoftPriorityDict()
+    if hasattr(ctx, '_soft_keys'):
+        return ctx
+    # plain dict -> upgrade to SoftPriorityDict; other dict subclasses -> add _soft_keys attr
+    if type(ctx) is dict:
+        return SoftPriorityDict(ctx)
+    # for specialized dict subclasses (e.g. TrackedContext), graft _soft_keys
+    ctx._soft_keys = set()
+    return ctx
+
+
 def add_to_context(new_context, existing_item, merge_key=DEFAULT_ADD_TO_CONTEXT_MERGE_KEY, skip_clean=False):
     """
     Add context to the item context, if it exists.
@@ -358,10 +392,10 @@ def add_to_context(new_context, existing_item, merge_key=DEFAULT_ADD_TO_CONTEXT_
         new_context = clean_context_keys(new_context)
 
     if hasattr(existing_item, 'context'):
+        existing_item.context = _ensure_soft_dict(existing_item.context)
         existing_item.context = context_add(existing_item.context, new_context, merge_key)
     else:
-        # if no context exists, just add it
-        existing_item.context = new_context
+        existing_item.context = _ensure_soft_dict(new_context)
     
     if hasattr(existing_item, '_clear_ctx') and existing_item._clear_ctx:
         for k in existing_item._clear_ctx:
