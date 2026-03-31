@@ -67,18 +67,12 @@ def node_source(node) -> Optional["SourceContext"]:
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
-def base_node_hash(node):
-    return hash(
-        (node.tag, node.value, node.start_mark.line, node.start_mark.column, node.start_mark.name)
-    )
+class SourceContextMixin:
+    """Mixin providing lazy source context tracking for Dracon node types."""
 
+    _source_context: Optional["SourceContext"] = None
 
-class DraconScalarNode(ScalarNode):
-    def __init__(
-        self, tag, value, start_mark=None, end_mark=None, style=None, comment=None,
-        anchor=None, source_context: Optional["SourceContext"] = None,
-    ):
-        ScalarNode.__init__(self, tag, value, start_mark, end_mark, style=style, comment=comment, anchor=anchor)
+    def _init_source_context(self, source_context: Optional["SourceContext"] = None):
         self._source_context = source_context
 
     @property
@@ -90,6 +84,21 @@ class DraconScalarNode(ScalarNode):
     @source_context.setter
     def source_context(self, value: Optional["SourceContext"]):
         self._source_context = value
+
+
+def base_node_hash(node):
+    return hash(
+        (node.tag, node.value, node.start_mark.line, node.start_mark.column, node.start_mark.name)
+    )
+
+
+class DraconScalarNode(SourceContextMixin, ScalarNode):
+    def __init__(
+        self, tag, value, start_mark=None, end_mark=None, style=None, comment=None,
+        anchor=None, source_context: Optional["SourceContext"] = None,
+    ):
+        ScalarNode.__init__(self, tag, value, start_mark, end_mark, style=style, comment=comment, anchor=anchor)
+        self._init_source_context(source_context)
 
     def __str__(self):
         return node_repr(self)
@@ -259,25 +268,15 @@ class UnsetNode(DraconScalarNode):
 ## {{{                        --     MappingNode     --
 
 
-class DraconMappingNode(MappingNode):
+class DraconMappingNode(SourceContextMixin, MappingNode):
     def __init__(
         self, tag: Any, value: Any, start_mark: Any = None, end_mark: Any = None,
         flow_style: Any = None, comment: Any = None, anchor: Any = None,
         source_context: Optional["SourceContext"] = None,
     ) -> None:
         MappingNode.__init__(self, tag, value, start_mark, end_mark, flow_style, comment, anchor)
-        self._source_context = source_context
+        self._init_source_context(source_context)
         self._recompute_map()
-
-    @property
-    def source_context(self) -> Optional["SourceContext"]:
-        if self._source_context is None and self.start_mark is not None:
-            self._source_context = make_source_context(self.start_mark)
-        return self._source_context
-
-    @source_context.setter
-    def source_context(self, value: Optional["SourceContext"]):
-        self._source_context = value
 
     def _recompute_map(self):
         self.map = {}  # key value -> index
@@ -441,24 +440,14 @@ class DraconMappingNode(MappingNode):
 
 
 ## {{{                       --     SequenceNode     --
-class DraconSequenceNode(SequenceNode):
+class DraconSequenceNode(SourceContextMixin, SequenceNode):
     def __init__(
         self, tag: Any, value: Any, start_mark: Any = None, end_mark: Any = None,
         flow_style: Any = None, comment: Any = None, anchor: Any = None,
         source_context: Optional["SourceContext"] = None,
     ) -> None:
         SequenceNode.__init__(self, tag, value, start_mark, end_mark, flow_style, comment, anchor)
-        self._source_context = source_context
-
-    @property
-    def source_context(self) -> Optional["SourceContext"]:
-        if self._source_context is None and self.start_mark is not None:
-            self._source_context = make_source_context(self.start_mark)
-        return self._source_context
-
-    @source_context.setter
-    def source_context(self, value: Optional["SourceContext"]):
-        self._source_context = value
+        self._init_source_context(source_context)
 
     def __getitem__(self, index: int) -> Node:
         return self.value[index]
