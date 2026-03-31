@@ -47,9 +47,37 @@ app_config:
   logging: ${log_level}   # uses default
 ```
 
+### `!require` - Mandatory Variable Declaration
+
+Declare that a variable **must** be provided by an outer scope (parent file, cascade overlay, CLI `++var=value`, or `!define`). If nobody provides it by end of composition, a clear error is raised with the hint message.
+
+```yaml
+# base config expects overlays to fill in
+!require environment: "set via ++environment or create a .myapp.yaml overlay"
+!require api_key: "set API_KEY env var or provide in overlay"
+
+endpoint: https://${environment}.api.example.com
+auth:
+  key: ${api_key}
+```
+
+If the requirement is not satisfied:
+
+```
+CompositionError: required variable 'environment' not provided
+  hint: set via ++environment or create a .myapp.yaml overlay
+  required by: base.yaml:2
+```
+
+The variable definition gradient:
+
+- `!define` -- always set, overwrites previous values
+- `!set_default` -- set if nobody else does (optional with fallback)
+- `!require` -- must be provided by someone else (mandatory, no fallback)
+
 ### Processing Order
 
-Instructions are processed in this order: `!set_default` → `!define` → `!each` → `!if`. This means `!define` can override `!set_default`, and `!if`/`!each` can use variables defined by both.
+Instructions are processed in this order: `!set_default` → `!define` → `!each` → `!if`. This means `!define` can override `!set_default`, and `!if`/`!each` can use variables defined by both. `!require` is checked after all instructions and includes are resolved.
 
 ## Conditional Logic
 
@@ -228,6 +256,38 @@ deployments:
   - name: finalize
 
 # Result: [init, deploy_dev_us, deploy_dev_eu, deploy_prod_us, deploy_prod_eu, finalize]
+```
+
+## Validation
+
+### `!assert` - Composition-Time Assertions
+
+Validate invariants over the composed tree. The expression uses the same interpolation engine as `${...}`. Runs after all other instructions are resolved but before construction.
+
+```yaml
+!assert ${port > 0 and port < 65536}: "port out of range"
+!assert ${engine in ('postgres', 'mysql', 'sqlite')}: "unknown db engine"
+!assert ${not (environment == 'prod' and debug)}: "debug must be off in prod"
+```
+
+Assertions are removed from the final tree -- pure validation, zero runtime overhead. If an assertion fails:
+
+```
+CompositionError: assertion failed: debug must be off in prod
+```
+
+### Combining `!require` and `!assert`
+
+```yaml
+!require environment: "set via ++environment"
+!require port: "provide a port number"
+
+!assert ${port > 0 and port < 65536}: "port must be 1-65535"
+!assert ${environment in ('dev', 'staging', 'prod')}: "invalid environment"
+
+server:
+  env: ${environment}
+  port: ${port}
 ```
 
 ## Construction Control

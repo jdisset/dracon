@@ -33,6 +33,37 @@ config:
 
 **Final `config` object:** `{ "version": "1.2.0", "debug_mode": ..., "logging": { "level": "INFO" } }` (The `!define` keys are gone).
 
+## Variable Contracts (`!require`)
+
+While `!define` and `!set_default` provide values, `!require` declares that a variable **must** be provided by an outer scope -- a parent file, cascade overlay, CLI `++var=value`, or another `!define`. If nobody provides it by end of composition, a clear error is raised.
+
+```yaml
+# base.yaml -- shipped with the tool
+!require environment: "set via ++environment or create a .myapp.yaml overlay"
+!require api_key: "set API_KEY env var or provide in overlay"
+
+endpoint: https://${environment}.api.example.com
+auth:
+  key: ${api_key}
+```
+
+This completes the variable definition gradient:
+
+- `!define` -- always set, overwrites previous values
+- `!set_default` -- set if nobody else does (optional with fallback)
+- `!require` -- must be provided by someone else (mandatory, no fallback)
+
+## Composition-Time Assertions (`!assert`)
+
+`!assert` validates arbitrary invariants over the composed tree. The expression uses the same interpolation engine as `${...}`. Assertions run after all other instructions are resolved, so they validate the final composed state.
+
+```yaml
+!assert ${port > 0 and port < 65536}: "port out of range"
+!assert ${not (environment == 'prod' and debug)}: "debug must be off in prod"
+```
+
+Assertions are removed from the final tree -- pure validation, zero runtime overhead.
+
 ## Conditional Composition (`!if`)
 
 Includes or excludes configuration blocks based on a condition evaluated _at composition time_.

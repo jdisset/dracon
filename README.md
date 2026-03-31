@@ -78,7 +78,7 @@ Generate type-safe CLIs directly from Pydantic models. Override any field — ev
 
 #### Add Expressions
 
-Embed Python expressions (`${...}`), reference other keys (`@path`), or compute values at runtime (`$(...)`). Define variables with `!define` and `!set_default`.
+Embed Python expressions (`${...}`), reference other keys (`@path`), or compute values at runtime (`$(...)`). Define variables with `!define` and `!set_default`, enforce contracts with `!require` and `!assert`.
 
 #### Define Configuration Once
 

@@ -107,8 +107,24 @@ raw_name: Annotated[str, Arg(auto_dash_alias=False, help="No dash alias")]
 # Creates --raw_name (underscores kept as-is)
 ```
 
+### `raw: bool = False`
+Skip YAML composition for this field's value. The raw string from the command line is passed directly without YAML parsing, interpolation, or tag construction. Useful for fields that accept free-text content like JSON strings, shell commands, or any input where `$`, `:`, `{}` should be treated literally.
+
+```python
+body: Annotated[str | None, Arg(positional=True, raw=True)] = None
+command: Annotated[str, Arg(raw=True, help="Shell command to run")]
+```
+
+```bash
+# With raw=True: JSON stays as a string instead of being parsed as a YAML mapping
+myapp '{"type":"question"}'  # -> body = '{"type":"question"}' (string)
+
+# With raw=True: $PATH stays literal instead of triggering interpolation
+myapp --command "echo $PATH"  # -> command = "echo $PATH" (literal)
+```
+
 ### `subcommand: bool = False`
-Marks this field as a subcommand union. Automatically set by `Subcommand()` — you don't need to set this manually.
+Marks this field as a subcommand union. Automatically set by `Subcommand()` -- you don't need to set this manually.
 
 ## Subcommands
 
