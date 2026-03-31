@@ -1,9 +1,5 @@
 from pathlib import Path
-from typing import ForwardRef, TypeAlias
 from .load_utils import with_possible_ext, make_file_context
-from typing import Optional
-
-DraconLoader = ForwardRef('DraconLoader')
 
 
 def read_from_file(path: str, extra_paths=None, **_) -> tuple[str, dict]:
@@ -13,10 +9,9 @@ def read_from_file(path: str, extra_paths=None, **_) -> tuple[str, dict]:
     Args:
         path (str): The primary path to the file.
         extra_paths (list, optional): Additional paths to search for the file. Defaults to None.
-        loader (Optional[DraconLoader], optional): An optional loader to update context. Defaults to None.
 
     Returns:
-        str: The content of the file.
+        tuple[str, dict]: The file content and file context metadata.
 
     Raises:
         FileNotFoundError: If the file is not found in any of the specified paths.

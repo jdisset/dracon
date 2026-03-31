@@ -15,14 +15,11 @@ from dracon.utils import ShallowDict, values_equal
 from ruamel.yaml.nodes import Node
 from dracon.keypath import KeyPath, KeyPathToken, MAPPING_KEY
 from dracon.nodes import node_source
-from dracon.merge import merged, MergeKey, cached_merge_key, add_to_context
+from dracon.merge import merged, cached_merge_key, add_to_context
 from dracon.interpolation import evaluate_expression, InterpolableNode
 from dracon.deferred import DeferredNode
 from functools import partial
 from dracon.nodes import DraconScalarNode
-import logging
-
-logger = logging.getLogger(__name__)
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 

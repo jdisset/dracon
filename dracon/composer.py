@@ -28,11 +28,11 @@ from dracon.keypath import KeyPath, ROOTPATH, MAPPING_KEY
 from dracon.merge import MergeKey, merged
 from pydantic import BaseModel, ConfigDict
 from typing import Any, Hashable, Callable, Union
-from typing import Optional, List, Literal, Final
+from typing import Optional, Literal, Final
 
 from dracon.interpolation import InterpolableNode
 from dracon.interpolation_utils import outermost_interpolation_exprs
-from dracon.composition_trace import CompositionTrace, TraceEntry, keypath_to_dotted
+from dracon.composition_trace import CompositionTrace, keypath_to_dotted
 
 import logging
 

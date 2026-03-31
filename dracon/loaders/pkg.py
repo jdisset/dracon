@@ -1,9 +1,6 @@
 from .load_utils import with_possible_ext, make_file_context
 from importlib.resources import files, as_file
-from typing import ForwardRef, Optional
 from pathlib import Path
-
-DraconLoader = ForwardRef('DraconLoader')
 
 
 def read_from_pkg(path: str, **_):

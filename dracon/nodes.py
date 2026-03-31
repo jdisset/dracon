@@ -190,6 +190,7 @@ class IncludeNode(ContextNode):
         comment=None,
         context=None,
         optional=False,
+        source_context=None,
     ):
         ContextNode.__init__(
             self,
@@ -200,6 +201,7 @@ class IncludeNode(ContextNode):
             comment=comment,
             anchor=anchor,
             context=context,
+            source_context=source_context,
         )
         self.optional = optional
 
