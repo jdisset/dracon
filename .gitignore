@@ -20,3 +20,5 @@ dracon/deepcopy_log.csv
 site
 uv.lock
 bugs
+features
+refactors
