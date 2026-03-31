@@ -392,7 +392,7 @@ class DraconComposer(Composer):
             if self.parser.check_event(ScalarEvent):
                 if event.ctag in (INCLUDE_TAG, OPTIONAL_INCLUDE_TAG):
                     node = self.compose_include_node(optional=(event.ctag == OPTIONAL_INCLUDE_TAG))
-                elif event.style is None and is_merge_key(event.value) and self.merging_enabled:
+                elif event.style is None and MergeKey.is_merge_key(event.value) and self.merging_enabled:
                     node = self.compose_merge_node()
                 else:
                     node = self.compose_scalar_node()
@@ -531,7 +531,7 @@ class DraconComposer(Composer):
         if tag is None or str(tag) == '!':
             tag = self.resolver.resolve(ScalarNode, event.value, event.implicit)
             assert not isinstance(tag, str)
-        assert is_merge_key(event.value), f'Invalidly routed to merge node: {event.value}'
+        assert MergeKey.is_merge_key(event.value), f'Invalidly routed to merge node: {event.value}'
         node = MergeNode(
             value=event.value,
             tag=tag,
@@ -547,9 +547,6 @@ class DraconComposer(Composer):
 
 ## {{{                           --     utils     --
 
-
-def is_merge_key(value: str) -> bool:
-    return value.startswith('<<')
 
 
 def delete_unset_nodes(comp_res: CompositionResult):
