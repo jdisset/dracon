@@ -50,6 +50,8 @@ def evaluate_nested_mapping_keys(node, engine, context):
 
 
 class Instruction:
+    deferred: bool = False  # if True, processed in the assertion pass instead
+
     @staticmethod
     def match(value: Optional[str]) -> Optional['Instruction']:
         raise NotImplementedError
@@ -86,8 +88,8 @@ def process_instructions(comp_res: CompositionResult, loader) -> CompositionResu
         tag = getattr(node, 'tag', None)
         if tag:
             if (path not in seen_paths) and (inst := match_instruct(tag)):
-                # defer !assert to a separate pass after all other instructions
-                if not isinstance(inst, Assert):
+                # defer instructions with deferred=True to a separate pass
+                if not getattr(inst, 'deferred', False):
                     instruction_nodes.append((inst, path))
 
     def refresh_instruction_nodes():
@@ -118,7 +120,7 @@ def process_assertions(comp_res: CompositionResult, loader) -> CompositionResult
         tag = getattr(node, 'tag', None)
         if tag:
             inst = match_instruct(tag)
-            if isinstance(inst, Assert):
+            if inst is not None and getattr(inst, 'deferred', False):
                 assert_nodes.append((inst, path))
 
     comp_res.make_map()
@@ -229,7 +231,7 @@ class SetDefault(Define):
     def match(value: Optional[str]) -> Optional['SetDefault']:
         if not value:
             return None
-        if value == '!set_default':
+        if value in ('!set_default', '!define?'):
             return SetDefault()
         return None
 
@@ -734,6 +736,7 @@ class Assert(Instruction):
     if falsy, raises CompositionError with the message. Removed from the final tree.
     Runs after all other instructions (separate pass).
     """
+    deferred = True
 
     @staticmethod
     def match(value: Optional[str]) -> Optional['Assert']:
@@ -777,23 +780,49 @@ class Assert(Instruction):
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
-AVAILABLE_INSTRUCTIONS = [SetDefault, Define, Each, If, Require, Assert]
+INSTRUCTION_REGISTRY: dict[str, type[Instruction]] = {
+    '!define': Define,
+    '!define?': SetDefault,      # weak define -- same pattern as !include vs !include?
+    '!set_default': SetDefault,  # backwards compat alias
+    '!each': Each,               # note: Each.match uses a regex, handled specially
+    '!if': If,
+    '!require': Require,
+    '!assert': Assert,
+}
+
+
+def register_instruction(tag: str, instruction_cls: type[Instruction]):
+    """Register a custom instruction class for a YAML tag.
+
+    The class must implement the Instruction protocol: a static `match(value)`
+    method and a `process(comp_res, path, loader)` method.
+    """
+    if not tag.startswith('!'):
+        tag = f'!{tag}'
+    INSTRUCTION_REGISTRY[tag] = instruction_cls
 
 
 def match_instruct(value) -> Optional[Instruction]:
-    # convert Tag to str once (avoids repeated Tag.__str__ in each match)
     value = str(value) if not isinstance(value, str) else value
-    for inst in AVAILABLE_INSTRUCTIONS:
-        match = inst.match(value)
-        if match:
-            return match
-    # check if stripping a trailing colon would match — common YAML syntax mistake
-    # e.g. `!set_default: a: null` parses the tag as `!set_default:` (colon in tag name)
+
+    # fast path: exact tag match
+    cls = INSTRUCTION_REGISTRY.get(value)
+    if cls is not None:
+        inst = cls.match(value)
+        if inst is not None:
+            return inst
+
+    # slow path: pattern-based matching (e.g. !each(var_name))
+    for cls in INSTRUCTION_REGISTRY.values():
+        inst = cls.match(value)
+        if inst is not None:
+            return inst
+
+    # trailing-colon detection for common YAML syntax mistakes
     if value.endswith(':'):
         stripped = value.rstrip(':')
-        near_matches = [inst.match(stripped) for inst in AVAILABLE_INSTRUCTIONS]
-        for m in near_matches:
-            if m:
+        for cls in INSTRUCTION_REGISTRY.values():
+            if cls.match(stripped):
                 raise ValueError(
                     f"tag '{value}' looks like instruction '{stripped}' but has a trailing colon. "
                     f"YAML interprets `{value} key: val` as a tag named '{value}' (colon is part "

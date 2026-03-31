@@ -46,3 +46,4 @@ from dracon.interpolation import evaluate_expression, InterpolableNode
 from dracon.nodes import DraconScalarNode, DraconMappingNode, DraconSequenceNode, ContextNode
 from dracon.deferred import DeferredNode
 from dracon.composition_trace import CompositionTrace, TraceEntry
+from dracon.instructions import register_instruction, Instruction
