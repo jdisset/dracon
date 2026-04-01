@@ -157,6 +157,33 @@ def check_pending_requirements(comp_res: CompositionResult, loader) -> None:
 ## {{{                           --     fn     --
 
 
+def _has_fn_return_key(node):
+    """Check if a mapping node has a !fn-tagged key (return marker)."""
+    if not isinstance(node, DraconMappingNode):
+        return False
+    return any(getattr(k, 'tag', None) == '!fn' for k, v in node.value)
+
+
+_FN_RETURN_KEY = '__fn_return__'
+
+
+def _rewrite_fn_return_key(template_node):
+    """Find !fn-tagged key in mapping, rewrite to sentinel. Returns True if found."""
+    from dracon.diagnostics import CompositionError
+    found = False
+    for k_node, v_node in template_node.value:
+        if getattr(k_node, 'tag', None) == '!fn':
+            if found:
+                raise CompositionError(
+                    "multiple !fn return markers in one template body",
+                    context=node_source(k_node),
+                )
+            k_node.tag = 'tag:yaml.org,2002:str'
+            k_node.value = _FN_RETURN_KEY
+            found = True
+    return found
+
+
 def _create_fn_callable(value_node, loader, key_node):
     """Create a DraconCallable from an !fn value node."""
     from dracon.callable import DraconCallable
@@ -164,6 +191,15 @@ def _create_fn_callable(value_node, loader, key_node):
 
     source = node_source(key_node)
     name = key_node.value
+
+    # inline scalar expression: !fn ${expr}
+    if isinstance(value_node, InterpolableNode):
+        from dracon.nodes import reset_tag
+        template_node = deepcopy(value_node)
+        reset_tag(template_node)
+        return DraconCallable(
+            template_node=template_node, loader=loader, source=source, name=name,
+        )
 
     if isinstance(value_node, DraconScalarNode):
         include_str = value_node.value
@@ -196,8 +232,12 @@ def _create_fn_callable(value_node, loader, key_node):
         from dracon.nodes import reset_tag
         template_node = deepcopy(value_node)
         reset_tag(template_node)
+        has_return = False
+        if isinstance(template_node, DraconMappingNode):
+            has_return = _rewrite_fn_return_key(template_node)
         return DraconCallable(
             template_node=template_node, loader=loader, source=source, name=name,
+            has_return=has_return,
         )
 
     else:
@@ -220,7 +260,7 @@ _TYPED_SET_DEFAULT_RE = re.compile(r'^!(?:define\?|set_default):(\w+)$')
 
 # tags that are dracon instructions or built-ins, never constructable types
 _BUILTIN_TAGS = frozenset({
-    '!include', '!include?', '!noconstruct', '!unset', '!fn',
+    '!include', '!include?', '!noconstruct', '!unset', '!fn', '!pipe',
     'tag:yaml.org,2002:map', 'tag:yaml.org,2002:seq',
     'tag:yaml.org,2002:str', 'tag:yaml.org,2002:int',
     'tag:yaml.org,2002:float', 'tag:yaml.org,2002:bool',
@@ -308,6 +348,12 @@ class Define(Instruction):
             )
 
         if getattr(value_node, 'tag', None) == '!fn':
+            value = _create_fn_callable(value_node, loader, key_node)
+        elif getattr(value_node, 'tag', None) == '!pipe':
+            from dracon.pipe import create_pipe_callable
+            value = create_pipe_callable(value_node, loader, key_node)
+        elif _has_fn_return_key(value_node):
+            # implicit callable: !fn key inside body without outer !fn tag
             value = _create_fn_callable(value_node, loader, key_node)
         elif isinstance(value_node, InterpolableNode):
             value = evaluate_expression(

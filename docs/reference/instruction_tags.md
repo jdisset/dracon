@@ -175,17 +175,44 @@ Instructions are processed in this order: `!set_default` → `!define` → `!eac
 
 Wrap a YAML template into a callable value. The result is a `DraconCallable` -- a real Python callable that can be invoked from both YAML tags and `${...}` expressions.
 
-**Definition:**
+**Three definition forms:**
 
 ```yaml
-# from a file
+# from a file -- returns whatever the file template composes to
 !define make_endpoint: !fn file:templates/endpoint.yaml
 
-# inline
+# inline mapping -- returns the mapping after instruction stripping
 !define make_endpoint: !fn
   !require name: "service name"
   !set_default port: 8080
   url: https://${name}.example.com:${port}
+
+# inline scalar (expression lambda) -- returns the expression result
+!define double: !fn ${x * 2}
+```
+
+**Scalar return with `!fn :` marker:**
+
+Mapping templates can return a single value instead of the whole mapping. Place `!fn :` on a key inside the body:
+
+```yaml
+!define double:
+  !require x: "number"
+  !fn : ${x * 2}
+```
+
+The `!fn :` key is the return marker. The outer `!fn` tag is optional when `!fn :` is present -- the body is implicitly a callable. Both forms are equivalent:
+
+```yaml
+# explicit
+!define f: !fn
+  !require x: "val"
+  !fn : ${x * 2}
+
+# implicit (no outer !fn needed)
+!define f:
+  !require x: "val"
+  !fn : ${x * 2}
 ```
 
 **Invocation (tag syntax):**
@@ -208,12 +235,83 @@ Parameters inside the template:
 
 Each call runs the full composition pipeline on an isolated copy of the template. Arguments don't leak into the caller's scope. The template can use any dracon feature (`!if`, `!each`, `!include`, type tags, interpolation).
 
-The callable name becomes a valid YAML tag: `!define f: !fn ...` makes `!f { ... }` available as a tag. From the caller's perspective, it works exactly like a Python type tag.
+**Tag invocation for any callable:** Any non-type callable in context (not just `!fn` templates) can be used as a YAML tag. Functions passed via loader context, lambdas, and `!define`d callables all work:
+
+```yaml
+# Python function from context -- kwargs unpacked
+result: !make_url { host: example.com, port: 443 }
+
+# scalar argument -- passed as single positional arg
+!define upper: ${str.upper}
+greeting: !upper "hello"
+```
 
 !!! tip
     `!fn` is the recommended approach when you need to call a template more than once or compose it inside expressions. For one-shot file includes that merge into the current scope, `!include` is still the right tool.
 
 See the [YAML Functions guide](../guides/use-fn.md) for full examples and recipes.
+
+### `!pipe` - Function Composition
+
+`!pipe` takes a sequence of callables (`!fn` templates, other pipes, or Python callables) and produces a new callable that chains them. The output of each stage feeds as input to the next.
+
+```yaml
+!define load: !fn file:templates/load.yaml
+!define clean: !fn file:templates/clean.yaml
+!define train: !fn file:templates/train.yaml
+
+!define ml: !pipe [load, clean, train]
+result: !ml { path: /data/train.csv, model_type: xgb }
+```
+
+**Output threading:**
+
+- **Mapping return** (dict, Dracontainer): kwarg-unpacked into the next stage. The returned keys become named arguments.
+- **Typed return** (Pydantic model, etc.): passed as a single value to the next stage's one unfilled `!require` parameter.
+
+This means stages don't need to know they're in a pipe. A stage that works standalone (`!clean { data: my_data }`) also works in a pipe (receives the previous stage's output as `data`).
+
+**Pre-filled kwargs** bake in values for specific stages:
+
+```yaml
+!define ml: !pipe
+  - load
+  - clean: { strategy: aggressive }   # strategy is fixed
+  - train
+  - evaluate
+```
+
+**Pipeline kwargs** flow through to all stages. If `clean` has `!set_default strategy: standard` and the pipeline call passes `strategy: aggressive`, the override reaches that stage. Pre-filled inline kwargs act as defaults -- piped output from the previous stage takes priority if keys overlap.
+
+**Pipes compose with pipes:**
+
+```yaml
+!define preprocess: !pipe [load, clean]
+!define train_eval: !pipe [train, evaluate]
+!define full: !pipe [preprocess, train_eval]
+```
+
+Nested pipes are flattened at definition time. `full` has 4 stages, not 2.
+
+**Invocation** works the same as `!fn`:
+
+```yaml
+# tag syntax
+result: !ml { path: /data/train.csv }
+
+# expression syntax
+result: ${ml(path='/data/train.csv')}
+
+# in comprehensions
+results: ${[ml(path=p) for p in data_paths]}
+```
+
+**Error handling:**
+
+- Stage name not found in context: `CompositionError` with the missing name
+- Stage not callable: `CompositionError`
+- Empty sequence: `CompositionError`
+- Non-mapping return with 0 or 2+ unfilled `!require` params in next stage: `CompositionError`
 
 ## Conditional Logic
 

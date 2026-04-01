@@ -33,6 +33,7 @@ from typing import (
 from functools import partial
 from dracon.nodes import DraconScalarNode  # Added for type checking
 from dracon.callable import DraconCallable
+from dracon.pipe import DraconPipe
 import logging
 
 logger = logging.getLogger("dracon")
@@ -278,7 +279,7 @@ class Draconstructor(Constructor):
                 callable_obj = current_loader_context.get(callable_name)
                 if callable_obj is None and hasattr(node, 'context'):
                     callable_obj = (node.context or {}).get(callable_name)
-                if isinstance(callable_obj, DraconCallable):
+                if callable(callable_obj) and not isinstance(callable_obj, type):
                     if isinstance(node, MappingNode):
                         reset_tag(node)
                         kwargs = self.base_construct_object(node, deep=True)
@@ -286,6 +287,14 @@ class Draconstructor(Constructor):
                         if not isinstance(kwargs, dict):
                             kwargs = dict(kwargs)
                         return callable_obj(**kwargs)
+                    elif isinstance(node, DraconScalarNode):
+                        reset_tag(node)
+                        arg = self.base_construct_object(node, deep=True)
+                        if isinstance(arg, LazyInterpolable):
+                            arg = resolve_all_lazy(arg)
+                        if arg is None or arg == '':
+                            return callable_obj()
+                        return callable_obj(arg)
                     else:
                         return callable_obj()
 

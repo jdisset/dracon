@@ -16,19 +16,24 @@ class DraconCallable:
     loader copy. The template itself is never mutated.
     """
 
-    __slots__ = ('_template_node', '_loader', '_source', '_name', '_file_context', '_call_depth')
+    __slots__ = ('_template_node', '_loader', '_source', '_name', '_file_context',
+                 '_call_depth', '_cached_params', '_has_return')
 
-    def __init__(self, template_node, loader, source=None, file_context=None, name=None):
+    def __init__(self, template_node, loader, source=None, file_context=None,
+                 name=None, has_return=False):
         self._template_node = template_node
         self._loader = loader
         self._source = source
         self._file_context = file_context
         self._name = name
         self._call_depth = 0
+        self._cached_params = None
+        self._has_return = has_return
 
     def __call__(self, **kwargs):
         from dracon.composer import CompositionResult
         from dracon.diagnostics import CompositionError
+        from dracon.lazy import LazyInterpolable, resolve_all_lazy
 
         if self._call_depth >= _MAX_CALL_DEPTH:
             raise CompositionError(
@@ -44,7 +49,20 @@ class DraconCallable:
             # file_context first (DIR, FILE_PATH, etc.), then kwargs override
             ctx = {**self._file_context, **kwargs} if self._file_context else kwargs
             loader_copy.update_context(ctx)
-            return loader_copy.load_composition_result(CompositionResult(root=node))
+            result = loader_copy.load_composition_result(CompositionResult(root=node))
+
+            # auto-resolve LazyInterpolable (scalar templates return these)
+            if isinstance(result, LazyInterpolable):
+                result = resolve_all_lazy(result)
+
+            # extract !fn return value if present
+            if self._has_return:
+                from dracon.instructions import _FN_RETURN_KEY
+                result = result[_FN_RETURN_KEY]
+                if isinstance(result, LazyInterpolable):
+                    result = resolve_all_lazy(result)
+
+            return result
         except CompositionError:
             raise
         except Exception as e:
@@ -68,6 +86,8 @@ class DraconCallable:
         clone._file_context = self._file_context
         clone._name = self._name
         clone._call_depth = 0
+        clone._cached_params = self._cached_params
+        clone._has_return = self._has_return
         return clone
 
     def __repr__(self):

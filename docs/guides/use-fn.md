@@ -15,7 +15,7 @@ all: ${[service(name=n, port=p) for n, p in svc_map.items()]}
 
 ## Defining a callable
 
-Use `!fn` with a file reference or an inline mapping.
+`!fn` has three forms, from full templates to expression lambdas.
 
 ### From a file
 
@@ -35,7 +35,7 @@ health: https://${name}.example.com:${port}/health
 
 Any loader works: `file:`, `pkg:`, etc.
 
-### Inline
+### Inline mapping
 
 ```yaml
 !define make_endpoint: !fn
@@ -45,11 +45,80 @@ Any loader works: `file:`, `pkg:`, etc.
   health: https://${name}.example.com:${port}/health
 ```
 
-Same result, no extra file. Good for small templates used in a single config.
+Same result, no extra file. Good for small templates used in a single config. Returns the mapping after instruction stripping.
+
+### Inline scalar (expression lambda)
+
+For simple transforms, `!fn` can take a single expression:
+
+```yaml
+!define double: !fn ${x * 2}
+!define greet: !fn ${"Hello " + name}
+```
+
+These are expression lambdas -- no `!require`/`!set_default`, parameters come implicitly from kwargs:
+
+```yaml
+result: ${double(x=21)}          # => 42
+msg: ${greet(name="world")}      # => "Hello world"
+squares: ${[sq(x=i) for i in range(5)]}
+```
+
+### Scalar return with `!fn :`
+
+Mapping templates normally return the whole mapping. If you need parameters (`!require`/`!set_default`) but want to return a single value, use `!fn :` inside the body as a return marker:
+
+```yaml
+!define double:
+  !require x: "number to double"
+  !fn : ${x * 2}
+
+result: ${double(x=21)}  # => 42, not {__something__: 42}
+```
+
+The `!fn :` key marks "this is what the function computes." The rest of the body (`!require`, `!set_default`, `!define` helpers) is processed normally but only the `!fn :` value is returned.
+
+This works with or without the outer `!fn` tag:
+
+```yaml
+# explicit outer !fn (redundant but valid)
+!define double: !fn
+  !require x: "number"
+  !fn : ${x * 2}
+
+# implicit -- !fn : inside the body is enough
+!define double:
+  !require x: "number"
+  !fn : ${x * 2}
+```
+
+The return value can be anything -- a scalar, a mapping, a list:
+
+```yaml
+!define extract:
+  !require data: "input list"
+  !fn :
+    count: ${len(data)}
+    first: ${data[0]}
+
+result: ${extract(data=[10, 20, 30])}
+# => {count: 3, first: 10}
+```
+
+Use `!define` for intermediate values in the body:
+
+```yaml
+!define compute:
+  !require x: "number"
+  !define intermediate: ${x + 1}
+  !fn : ${intermediate * 2}
+
+result: ${compute(x=4)}  # => 10
+```
 
 ## Calling from YAML (tag syntax)
 
-When you define a callable named `make_endpoint`, the tag `!make_endpoint` becomes available. The mapping under it provides keyword arguments:
+Any callable in context becomes a valid YAML tag. This includes `!fn` templates, `!pipe` pipelines, and plain Python functions passed in context. The mapping under the tag provides keyword arguments:
 
 ```yaml
 !define make_endpoint: !fn file:templates/endpoint.yaml
@@ -73,6 +142,24 @@ internal:
 ```
 
 From the caller's perspective, `!make_endpoint { name: api }` looks and works exactly like a Python type tag (`!MyModel { field: value }`). The implementation -- YAML or Python -- is invisible.
+
+### Python functions as tags
+
+Any non-type callable in context works as a tag too, not just `!fn` templates:
+
+```yaml
+# function passed via loader context
+result: !make_url { host: example.com, port: 443 }
+
+# scalar argument (single positional arg)
+!define upper: ${str.upper}
+greeting: !upper "hello"   # => "HELLO"
+
+# no arguments
+result: !get_timestamp
+```
+
+With a mapping node, kwargs are unpacked. With a scalar node, the value is passed as a single positional argument. With an empty/null value, the function is called with no arguments.
 
 ## Calling from expressions
 
@@ -222,10 +309,63 @@ Templates that construct a Pydantic model return the real object:
 result: !SimpleModel ${make_model(val=42)}
 ```
 
+## Composing functions with `!pipe`
+
+If you have several `!fn` templates that form a pipeline, `!pipe` chains them into a single callable:
+
+```yaml
+!define load: !fn file:templates/load.yaml
+!define clean: !fn file:templates/clean.yaml
+!define train: !fn file:templates/train.yaml
+!define evaluate: !fn file:templates/evaluate.yaml
+
+!define ml: !pipe [load, clean, train, evaluate]
+```
+
+Each stage's mapping output is kwarg-unpacked into the next stage. So if `load` returns `{data: ..., metadata: ...}`, `clean` receives those as named arguments.
+
+Pre-fill kwargs per stage:
+
+```yaml
+!define ml: !pipe
+  - load
+  - clean: { strategy: aggressive }
+  - train: { model_type: xgb }
+  - evaluate
+```
+
+Pipeline kwargs (from the call site) flow through to all stages:
+
+```yaml
+# 'path' reaches load, 'epochs' reaches train
+result: ${ml(path='/data/train.csv', epochs=200)}
+```
+
+Pipes compose with pipes:
+
+```yaml
+!define preprocess: !pipe [load, clean, normalize]
+!define train_eval: !pipe [train, evaluate]
+!define full: !pipe [preprocess, train_eval]
+```
+
+And since pipes are callables, they work in sweeps:
+
+```yaml
+!define fast: !pipe [load, downsample, train_quick]
+!define full: !pipe [load, clean, augment, train_full, evaluate]
+
+results: ${[p(path=data_path) for p in [fast, full]]}
+```
+
 ## When to use what
 
 | Pattern | Best for |
 |---|---|
-| `!fn` (callable) | Reusable templates, expression composability, isolated scope |
+| `!fn` inline mapping | Reusable templates returning mappings, isolated scope |
+| `!fn` with `!fn :` | Templates with params that return a single value |
+| `!fn ${expr}` | Simple expression transforms (lambdas) |
+| `!pipe` | Chaining callables into pipelines, sweep over methodologies |
+| Python callable as tag | Applying Python functions directly in YAML |
 | `!include` with merge | One-shot includes that merge into the parent scope |
 | `__dracon__` + anchor | Same-file composition helpers that don't need parameterization |

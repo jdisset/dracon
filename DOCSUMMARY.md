@@ -69,6 +69,7 @@ Defines variables in the current scope's context. These are removed from the fin
 | `!define x: ${expr}` | Composition time (expression) | Derived strings, comprehensions |
 | `!define x: !Type { ... }` | On first `${x}` access (lazy) | Pipeline stages, Python objects |
 | `!define f: !fn ...` | On each `f(...)` call | Reusable templates with args |
+| `!define p: !pipe [...]` | On each `p(...)` call | Composed pipeline of callables |
 | `!deferred` | Runtime (manual `.construct()`) | Objects needing live runtime state |
 
 **Lazy `!define` replaces** the old `!noconstruct` + `construct(&/ref)` ceremony:
@@ -129,30 +130,98 @@ This enables mixing static and dynamic items in a single sequence without explic
 
 ### 3.4. Callable Templates (`!fn`)
 
-`!fn` wraps a YAML template (file or inline) into a callable. Define once, call from tags or `${...}` expressions.
+`!fn` wraps a YAML template into a callable. Three forms:
 
 ```yaml
-# define from file or inline
+# from a file
 !define make_endpoint: !fn file:templates/endpoint.yaml
 
+# inline mapping -- returns the mapping
 !define greet: !fn
   !require who: "name"
   msg: hello ${who}
 
-# call via tag (looks like a type constructor)
-api: !make_endpoint { name: api, port: 443 }
+# inline scalar (expression lambda)
+!define double: !fn ${x * 2}
+```
 
-# call via expression (composable)
+**Scalar return with `!fn :`:** Use `!fn :` inside the body to return a single value instead of the full mapping. The outer `!fn` tag is optional when `!fn :` is present:
+
+```yaml
+!define double:
+  !require x: "number"
+  !fn : ${x * 2}
+
+result: ${double(x=21)}  # => 42
+```
+
+**Invocation:** Tag syntax or expression syntax:
+
+```yaml
+api: !make_endpoint { name: api, port: 443 }
 all: ${[make_endpoint(name=n) for n in service_names]}
 greeting: ${greet(who='world')}
+```
+
+**Tag invocation for any callable:** Any non-type callable in context works as a YAML tag -- not just `!fn` templates. Python functions, lambdas, etc. With a mapping, kwargs are unpacked. With a scalar, it's passed as a single positional arg.
+
+```yaml
+# Python function from context
+result: !make_url { host: example.com, port: 443 }
+greeting: !upper "hello"
 ```
 
 - Parameters: `!require` (mandatory) and `!set_default` (optional) inside the template.
 - Isolation: each call gets a fresh scope; args don't leak into the caller.
 - The template body is full dracon (`!if`, `!each`, `!include`, type tags all work).
-- Returns whatever the template composes to (mapping, constructed Pydantic model, etc.).
 
-### 3.5. Construction Control
+### 3.5. Function Composition (`!pipe`)
+
+`!pipe` takes a sequence of callables and produces a new callable that chains them. The output of each stage feeds as input to the next.
+
+```yaml
+!define load: !fn file:templates/load.yaml
+!define clean: !fn file:templates/clean.yaml
+!define train: !fn file:templates/train.yaml
+
+!define ml: !pipe [load, clean, train]
+
+# call it like any callable
+result: !ml { path: /data/train.csv, model_type: xgb }
+result: ${ml(path='/data/train.csv', model_type='xgb')}
+```
+
+**Output threading:**
+
+- If a stage returns a mapping (dict), it is **kwarg-unpacked** into the next stage. Keys become named arguments.
+- If a stage returns a typed object (Pydantic model, etc.), it is passed as a single value to the next stage's one unfilled `!require` parameter.
+
+**Partial application:** Pre-fill kwargs per stage with `name: {kwargs}` syntax:
+
+```yaml
+!define ml: !pipe
+  - load
+  - clean: { strategy: aggressive }   # baked-in default
+  - train
+```
+
+**Pipeline kwargs** flow through to all stages. `!set_default` params from any stage are available at pipeline call time:
+
+```yaml
+!define ml: !pipe [load, clean, train]
+# clean has !set_default strategy: standard, train has !set_default epochs: 100
+result: ${ml(path='/data/file.csv', strategy='aggressive', epochs=200)}
+```
+
+**Composition:** Pipes are callables, so they compose with other pipes:
+
+```yaml
+!define preprocess: !pipe [load, clean]
+!define train_eval: !pipe [train, evaluate]
+!define full: !pipe [preprocess, train_eval]   # flattened into 4 stages
+```
+
+### 3.6. Construction Control
 
 - **`!noconstruct`**: The node is processed (anchors/defines are valid) but the node is removed before the Construction phase. **Note:** The common `!noconstruct` + `construct(&/ref)` pattern for building Python objects is now obsolete -- use `!define x: !Type { ... }` with lazy construction instead. Still useful for template anchors and metadata nodes.
 - **`__dracon__` Prefix**: Any key starting with `__dracon__` is treated as `!noconstruct`.

@@ -254,6 +254,229 @@ class TestFnIsolation:
         assert [r['doubled'] for r in config['results']] == [0, 2, 4, 6, 8]
 
 
+# --- inline scalar !fn (expression lambdas) ---
+
+
+class TestFnInlineScalar:
+    """!define f: !fn ${expr} -- expression lambdas returning scalars."""
+
+    def test_scalar_arithmetic(self):
+        yaml = """
+        !define double: !fn ${x * 2}
+        result: ${double(x=21)}
+        """
+        config = _loads(yaml)
+        assert config['result'] == 42
+
+    def test_scalar_string_expr(self):
+        yaml = """
+        !define greet: !fn ${"Hello " + name}
+        result: ${greet(name="world")}
+        """
+        config = _loads(yaml)
+        assert config['result'] == "Hello world"
+
+    def test_scalar_multiple_calls(self):
+        yaml = """
+        !define inc: !fn ${x + 1}
+        a: ${inc(x=0)}
+        b: ${inc(x=10)}
+        """
+        config = _loads(yaml)
+        assert config['a'] == 1
+        assert config['b'] == 11
+
+    def test_scalar_in_comprehension(self):
+        yaml = """
+        !define sq: !fn ${x ** 2}
+        results: ${[sq(x=i) for i in range(5)]}
+        """
+        config = _loads(yaml)
+        assert config['results'] == [0, 1, 4, 9, 16]
+
+    def test_scalar_tag_invocation(self):
+        """!fn_name { args } works for scalar-returning callables."""
+        yaml = """
+        !define double: !fn ${x * 2}
+        result: !double { x: 21 }
+        """
+        config = _loads(yaml)
+        assert config['result'] == 42
+
+    def test_scalar_chaining(self):
+        yaml = """
+        !define double: !fn ${x * 2}
+        result: ${str(double(x=21))}
+        """
+        config = _loads(yaml)
+        assert config['result'] == '42'
+
+
+# --- !fn : return marker ---
+
+
+class TestFnReturnMarker:
+    """!fn : value inside a body marks the return value."""
+
+    def test_return_scalar_with_outer_fn(self):
+        """!fn body with !fn : returns scalar, not mapping."""
+        yaml = """
+        !define double: !fn
+          !require x: "number"
+          !fn : ${x * 2}
+        result: ${double(x=21)}
+        """
+        config = _loads(yaml)
+        assert config['result'] == 42
+
+    def test_return_scalar_without_outer_fn(self):
+        """!fn : inside !define body implies callable creation."""
+        yaml = """
+        !define double:
+          !require x: "number"
+          !fn : ${x * 2}
+        result: ${double(x=21)}
+        """
+        config = _loads(yaml)
+        assert config['result'] == 42
+
+    def test_return_with_set_default(self):
+        yaml = """
+        !define greet:
+          !require name: "who"
+          !set_default prefix: Hello
+          !fn : ${prefix + " " + name}
+        result: ${greet(name="world")}
+        overridden: ${greet(name="world", prefix="Hi")}
+        """
+        config = _loads(yaml)
+        assert config['result'] == "Hello world"
+        assert config['overridden'] == "Hi world"
+
+    def test_return_mapping_value(self):
+        """!fn : with a mapping value returns that mapping."""
+        yaml = """
+        !define extract:
+          !require data: "input list"
+          !fn :
+            count: ${len(data)}
+            first: ${data[0]}
+        result: ${extract(data=[10, 20, 30])}
+        """
+        config = _loads(yaml)
+        assert config['result']['count'] == 3
+        assert config['result']['first'] == 10
+
+    def test_return_with_define_helpers(self):
+        """!define inside body provides intermediate values for !fn return."""
+        yaml = """
+        !define compute:
+          !require x: "number"
+          !define intermediate: ${x + 1}
+          !fn : ${intermediate * 2}
+        result: ${compute(x=4)}
+        """
+        config = _loads(yaml)
+        assert config['result'] == 10
+
+    def test_return_tag_invocation(self):
+        """Tag syntax works with !fn : return."""
+        yaml = """
+        !define double:
+          !require x: "number"
+          !fn : ${x * 2}
+        result: !double { x: 21 }
+        """
+        config = _loads(yaml)
+        assert config['result'] == 42
+
+    def test_return_multiple_fn_keys_error(self):
+        """Multiple !fn : keys should error."""
+        yaml = """
+        !define bad:
+          !require x: "number"
+          !fn : ${x * 2}
+          !fn : ${x * 3}
+        result: ${bad(x=1)}
+        """
+        with pytest.raises(Exception):
+            _loads(yaml)
+
+    def test_return_in_comprehension(self):
+        yaml = """
+        !define sq:
+          !require x: "number"
+          !fn : ${x ** 2}
+        results: ${[sq(x=i) for i in range(5)]}
+        """
+        config = _loads(yaml)
+        assert config['results'] == [0, 1, 4, 9, 16]
+
+
+# --- callable() tag invocation ---
+
+
+class TestCallableTagInvocation:
+    """Any callable in context works as a YAML tag."""
+
+    def test_python_function_tag_with_kwargs(self):
+        def make_url(host='localhost', port=80):
+            return f"http://{host}:{port}"
+
+        yaml = """
+        result: !make_url { host: example.com, port: 443 }
+        """
+        config = _loads(yaml, make_url=make_url)
+        assert config['result'] == "http://example.com:443"
+
+    def test_python_function_tag_scalar_arg(self):
+        """!callable "scalar" passes scalar as single positional arg."""
+        yaml = """
+        !define upper: ${str.upper}
+        result: !upper "hello"
+        """
+        config = _loads(yaml)
+        assert config['result'] == "HELLO"
+
+    def test_lambda_tag(self):
+        yaml = """
+        result: !double "21"
+        """
+        config = _loads(yaml, double=lambda x: int(x) * 2)
+        assert config['result'] == 42
+
+    def test_callable_with_no_args(self):
+        """Tag invocation with no arguments."""
+        def get_answer():
+            return 42
+
+        yaml = """
+        result: !get_answer
+        """
+        config = _loads(yaml, get_answer=get_answer)
+        assert config['result'] == 42
+
+    def test_non_callable_not_tag(self):
+        """!define'd non-callable falls through to type resolution, not tag invocation."""
+        yaml = """
+        !define my_val: 42
+        result: ${my_val}
+        """
+        config = _loads(yaml)
+        assert config['result'] == 42
+
+    def test_callable_tag_overrides_type(self):
+        """Explicit !define callable shadows implicit type resolution."""
+        def custom_int(x):
+            return int(x) + 1000
+
+        yaml = """
+        result: !custom_int "42"
+        """
+        config = _loads(yaml, custom_int=custom_int)
+        assert config['result'] == 1042
+
+
 # --- return types ---
 
 
