@@ -2,7 +2,7 @@
 # MIT License - see LICENSE file for details.
 
 ## {{{                          --     imports     --
-from typing import Optional
+from typing import Any, Optional
 import re
 from dracon.utils import ftrace, deepcopy
 from dracon.composer import (
@@ -173,10 +173,7 @@ _BUILTIN_TAGS = frozenset({
 
 
 def _is_constructable_type_tag(node, loader) -> bool:
-    """True iff the node's tag resolves to a Python type (not an instruction).
-    Only applies to mapping/sequence nodes, not scalars like !int 42."""
-    from typing import Any
-    # only mapping/sequence nodes can be lazily constructed as typed objects
+    """True iff the node is a mapping/sequence whose tag resolves to a Python type."""
     if not isinstance(node, (DraconMappingNode, DraconSequenceNode)):
         return False
     tag = getattr(node, 'tag', None)
@@ -254,15 +251,13 @@ class Define(Instruction):
                 source_context=value_node.source_context,
             )
         elif _is_constructable_type_tag(value_node, loader):
-            # lazy construction: wrap in LazyConstructable, resolve on first access
             value = LazyConstructable(
                 node=value_node,
                 loader=loader,
                 source=node_source(key_node),
                 defined_vars=comp_res.defined_vars,
+                post_process=self.target_type,
             )
-            if self.target_type is not None:
-                value.set_post_process(self.target_type)
         else:
             value = loader.load_composition_result(CompositionResult(root=value_node))
 
