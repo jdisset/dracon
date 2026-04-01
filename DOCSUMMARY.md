@@ -68,6 +68,7 @@ Defines variables in the current scope's context. These are removed from the fin
 | `!define x: 42` | Immediately (literal) | Constants, simple values |
 | `!define x: ${expr}` | Composition time (expression) | Derived strings, comprehensions |
 | `!define x: !Type { ... }` | On first `${x}` access (lazy) | Pipeline stages, Python objects |
+| `!define f: !fn ...` | On each `f(...)` call | Reusable templates with args |
 | `!deferred` | Runtime (manual `.construct()`) | Objects needing live runtime state |
 
 **Lazy `!define` replaces** the old `!noconstruct` + `construct(&/ref)` ceremony:
@@ -126,7 +127,32 @@ tasks:
 
 This enables mixing static and dynamic items in a single sequence without explicit concatenation.
 
-### 3.4. Construction Control
+### 3.4. Callable Templates (`!fn`)
+
+`!fn` wraps a YAML template (file or inline) into a callable. Define once, call from tags or `${...}` expressions.
+
+```yaml
+# define from file or inline
+!define make_endpoint: !fn file:templates/endpoint.yaml
+
+!define greet: !fn
+  !require who: "name"
+  msg: hello ${who}
+
+# call via tag (looks like a type constructor)
+api: !make_endpoint { name: api, port: 443 }
+
+# call via expression (composable)
+all: ${[make_endpoint(name=n) for n in service_names]}
+greeting: ${greet(who='world')}
+```
+
+- Parameters: `!require` (mandatory) and `!set_default` (optional) inside the template.
+- Isolation: each call gets a fresh scope; args don't leak into the caller.
+- The template body is full dracon (`!if`, `!each`, `!include`, type tags all work).
+- Returns whatever the template composes to (mapping, constructed Pydantic model, etc.).
+
+### 3.5. Construction Control
 
 - **`!noconstruct`**: The node is processed (anchors/defines are valid) but the node is removed before the Construction phase. **Note:** The common `!noconstruct` + `construct(&/ref)` pattern for building Python objects is now obsolete -- use `!define x: !Type { ... }` with lazy construction instead. Still useful for template anchors and metadata nodes.
 - **`__dracon__` Prefix**: Any key starting with `__dracon__` is treated as `!noconstruct`.
