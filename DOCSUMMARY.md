@@ -58,8 +58,33 @@ Executed during Phase 1. Modifications apply to the YAML graph.
 
 Defines variables in the current scope's context. These are removed from the final configuration tree.
 
-- **`!define key: value`**: Sets `key` in the context.
-- **`!set_default key: value`**: Sets `key` only if it doesn't exist in the context (useful in included files).
+- **`!define key: value`**: Sets `key` in the context. For expressions (`${...}`), evaluated immediately. For **typed objects** (`!MyModel { ... }`), construction is **lazy** -- happens on first `${key}` access, enabling forward references and pipeline-style YAML.
+- **`!set_default key: value`**: Sets `key` only if it doesn't exist in the context (useful in included files). Also supports lazy construction for typed objects.
+
+**Construction timing gradient:**
+
+| Pattern | Resolves | Use case |
+|---------|----------|----------|
+| `!define x: 42` | Immediately (literal) | Constants, simple values |
+| `!define x: ${expr}` | Composition time (expression) | Derived strings, comprehensions |
+| `!define x: !Type { ... }` | On first `${x}` access (lazy) | Pipeline stages, Python objects |
+| `!deferred` | Runtime (manual `.construct()`) | Objects needing live runtime state |
+
+**Lazy `!define` replaces** the old `!noconstruct` + `construct(&/ref)` ceremony:
+
+```yaml
+# old way:
+!noconstruct data: !DataLoader
+  path: ${data_path}
+!define result: ${construct(&/data).process()}
+
+# new way:
+!define data: !DataLoader
+  path: ${data_path}
+!define result: ${data.process()}
+```
+
+Key behaviors: result is the real Python object (not a proxy), construction is cached (at most once), forward references work, circular references are detected, unreferenced objects are never constructed.
 
 ### 3.2. Conditionals (`!if`)
 
@@ -103,7 +128,7 @@ This enables mixing static and dynamic items in a single sequence without explic
 
 ### 3.4. Construction Control
 
-- **`!noconstruct`**: The node is processed (anchors/defines are valid) but the node is removed before the Construction phase.
+- **`!noconstruct`**: The node is processed (anchors/defines are valid) but the node is removed before the Construction phase. **Note:** The common `!noconstruct` + `construct(&/ref)` pattern for building Python objects is now obsolete -- use `!define x: !Type { ... }` with lazy construction instead. Still useful for template anchors and metadata nodes.
 - **`__dracon__` Prefix**: Any key starting with `__dracon__` is treated as `!noconstruct`.
 
 ## 4. The Merge Operator (`<<:`)
@@ -217,7 +242,7 @@ Additionally, file loaders inject `$DIR`, `$FILE`, `$FILE_PATH`, `$FILE_EXT`, `$
 
 ## 8. Deferred Execution
 
-Mechanisms for values unavailable at load time (runtime secrets, Python loop objects).
+Mechanisms for values unavailable at load time (runtime secrets, Python loop objects). Before reaching for `!deferred`, check if lazy `!define` (section 3.1) solves your problem -- if all info is available at composition time, lazy `!define x: !Type { ... }` is simpler.
 
 ### 8.1. `!deferred` / `DeferredNode`
 
