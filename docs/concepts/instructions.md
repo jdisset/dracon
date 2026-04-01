@@ -8,10 +8,11 @@ These instructions create variables within the configuration's context, making t
 
 - **`!define var_name: node_value`**
 
-  - Evaluates `node_value` _at composition time_. If `node_value` itself contains interpolations (`${...}` or `$(...)`), they are resolved immediately based on the context _at that point_.
   - Assigns the resulting value to `var_name` in the context of the current node and its descendants.
   - **Overwrites** any existing variable with the same name in the current scope.
   - The `!define var_name: ...` entry is **removed** from the final configuration structure.
+  - **For expressions** (`${...}`): evaluated immediately at composition time.
+  - **For typed objects** (`!MyModel { ... }`): construction is **deferred** until the variable is first accessed via `${var_name}`. This means forward references work -- the object can reference variables defined later in the file.
 
 - **`!set_default var_name: node_value`**
   - Similar to `!define`, but only sets `var_name` if it does _not_ already exist in the current context scope.
@@ -32,6 +33,25 @@ config:
 ```
 
 **Final `config` object:** `{ "version": "1.2.0", "debug_mode": ..., "logging": { "level": "INFO" } }` (The `!define` keys are gone).
+
+### Lazy Construction with Typed Objects
+
+When `!define` assigns a typed node (a mapping or sequence with a `!TypeTag`), construction is lazy -- it happens when the variable is first accessed, not when the `!define` is processed. This is important because it means the object's interpolations are resolved in the full context, including variables defined _after_ the `!define`:
+
+```yaml
+# order doesn't matter -- 'model' is constructed when ${model} is accessed
+!define model: !Predictor
+  data: ${dataset}
+  method: linear
+!define dataset: !DataLoader { path: data.csv }
+
+# both variables are available here
+output: ${model.predict()}
+```
+
+The result is the real Python object. `isinstance()` returns `True`, methods work, attributes are accessible. If the variable is never referenced, the object is never constructed.
+
+This replaces the old `!noconstruct` + `construct(&/name)` ceremony entirely.
 
 ### Explicit Type Coercion (`!define:type`)
 
@@ -168,10 +188,14 @@ config:
 
 Sometimes you need helper nodes or templates during composition that shouldn't appear in the final constructed configuration object.
 
+!!! note "You probably don't need `!noconstruct` for building objects"
+    The common pattern of `!noconstruct` + `construct(&/ref)` to manually build Python objects from YAML nodes has been replaced by lazy `!define`. Just write `!define x: !MyType { ... }` and use `${x}` -- construction happens automatically on first access. See the [lazy construction section above](#lazy-construction-with-typed-objects).
+
 - **`!noconstruct <node>`**
 
   - Applies to any node (scalar, sequence, mapping).
-  - The node exists during composition (can be referenced via anchors `&`, includes `!include`, or defines `!define`) but it and its children are **skipped during the construction phase** — they won't appear in the final Python object.
+  - The node exists during composition (can be referenced via anchors `&`, includes `!include`, or defines `!define`) but it and its children are **skipped during the construction phase** -- they won't appear in the final Python object.
+  - Still useful for template anchors, metadata, and nodes that should exist in the tree but not in the output.
 
 - **`__dracon__<key>: ...`**
   - Applies only to top-level keys in a mapping.

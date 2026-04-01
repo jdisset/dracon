@@ -30,6 +30,54 @@ workers: ${max_workers}
 database: ${database_config}
 ```
 
+### `!define` with Typed Objects (Lazy Construction)
+
+When the value of a `!define` has a type tag (a Pydantic model or other Python class), construction is **lazy** -- it happens on first access, not when the `!define` is encountered. This means the object's interpolations are resolved later, when the full context is available.
+
+```yaml
+# construction of SimpleModel happens when ${model} is first accessed
+!define model: !SimpleModel { field: 42 }
+
+# works even though 'y' is defined AFTER 'obj'
+!define obj: !MyModel
+  value: ${y}
+!define y: ${42}
+
+result: ${obj.value}  # triggers construction, returns 42
+```
+
+This is the natural way to bind Python objects to variables. You can call methods, access attributes, chain objects:
+
+```yaml
+!define data: !DataLoader { path: ${data_path} }
+!define cleaned: !DataCleaner { data: ${data}, strategy: outlier }
+!define predictions: ${cleaned.predict()}
+output: ${predictions}
+```
+
+!!! tip "Pipeline-style YAML"
+    Each `!define` with a type tag is a pipeline stage. Dependencies are explicit through `${...}` references. If a variable is never referenced, the object is never constructed -- no wasted work.
+
+Key behaviors:
+
+- The result is the **real Python object**, not a proxy. `isinstance`, `type()`, attribute access, method calls all work normally.
+- Construction happens **at most once** per variable (cached after first access).
+- Forward references work: `!define x: !T { field: ${y} }` followed by `!define y: 42` is fine.
+- Circular references are detected: `!define a: !T { ref: ${a} }` raises `CompositionError`.
+
+This replaces the old `!noconstruct` + `construct()` pattern:
+
+```yaml
+# before (verbose, manual):
+!noconstruct data: !DataLoader
+  path: ${data_path}
+!define result: ${construct(&/data).process()}
+
+# after (just works):
+!define data: !DataLoader { path: ${data_path} }
+!define result: ${data.process()}
+```
+
 ### `!define:type` - Typed Variable Definition
 
 Force a specific type on the defined value. Useful when YAML's implicit type inference doesn't match what you want -- for example, defining `1` as a float or `42` as a string:
@@ -103,6 +151,19 @@ The variable definition gradient:
 - `!define` -- always set, overwrites previous values
 - `!set_default` -- set if nobody else does (optional with fallback)
 - `!require` -- must be provided by someone else (mandatory, no fallback)
+
+### When Does Construction Happen?
+
+With `!define`, the timing depends on what you're defining:
+
+| Pattern | Resolves | Use case |
+|---------|----------|----------|
+| `!define x: 42` | Immediately (literal) | Constants, simple values |
+| `!define x: ${expr}` | Composition time (expression) | Derived strings, comprehensions |
+| `!define x: !Type { ... }` | On first `${x}` access (lazy) | Pipeline stages, Python objects |
+| `!deferred` | Runtime (manual `.construct()`) | Objects needing live runtime state |
+
+The lazy construction for typed objects is what makes `!define` work as a pipeline mechanism. The `!noconstruct` + `construct()` pattern that was previously needed for this is now unnecessary.
 
 ### Processing Order
 
@@ -322,6 +383,11 @@ server:
 ## Construction Control
 
 ### `!noconstruct` - Skip During Construction
+
+!!! note "Mostly superseded by lazy `!define`"
+    The common pattern of `!noconstruct` + `construct(&/name)` to build Python objects from YAML is no longer needed. Use `!define name: !Type { ... }` instead -- it handles lazy construction automatically. See [lazy construction above](#define-with-typed-objects-lazy-construction).
+
+    `!noconstruct` is still useful for its original purpose: excluding nodes from construction entirely (template anchors, metadata, tooling hints).
 
 Tag a key or value with `!noconstruct` to skip it during Pydantic model construction. The node is kept in the YAML tree during composition but ignored when building Python objects.
 

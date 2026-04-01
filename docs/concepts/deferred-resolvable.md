@@ -36,16 +36,33 @@ Dracon offers two mechanisms for delaying parts of the configuration processing:
 
 **Analogy:** `Resolvable` is like getting a gift voucher (`Resolvable`) for a specific item (`T`). You have the voucher now, but you need to go redeem it (`.resolve()`) later, possibly providing extra information (`context`), to get the actual item.
 
+## Where Does Lazy `!define` Fit?
+
+Before reaching for `!deferred` or `Resolvable`, consider whether lazy `!define` solves your problem. When you write `!define x: !MyType { ... }`, the object is constructed automatically on first access to `${x}`. This covers the common case where you need to build a Python object from YAML but its fields depend on other `!define`d variables:
+
+```yaml
+!define data: !DataLoader { path: ${data_path} }
+!define model: !Predictor { data: ${data} }
+result: ${model.predict()}
+```
+
+No manual `.construct()` call, no `!noconstruct`, no `&` anchor juggling. If all the information you need is available at composition time (from `!define`, `!set_default`, environment variables, etc.), lazy `!define` is the right tool.
+
+You still need `!deferred` when:
+
+- The context is only available at **runtime** (e.g. secrets fetched after load, user input, runtime IDs).
+- You want to **re-construct** the same node multiple times with different contexts.
+- You need explicit control over **when** construction happens relative to other application logic.
+
 ## Comparison Summary
 
-| Feature            | `DeferredNode` (`!deferred`)        | `Resolvable[T]`                         |
-| :----------------- | :---------------------------------- | :-------------------------------------- |
-| **What's Delayed** | Entire Node Branch **Construction** | Single Field **Value Processing**       |
-| **Stage**          | During initial `load`/`loads`       | After initial load, before final use    |
-| **Placeholder**    | `DeferredNode` instance             | `Resolvable` instance                   |
-| **Trigger**        | `.construct(context=...)`           | `.resolve(context=...)`                 |
-| **Input Held**     | YAML Node, Context Snapshot         | YAML Node, Expected Type `T`, Ctor Ref  |
-| **Granularity**    | Whole Node Tree Branch              | Single Field/Value                      |
-| **Primary Use**    | Late Context, Resource Init, Order  | CLI Post-Processing, Field Finalization |
+| Feature            | Lazy `!define`                      | `DeferredNode` (`!deferred`)        | `Resolvable[T]`                         |
+| :----------------- | :---------------------------------- | :---------------------------------- | :-------------------------------------- |
+| **What's Delayed** | Object construction in `!define`    | Entire Node Branch **Construction** | Single Field **Value Processing**       |
+| **Stage**          | During composition, on first access | During initial `load`/`loads`       | After initial load, before final use    |
+| **Trigger**        | Automatic (first `${x}` access)    | Manual `.construct(context=...)`    | Manual `.resolve(context=...)`          |
+| **Context**        | Full composition context            | Captured snapshot + runtime context | YAML Node, Expected Type `T`, Ctor Ref  |
+| **Granularity**    | Single variable binding             | Whole Node Tree Branch              | Single Field/Value                      |
+| **Primary Use**    | Object pipelines, forward refs      | Late Context, Resource Init, Order  | CLI Post-Processing, Field Finalization |
 
-Use `DeferredNode` when you need to postpone building a component. Use `Resolvable` when the component is built, but a specific value within it needs a final touch based on later information.
+Use lazy `!define` for composition-time object pipelines. Use `DeferredNode` when you need runtime context. Use `Resolvable` when a single field needs post-load finalization.
