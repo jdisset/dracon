@@ -213,6 +213,90 @@ class LazyProtocol(Protocol):
     context: DictLike
 
 
+class _LCSentinel:
+    _instance = None
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+_LC_SENTINEL = _LCSentinel()
+
+
+class LazyConstructable:
+    """Deferred construction marker for !define with type tags.
+
+    NOT a proxy. Resolved by the interpolation engine before user code sees it.
+    Caches result so construction happens at most once.
+    """
+
+    _CONSTRUCTING: set[int] = set()  # cycle detection
+
+    __slots__ = ('_node', '_loader', '_source', '_result', '_post_process', '_defined_vars')
+
+    def __init__(self, node, loader, source=None, defined_vars=None):
+        self._node = node
+        self._loader = loader
+        self._source = source
+        self._result = _LC_SENTINEL
+        self._post_process = None
+        self._defined_vars = defined_vars  # ref to comp_res.defined_vars, accumulates later !defines
+
+    def set_post_process(self, coerce_type):
+        self._post_process = coerce_type
+
+    def resolve(self) -> Any:
+        if self._result is not _LC_SENTINEL:
+            return self._result
+
+        from dracon.composer import CompositionResult, walk_node
+        from dracon.diagnostics import CompositionError
+        from dracon.merge import add_to_context
+        from functools import partial
+
+        node_id = id(self)
+        if node_id in self._CONSTRUCTING:
+            raise CompositionError(
+                f"circular dependency: !define at {self._source} "
+                f"triggers construction of itself"
+            )
+        self._CONSTRUCTING.add(node_id)
+        try:
+            comp = CompositionResult(root=self._node)
+            # propagate later-defined vars so forward references resolve
+            if self._defined_vars:
+                walk_node(comp.root, partial(add_to_context, self._defined_vars))
+            self._result = self._loader.load_composition_result(comp)
+            if self._post_process is not None:
+                self._result = self._post_process(self._result)
+            return self._result
+        except Exception as e:
+            tag = getattr(self._node, 'tag', '?')
+            raise CompositionError(
+                f"error constructing {tag} "
+                f"(defined at {self._source})"
+            ) from e
+        finally:
+            self._CONSTRUCTING.discard(node_id)
+
+    def __deepcopy__(self, memo):
+        from dracon.utils import deepcopy as dracon_deepcopy
+        clone = LazyConstructable.__new__(LazyConstructable)
+        memo[id(self)] = clone
+        clone._node = dracon_deepcopy(self._node, memo)
+        clone._loader = self._loader  # shared, not copied
+        clone._source = self._source
+        clone._result = _LC_SENTINEL  # each copy constructs independently
+        clone._post_process = self._post_process
+        clone._defined_vars = self._defined_vars  # shared ref
+        return clone
+
+    def __repr__(self):
+        tag = getattr(self._node, 'tag', '?')
+        resolved = self._result is not _LC_SENTINEL
+        return f"LazyConstructable({tag}, resolved={resolved})"
+
+
 def resolve_field_references(expr: str):
     keypath_matches = find_field_references(expr)
     if not keypath_matches:
@@ -312,7 +396,9 @@ def do_safe_eval(expr: str, engine: str, symbols: Optional[dict] = None, source_
         for ident in identifiers:
             if ident in symbols and not ident.startswith('__'):
                 val = symbols.get(ident)  # triggers TrackedContext tracking
-                if isinstance(val, LazyProtocol):
+                if isinstance(val, LazyConstructable):
+                    symbols[ident] = val.resolve()
+                elif isinstance(val, LazyProtocol):
                     symbols[ident] = val.resolve()
 
     try:

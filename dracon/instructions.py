@@ -16,7 +16,7 @@ from ruamel.yaml.nodes import Node
 from dracon.keypath import KeyPath, KeyPathToken, MAPPING_KEY
 from dracon.nodes import node_source
 from dracon.merge import merged, cached_merge_key, add_to_context
-from dracon.interpolation import evaluate_expression, InterpolableNode
+from dracon.interpolation import evaluate_expression, InterpolableNode, LazyConstructable
 from dracon.deferred import DeferredNode
 from functools import partial
 from dracon.nodes import DraconScalarNode
@@ -161,6 +161,46 @@ _COERCE_TYPES: dict[str, type] = {
 _TYPED_DEFINE_RE = re.compile(r'^!define:(\w+)$')
 _TYPED_SET_DEFAULT_RE = re.compile(r'^!(?:define\?|set_default):(\w+)$')
 
+# tags that are dracon instructions or built-ins, never constructable types
+_BUILTIN_TAGS = frozenset({
+    '!include', '!include?', '!noconstruct', '!unset',
+    'tag:yaml.org,2002:map', 'tag:yaml.org,2002:seq',
+    'tag:yaml.org,2002:str', 'tag:yaml.org,2002:int',
+    'tag:yaml.org,2002:float', 'tag:yaml.org,2002:bool',
+    'tag:yaml.org,2002:null', 'tag:yaml.org,2002:binary',
+    'tag:yaml.org,2002:timestamp',
+})
+
+
+def _is_constructable_type_tag(node, loader) -> bool:
+    """True iff the node's tag resolves to a Python type (not an instruction).
+    Only applies to mapping/sequence nodes, not scalars like !int 42."""
+    from typing import Any
+    # only mapping/sequence nodes can be lazily constructed as typed objects
+    if not isinstance(node, (DraconMappingNode, DraconSequenceNode)):
+        return False
+    tag = getattr(node, 'tag', None)
+    if not tag or not isinstance(tag, str) or not tag.startswith('!'):
+        return False
+    if tag in _BUILTIN_TAGS:
+        return False
+    # exclude instruction tags (registered and pattern-based)
+    if match_instruct(tag) is not None:
+        return False
+    # exclude deferred tags
+    if tag.startswith('!deferred'):
+        return False
+    # try to resolve to a real Python type
+    try:
+        from dracon.draconstructor import resolve_type, get_all_types
+        localns = {}
+        if loader and hasattr(loader, 'context'):
+            localns.update(get_all_types(loader.context))
+        resolved = resolve_type(tag, localns=localns)
+        return resolved is not Any
+    except (ValueError, ImportError):
+        return False
+
 
 class Define(Instruction):
     """
@@ -213,10 +253,20 @@ class Define(Instruction):
                 context=value_node.context,
                 source_context=value_node.source_context,
             )
+        elif _is_constructable_type_tag(value_node, loader):
+            # lazy construction: wrap in LazyConstructable, resolve on first access
+            value = LazyConstructable(
+                node=value_node,
+                loader=loader,
+                source=node_source(key_node),
+                defined_vars=comp_res.defined_vars,
+            )
+            if self.target_type is not None:
+                value.set_post_process(self.target_type)
         else:
             value = loader.load_composition_result(CompositionResult(root=value_node))
 
-        if self.target_type is not None:
+        if self.target_type is not None and not isinstance(value, LazyConstructable):
             try:
                 value = self.target_type(value)
             except (ValueError, TypeError) as e:
