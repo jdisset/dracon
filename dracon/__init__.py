@@ -47,3 +47,4 @@ from dracon.nodes import DraconScalarNode, DraconMappingNode, DraconSequenceNode
 from dracon.deferred import DeferredNode
 from dracon.composition_trace import CompositionTrace, TraceEntry
 from dracon.instructions import register_instruction, Instruction, unpack_mapping_key
+from dracon.callable import DraconCallable

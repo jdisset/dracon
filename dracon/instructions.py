@@ -153,6 +153,63 @@ def check_pending_requirements(comp_res: CompositionResult, loader) -> None:
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
+
+## {{{                           --     fn     --
+
+
+def _create_fn_callable(value_node, loader, key_node):
+    """Create a DraconCallable from an !fn value node."""
+    from dracon.callable import DraconCallable
+    from dracon.diagnostics import CompositionError
+
+    source = node_source(key_node)
+    name = key_node.value
+
+    if isinstance(value_node, DraconScalarNode):
+        include_str = value_node.value
+        if ':' not in include_str:
+            raise CompositionError(
+                f"!fn scalar must be a loader reference (file:..., pkg:...), got '{include_str}'",
+                context=source,
+            )
+        loader_name, path = include_str.split(':', 1)
+        if loader_name not in loader.custom_loaders:
+            available = ', '.join(sorted(loader.custom_loaders.keys()))
+            raise CompositionError(
+                f"!fn: unknown loader '{loader_name}'. Available: {available}",
+                context=source,
+            )
+        raw_content, file_ctx = loader.custom_loaders[loader_name](path, draconloader=loader)
+        if not isinstance(raw_content, str):
+            raise CompositionError(
+                f"!fn: loader '{loader_name}' returned {type(raw_content).__name__}, expected str",
+                context=source,
+            )
+        from dracon.loader import compose_config_from_str as raw_compose
+        raw_comp = raw_compose(loader.yaml, raw_content)
+        return DraconCallable(
+            template_node=raw_comp.root, loader=loader, source=source,
+            file_context=file_ctx, name=name,
+        )
+
+    elif isinstance(value_node, (DraconMappingNode, DraconSequenceNode)):
+        from dracon.nodes import reset_tag
+        template_node = deepcopy(value_node)
+        reset_tag(template_node)
+        return DraconCallable(
+            template_node=template_node, loader=loader, source=source, name=name,
+        )
+
+    else:
+        raise CompositionError(
+            f"!fn value must be a file reference or inline mapping, "
+            f"got {type(value_node).__name__}",
+            context=source,
+        )
+
+
+##────────────────────────────────────────────────────────────────────────────}}}
+
 ## {{{                          --     define     --
 _COERCE_TYPES: dict[str, type] = {
     'int': int, 'float': float, 'str': str, 'bool': bool,
@@ -163,7 +220,7 @@ _TYPED_SET_DEFAULT_RE = re.compile(r'^!(?:define\?|set_default):(\w+)$')
 
 # tags that are dracon instructions or built-ins, never constructable types
 _BUILTIN_TAGS = frozenset({
-    '!include', '!include?', '!noconstruct', '!unset',
+    '!include', '!include?', '!noconstruct', '!unset', '!fn',
     'tag:yaml.org,2002:map', 'tag:yaml.org,2002:seq',
     'tag:yaml.org,2002:str', 'tag:yaml.org,2002:int',
     'tag:yaml.org,2002:float', 'tag:yaml.org,2002:bool',
@@ -241,7 +298,18 @@ class Define(Instruction):
             comp_res, path, self.__class__.__name__.lower()
         )
 
-        if isinstance(value_node, InterpolableNode):
+        var_name = key_node.value
+        if not var_name.isidentifier():
+            ctx = node_source(key_node)
+            raise CompositionError(
+                f"Invalid variable name '{var_name}' in !{self.__class__.__name__.lower()}. "
+                f"Must be a valid Python identifier.",
+                context=ctx,
+            )
+
+        if getattr(value_node, 'tag', None) == '!fn':
+            value = _create_fn_callable(value_node, loader, key_node)
+        elif isinstance(value_node, InterpolableNode):
             value = evaluate_expression(
                 value_node.value,
                 current_path=path,
@@ -270,14 +338,6 @@ class Define(Instruction):
                     f"cannot coerce {value!r} to {self.target_type.__name__} in !define:{self.target_type.__name__}",
                     context=ctx,
                 ) from e
-
-        var_name = key_node.value
-        if not var_name.isidentifier():
-            ctx = node_source(key_node)
-            raise CompositionError(
-                f"Invalid variable name '{var_name}' in !{self.__class__.__name__.lower()}. Must be a valid Python identifier.",
-                context=ctx,
-            )
 
         del parent_node[str(path[-1])]
 

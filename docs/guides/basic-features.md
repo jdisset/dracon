@@ -190,6 +190,22 @@ api:
   retries: ${retry_count}
 ```
 
+### Callable Templates
+
+Turn a parameterized template into a reusable function with `!fn`:
+
+```yaml
+!define make_endpoint: !fn
+  !require name: "service name"
+  !set_default port: 8080
+  url: https://${name}.example.com:${port}
+
+api: !make_endpoint { name: api, port: 443 }
+internal: !make_endpoint { name: internal }
+```
+
+See the [YAML Functions guide](use-fn.md) for the full picture.
+
 ### Simple Loops
 
 ```yaml

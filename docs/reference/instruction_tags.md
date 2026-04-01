@@ -169,6 +169,52 @@ The lazy construction for typed objects is what makes `!define` work as a pipeli
 
 Instructions are processed in this order: `!set_default` → `!define` → `!each` → `!if`. This means `!define` can override `!set_default`, and `!if`/`!each` can use variables defined by both. `!require` is checked after all instructions and includes are resolved.
 
+## YAML Functions
+
+### `!fn` - Callable Templates
+
+Wrap a YAML template into a callable value. The result is a `DraconCallable` -- a real Python callable that can be invoked from both YAML tags and `${...}` expressions.
+
+**Definition:**
+
+```yaml
+# from a file
+!define make_endpoint: !fn file:templates/endpoint.yaml
+
+# inline
+!define make_endpoint: !fn
+  !require name: "service name"
+  !set_default port: 8080
+  url: https://${name}.example.com:${port}
+```
+
+**Invocation (tag syntax):**
+
+```yaml
+api: !make_endpoint { name: api, port: 443 }
+```
+
+**Invocation (expression syntax):**
+
+```yaml
+api: ${make_endpoint(name='api', port=443)}
+endpoints: ${[make_endpoint(name=n) for n in names]}
+```
+
+Parameters inside the template:
+
+- `!require param: "hint"` -- mandatory, error if not provided
+- `!set_default param: value` -- optional with default
+
+Each call runs the full composition pipeline on an isolated copy of the template. Arguments don't leak into the caller's scope. The template can use any dracon feature (`!if`, `!each`, `!include`, type tags, interpolation).
+
+The callable name becomes a valid YAML tag: `!define f: !fn ...` makes `!f { ... }` available as a tag. From the caller's perspective, it works exactly like a Python type tag.
+
+!!! tip
+    `!fn` is the recommended approach when you need to call a template more than once or compose it inside expressions. For one-shot file includes that merge into the current scope, `!include` is still the right tool.
+
+See the [YAML Functions guide](../guides/use-fn.md) for full examples and recipes.
+
 ## Conditional Logic
 
 ### `!if` - Conditional Inclusion

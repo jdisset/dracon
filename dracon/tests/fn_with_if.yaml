@@ -1,0 +1,5 @@
+!require name: "service name"
+!set_default is_prod: false
+url: https://${name}.example.com
+!if ${is_prod}:
+  monitoring: https://${name}.example.com/metrics

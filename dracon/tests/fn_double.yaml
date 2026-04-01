@@ -1,0 +1,2 @@
+!require x: "value to double"
+result: ${x * 2}

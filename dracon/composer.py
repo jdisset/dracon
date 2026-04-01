@@ -567,7 +567,7 @@ def delete_unset_nodes(comp_res: CompositionResult):
             if not new_value and not node.tag.startswith('!'):
                 has_changed = True
                 return UnsetNode()
-            return DraconMappingNode(
+            new_node = DraconMappingNode(
                 tag=node.tag,
                 value=new_value,
                 start_mark=node.start_mark,
@@ -576,6 +576,9 @@ def delete_unset_nodes(comp_res: CompositionResult):
                 comment=node.comment,
                 anchor=node.anchor,
             )
+            if hasattr(node, 'context'):
+                new_node.context = node.context
+            return new_node
         elif isinstance(node, DraconSequenceNode):
             new_value = []
             for v in node.value:
@@ -583,7 +586,7 @@ def delete_unset_nodes(comp_res: CompositionResult):
                     has_changed = True
                     continue
                 new_value.append(_delete_unset_nodes(v, node, None))
-            return DraconSequenceNode(
+            new_node = DraconSequenceNode(
                 tag=node.tag,
                 value=new_value,
                 start_mark=node.start_mark,
@@ -592,6 +595,9 @@ def delete_unset_nodes(comp_res: CompositionResult):
                 comment=node.comment,
                 anchor=node.anchor,
             )
+            if hasattr(node, 'context'):
+                new_node.context = node.context
+            return new_node
         else:
             return node
 

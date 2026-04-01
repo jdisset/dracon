@@ -387,6 +387,47 @@ jobs:
           "
 ```
 
+## Callable Template Patterns
+
+### Functional composition
+
+Chain multiple callables in expressions:
+
+```yaml
+!define load: !fn file:templates/loader.yaml
+!define clean: !fn file:templates/cleaner.yaml
+!define predict: !fn file:templates/predictor.yaml
+
+results: ${predict(data=clean(data=load(path=data_path)), model=model_path)}
+```
+
+### Map-reduce with `!fn` + `!each`
+
+```yaml
+!define services: ${['auth', 'api', 'worker']}
+!define make_endpoint: !fn
+  !require name: "svc"
+  url: https://${name}.example.com
+
+endpoints:
+  !each(svc) ${services}:
+    ${svc}: ${make_endpoint(name=svc)}
+```
+
+### Callables returning typed objects
+
+From the caller's perspective, a YAML callable and a Python class are interchangeable:
+
+```yaml
+# Python class
+db: !PostgresConfig { host: localhost, port: 5432 }
+
+# YAML callable
+api: !make_endpoint { name: api, port: 443 }
+```
+
+Both are tags that accept keyword arguments and produce structured results.
+
 ## Best Practices
 
 ### Configuration Architecture

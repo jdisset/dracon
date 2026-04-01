@@ -1,0 +1,4 @@
+!require name: "service name"
+!set_default port: 8080
+url: https://${name}.example.com:${port}
+health: https://${name}.example.com:${port}/health

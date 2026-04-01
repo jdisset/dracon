@@ -71,6 +71,8 @@ nav:
       - "Use Pydantic Models": "guides/use-pydantic.md"
       - "Customize CLI Arguments": "guides/customize-cli.md"
       - "Handle Secrets": "guides/handle-secrets.md"
+      - "Reusable Templates": "guides/use-templates.md"
+      - "YAML Functions (\\!fn)": "guides/use-fn.md"
       - "Use Deferred Execution": "guides/use-deferred.md"
       - "Inspect & Debug Configs": "guides/inspect-configs.md"
   - "Conceptual Guides":

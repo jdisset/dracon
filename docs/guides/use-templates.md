@@ -143,11 +143,33 @@ __dracon__: &service
   port: ${port}
 ```
 
-## When to use files vs. inline templates
+## Callable templates with `!fn`
+
+If you're calling the same template multiple times or need expression-level composability, `!fn` wraps the template into a callable with isolated scope:
+
+```yaml
+!define service: !fn file:templates/service.yaml
+
+services:
+  auth: !service { name: auth, port: 8001, replicas: 3 }
+  api: !service { name: api, port: 8002 }
+```
+
+Or from expressions:
+
+```yaml
+all_services: ${[service(name=n, port=p) for n, p in svc_map.items()]}
+```
+
+`!fn` eliminates the `!define` + merge boilerplate, prevents argument leakage into the caller's scope, and enables patterns like list comprehensions and chaining that aren't possible with `!include`. See the [YAML Functions guide](use-fn.md) for details.
+
+## When to use what
 
 | Approach | Best for |
 |---|---|
-| `__dracon__` + anchor | Small templates (< 10 lines), same-file reuse |
+| `__dracon__` + anchor | Small composition helpers (< 10 lines), same-file reuse |
+| `!define` + `!include` | One-shot includes that merge into the parent scope |
+| `!fn` (callable) | Templates called more than once, expression composability, isolated scope |
 | Separate file + `!include` | Shared across projects, large templates, template libraries |
 
-Both approaches support `!require`, `!set_default`, `!assert`, and all other instructions.
+All approaches support `!require`, `!set_default`, `!assert`, and all other instructions.

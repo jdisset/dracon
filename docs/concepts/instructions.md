@@ -66,6 +66,39 @@ YAML's implicit type inference usually does the right thing (`1.2` is a float, `
 
 Supported types: `int`, `float`, `str`, `bool`, `list`, `dict`. This syntax also works with `!define?:type` and `!set_default:type`.
 
+## YAML Functions (`!fn`)
+
+`!fn` wraps a YAML template -- file or inline -- into a first-class callable. It bridges composition-time structure and expression-time computation: an `!include` is a statement (merges into scope), but `!fn` produces a value (composable in expressions).
+
+```yaml
+!define make_endpoint: !fn
+  !require name: "service name"
+  !set_default port: 8080
+  url: https://${name}.example.com:${port}
+
+# tag syntax -- looks like a type constructor
+api: !make_endpoint { name: api, port: 443 }
+
+# expression syntax -- composable
+all: ${[make_endpoint(name=n) for n in service_names]}
+```
+
+From the caller's perspective, a YAML callable and a Python class are the same thing. Both are tags that take keyword arguments and produce structured results. The implementation (YAML template vs Python class) is invisible.
+
+Each invocation gets a fresh scope. The template is deep-copied, arguments are injected as context variables, and the full composition + construction pipeline runs. `!require` validates that mandatory arguments are provided; `!set_default` provides fallbacks. Arguments are consumed by these instructions and don't appear in the output.
+
+This fills the gap between one-off expressions and full file includes:
+
+| Mechanism | What it is | Scope |
+|-----------|-----------|-------|
+| `${expr}` | Inline expression | Single value |
+| `!define x: val` | Variable binding | Current scope + descendants |
+| `!fn` | YAML-defined function | Reusable, isolated, composable |
+| `!include` | File composition | Structural (merges into tree) |
+| `!Type { ... }` | Python constructor | Type-checked object |
+
+See the [YAML Functions guide](../guides/use-fn.md) for full usage patterns.
+
 ## Variable Contracts (`!require`)
 
 While `!define` and `!set_default` provide values, `!require` declares that a variable **must** be provided by an outer scope -- a parent file, cascade overlay, CLI `++var=value`, or another `!define`. If nobody provides it by end of composition, a clear error is raised.
