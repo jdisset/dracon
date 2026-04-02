@@ -7,6 +7,12 @@ import collections.abc
 
 _SENTINEL = object()
 
+def _has_custom_tag(node):
+    """True if node has a custom YAML tag (not a builtin or default type tag)."""
+    from dracon.instructions import _BUILTIN_TAGS
+    tag = getattr(node, 'tag', None)
+    return tag and isinstance(tag, str) and tag.startswith('!') and tag not in _BUILTIN_TAGS
+
 
 class DraconPipe:
     """Composed callable that chains a sequence of callables.
@@ -60,11 +66,17 @@ def _scan_template_params(callable_obj):
     For plain callables: inspect.signature.
     """
     from dracon.callable import DraconCallable
+    from dracon.partial import DraconPartial
 
     if isinstance(callable_obj, DraconCallable):
         return _scan_dracon_callable_params(callable_obj)
     elif isinstance(callable_obj, DraconPipe):
         return _scan_pipe_params(callable_obj)
+    elif isinstance(callable_obj, DraconPartial):
+        req, opt = _scan_python_callable_params(callable_obj._func)
+        req = [r for r in req if r not in callable_obj._kwargs]
+        opt = [o for o in opt if o not in callable_obj._kwargs]
+        return req, opt
     elif callable(callable_obj):
         return _scan_python_callable_params(callable_obj)
     return [], []
@@ -196,6 +208,12 @@ def create_pipe_callable(value_node, loader, key_node):
                 context=item.context, source_context=getattr(item, 'source_context', None),
             )
             _validate_stage(resolved, item.value, source)
+            _append_stage(stages, stage_kwargs, resolved, {})
+        elif _has_custom_tag(item):
+            # tagged node (e.g. !fn:path { kwargs }) -- construct via loader
+            from dracon.composer import CompositionResult
+            resolved = loader.load_composition_result(CompositionResult(root=item))
+            _validate_stage(resolved, item.tag, source)
             _append_stage(stages, stage_kwargs, resolved, {})
         elif isinstance(item, DraconScalarNode):
             # bare name: resolve from context

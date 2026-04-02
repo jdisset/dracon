@@ -365,6 +365,7 @@ results: ${[p(path=data_path) for p in [fast, full]]}
 | `!fn` inline mapping | Reusable templates returning mappings, isolated scope |
 | `!fn` with `!fn :` | Templates with params that return a single value |
 | `!fn ${expr}` | Simple expression transforms (lambdas) |
+| `!fn:path { kwargs }` | Serializable partial application of Python functions |
 | `!pipe` | Chaining callables into pipelines, sweep over methodologies |
 | Python callable as tag | Applying Python functions directly in YAML |
 | `!include` with merge | One-shot includes that merge into the parent scope |

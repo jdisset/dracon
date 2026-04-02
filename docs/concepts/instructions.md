@@ -99,6 +99,83 @@ This fills the gap between one-off expressions and full file includes:
 
 See the [YAML Functions guide](../guides/use-fn.md) for full usage patterns.
 
+## Partial Application (`!fn:path`)
+
+Where `!fn` wraps a YAML template into a callable, `!fn:path` wraps an actual Python function. The colon suffix is a dotted import path (or context name) that resolves to a callable. The mapping body provides pre-filled kwargs that are stored and merged with runtime kwargs on each call.
+
+```yaml
+loss_fn: !fn:biocomp.train.energy_loss
+  kl_weight: !optax.polynomial_schedule { init_value: 0.1, end_value: 0.001 }
+  energy_weight: 0.5
+```
+
+The result is a `DraconPartial` -- calling `loss_fn(stack, config)` invokes `energy_loss(stack, config, kl_weight=<schedule>, energy_weight=0.5)`. Runtime kwargs override stored ones.
+
+This is `functools.partial` with two extras: YAML round-trip serialization (`dracon.dump` produces `!fn:path { kwargs }`) and pickle support (the function is stored as its import path string).
+
+With no mapping body, `!fn:path` is a serializable function reference:
+
+```yaml
+activation: !fn:jax.nn.relu
+```
+
+The path resolves in context first, then as a dotted import path. Nested tags and interpolations in the kwargs are resolved at construction time, so `!fn:f { x: !g { y: 1 } }` calls `g(y=1)` once and stores the result as `x`.
+
+| | `!fn` (template) | `!fn:path` (partial) |
+|--|-------|-----------|
+| Wraps | YAML template | Python function |
+| Scope | Composition (YAML manipulation) | Construction (Python call) |
+| Kwargs resolved | Each call re-composes | Once at construction |
+| Serializable | No | Yes (pickle + YAML dump) |
+| Use case | Config templates, YAML generation | Runtime callables, loss fns, optimizers |
+
+## Function Composition (`!pipe`)
+
+Where `!fn` turns a template into a callable, `!pipe` composes callables into a pipeline. The result is itself a callable -- usable as a tag, in expressions, or as a stage in another pipe.
+
+```yaml
+!define load: !fn file:templates/load.yaml
+!define clean: !fn file:templates/clean.yaml
+!define train: !fn file:templates/train.yaml
+
+!define ml: !pipe [load, clean, train]
+result: ${ml(path='/data/train.csv', model_type='xgb')}
+```
+
+Each stage's output feeds into the next. If a stage returns a mapping, its keys are unpacked as keyword arguments to the next stage. If it returns a typed object (like a Pydantic model), it goes as a single value to the next stage's unfilled `!require` parameter. This means stages written for standalone use automatically work inside a pipe.
+
+Pre-fill kwargs per stage with mapping syntax:
+
+```yaml
+!define ml: !pipe
+  - load
+  - clean: { strategy: aggressive }
+  - train
+```
+
+Pipeline kwargs flow through to all stages. Pipes compose with other pipes (nested pipes are flattened).
+
+`!fn:path` nodes can be used as inline pipe stages -- any tagged node in the sequence is constructed and validated as callable:
+
+```yaml
+!define pipeline: !pipe
+  - !fn:preprocess.load_data
+  - !fn:preprocess.clean { strategy: aggressive }
+  - !fn:models.train
+```
+
+This mixes freely with named stages and `!fn` templates.
+
+| Primitive | What it does |
+|-----------|-------------|
+| `!define` | Name a value |
+| `!fn` | Define a function (template to callable) |
+| `!fn:path` | Partial-apply a Python function (serializable) |
+| `!pipe` | Compose functions (callables to callable) |
+| `!if` | Branch |
+| `!each` | Iterate |
+| `!require` / `!set_default` | Declare parameters |
+
 ## Variable Contracts (`!require`)
 
 While `!define` and `!set_default` provide values, `!require` declares that a variable **must** be provided by an outer scope -- a parent file, cascade overlay, CLI `++var=value`, or another `!define`. If nobody provides it by end of composition, a clear error is raised.

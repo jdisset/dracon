@@ -70,6 +70,7 @@ Defines variables in the current scope's context. These are removed from the fin
 | `!define x: !Type { ... }` | On first `${x}` access (lazy) | Pipeline stages, Python objects |
 | `!define f: !fn ...` | On each `f(...)` call | Reusable templates with args |
 | `!define p: !pipe [...]` | On each `p(...)` call | Composed pipeline of callables |
+| `!fn:path { kwargs }` | Construction time (once) | Serializable partial application |
 | `!deferred` | Runtime (manual `.construct()`) | Objects needing live runtime state |
 
 **Lazy `!define` replaces** the old `!noconstruct` + `construct(&/ref)` ceremony:
@@ -175,7 +176,33 @@ greeting: !upper "hello"
 - Isolation: each call gets a fresh scope; args don't leak into the caller.
 - The template body is full dracon (`!if`, `!each`, `!include`, type tags all work).
 
-### 3.5. Function Composition (`!pipe`)
+### 3.5. Partial Application (`!fn:path`)
+
+`!fn:path` wraps a Python function with pre-filled kwargs, producing a `DraconPartial`. Unlike `!fn` (which wraps a YAML template), `!fn:path` wraps a real Python callable resolved by import path or context lookup.
+
+```yaml
+loss_fn: !fn:biocomp.train.energy_loss
+  kl_weight: !optax.polynomial_schedule { init_value: 0.1 }
+  energy_weight: 0.5
+
+# zero-arg form: serializable function reference
+activation: !fn:jax.nn.relu
+```
+
+Calling `loss_fn(stack, config)` invokes `energy_loss(stack, config, kl_weight=<schedule>, energy_weight=0.5)`. Runtime kwargs override stored ones.
+
+Key differences from `!fn`: kwargs are resolved once at construction (not re-composed each call), the result is serializable (pickle + YAML round-trip), and it wraps a Python function, not a YAML template.
+
+The path resolves in context first, then as a dotted import. Nested tags and `${...}` in the kwargs body are resolved during construction. Works inline in `!pipe` stages:
+
+```yaml
+!define pipeline: !pipe
+  - !fn:preprocess.load_data
+  - !fn:preprocess.clean { strategy: aggressive }
+  - !fn:models.train
+```
+
+### 3.6. Function Composition (`!pipe`)
 
 `!pipe` takes a sequence of callables and produces a new callable that chains them. The output of each stage feeds as input to the next.
 
@@ -221,7 +248,7 @@ result: ${ml(path='/data/file.csv', strategy='aggressive', epochs=200)}
 !define full: !pipe [preprocess, train_eval]   # flattened into 4 stages
 ```
 
-### 3.6. Construction Control
+### 3.7. Construction Control
 
 - **`!noconstruct`**: The node is processed (anchors/defines are valid) but the node is removed before the Construction phase. **Note:** The common `!noconstruct` + `construct(&/ref)` pattern for building Python objects is now obsolete -- use `!define x: !Type { ... }` with lazy construction instead. Still useful for template anchors and metadata nodes.
 - **`__dracon__` Prefix**: Any key starting with `__dracon__` is treated as `!noconstruct`.

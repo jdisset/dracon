@@ -251,6 +251,51 @@ greeting: !upper "hello"
 
 See the [YAML Functions guide](../guides/use-fn.md) for full examples and recipes.
 
+### `!fn:path` - Partial Application
+
+`!fn:path` wraps a Python function (resolved by dotted import path or context lookup) with pre-filled kwargs, producing a `DraconPartial`. This is a construction-time tag, not a composition instruction.
+
+```yaml
+# partial with pre-filled kwargs -- callable at runtime
+loss_fn: !fn:biocomp.train.energy_loss
+  kl_weight: 0.1
+  energy_weight: 0.5
+
+# zero-arg: serializable function reference
+activation: !fn:jax.nn.relu
+
+# in a list
+transforms:
+  - !fn:optax.clip_by_global_norm { max_norm: 2.0 }
+  - !fn:optax.adamw { weight_decay: 0.003 }
+```
+
+**Calling:** `loss_fn(stack, config)` calls `energy_loss(stack, config, kl_weight=0.1, energy_weight=0.5)`. Runtime kwargs override stored kwargs. Positional args pass through.
+
+**Resolution:** context first (loader context, then node context), then dotted import path. So `!fn:my_func` works with context callables and `!fn:math.sqrt` works with any importable function.
+
+**Serialization:** `DraconPartial` supports pickle (func stored as import path) and YAML round-trip (`dracon.dump` produces `!fn:path { kwargs }`).
+
+**Nested construction:** The mapping body is constructed normally -- nested callable tags, `${...}` interpolations, and type tags resolve at construction time.
+
+**In `!define`:** `!define f: !fn:math.sqrt` stores the partial in context.
+
+**In `!pipe`:** Works as an inline pipe stage:
+
+```yaml
+!define pipeline: !pipe
+  - !fn:preprocess.load_data
+  - !fn:preprocess.clean { strategy: aggressive }
+  - named_stage
+```
+
+| | `!fn` (template) | `!fn:path` (partial) |
+|--|-------|-----------|
+| Wraps | YAML template | Python function |
+| Kwargs resolved | Each call re-composes | Once at construction |
+| Serializable | No | Yes (pickle + YAML dump) |
+| Use case | Config templates | Runtime callables, loss fns |
+
 ### `!pipe` - Function Composition
 
 `!pipe` takes a sequence of callables (`!fn` templates, other pipes, or Python callables) and produces a new callable that chains them. The output of each stage feeds as input to the next.

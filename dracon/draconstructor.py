@@ -34,6 +34,7 @@ from functools import partial
 from dracon.nodes import DraconScalarNode  # Added for type checking
 from dracon.callable import DraconCallable
 from dracon.pipe import DraconPipe
+from dracon.partial import DraconPartial
 import logging
 
 logger = logging.getLogger("dracon")
@@ -273,6 +274,20 @@ class Draconstructor(Constructor):
         tag = node.tag
 
         try:
+            # !fn:path partial application
+            if tag and isinstance(tag, str) and tag.startswith('!fn:') and target_type is None:
+                func_path = tag[4:]
+                func = self._resolve_fn_target(func_path, current_loader_context, node)
+                if isinstance(node, MappingNode):
+                    reset_tag(node)
+                    kwargs = self.base_construct_object(node, deep=True)
+                    kwargs = resolve_all_lazy(kwargs)
+                    if not isinstance(kwargs, dict):
+                        kwargs = dict(kwargs)
+                else:
+                    kwargs = {}
+                return DraconPartial(func_path, func, kwargs)
+
             # callable template tag invocation: !callable_name { kwargs }
             if tag and isinstance(tag, str) and tag.startswith('!') and target_type is None:
                 callable_name = tag[1:]
@@ -352,6 +367,37 @@ class Draconstructor(Constructor):
 
         finally:
             self._depth -= 1
+
+    def _resolve_fn_target(self, func_path, loader_context, node):
+        """Resolve a function for !fn:path -- context first, then import."""
+        func = loader_context.get(func_path)
+        if func is None and hasattr(node, 'context'):
+            func = (node.context or {}).get(func_path)
+        if func is not None:
+            if not callable(func):
+                raise ConstructorError(
+                    None, None,
+                    f"!fn:{func_path} resolved to non-callable {type(func).__name__}",
+                    node.start_mark,
+                )
+            return func
+        try:
+            resolved = resolve_type(f'!{func_path}', localns=self.localns)
+            if resolved is not Any:
+                if not callable(resolved):
+                    raise ConstructorError(
+                        None, None,
+                        f"!fn:{func_path} resolved to non-callable {type(resolved).__name__}",
+                        node.start_mark,
+                    )
+                return resolved
+        except (ValueError, ImportError):
+            pass
+        raise ConstructorError(
+            None, None,
+            f"!fn:{func_path} -- cannot resolve '{func_path}' as context name or import path",
+            node.start_mark,
+        )
 
     def construct_resolvable(self, node, tag_type):
         newnode = deepcopy(node)
