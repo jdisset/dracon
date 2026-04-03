@@ -253,6 +253,84 @@ def test_public_imports():
     assert LayerScope is not None
 
 
+# -- 18. compose() uses stack internally (migration equivalence) --
+
+class TestComposeUsesStack:
+    """Verify compose() delegates to CompositionStack and produces identical results."""
+
+    def test_compose_three_files(self, tmp_path):
+        """3-layer merge via compose() matches expected values."""
+        (tmp_path / "a.yaml").write_text("a: 1\nb:\n  x: 10\nl: [1, 2]")
+        (tmp_path / "b.yaml").write_text("a: 2\nb:\n  y: 20\nl: [3, 4]")
+        (tmp_path / "c.yaml").write_text("l: [5, 6]\nb:\n  x: 100\n  z: 30")
+        loader = DraconLoader(trace=True)
+        result = loader.load(
+            [str(tmp_path / "a.yaml"), str(tmp_path / "b.yaml"), str(tmp_path / "c.yaml")],
+        )
+        assert dict(result) == {
+            "a": 2,
+            "b": {"x": 100, "y": 20, "z": 30},
+            "l": [5, 6],
+        }
+
+    def test_compose_single_file(self, loader, base_path):
+        """Single-file compose still works after migration."""
+        result = loader.compose(base_path)
+        d = _node_to_dict(result.root)
+        assert d["name"] == "base"
+        assert d["items"] == [1, 2]
+
+    def test_compose_pathlib(self, tmp_path):
+        """Path objects are handled correctly."""
+        (tmp_path / "p.yaml").write_text("key: val")
+        loader = DraconLoader(trace=True)
+        result = loader.compose(tmp_path / "p.yaml")
+        assert _node_to_dict(result.root)["key"] == "val"
+
+    def test_compose_empty_raises(self, loader):
+        with pytest.raises(ValueError, match="No configuration"):
+            loader.compose([])
+
+    def test_compose_resets_context(self, loader, base_path):
+        """compose() calls reset_context() so each call starts clean."""
+        loader.update_context({"custom_key": 42})
+        loader.compose(base_path)
+        # after compose, default context should be restored (reset_context was called)
+        assert "getenv" in loader.context  # default context present
+
+    def test_compose_with_define(self, tmp_path):
+        """!define in layers works through compose()."""
+        (tmp_path / "d.yaml").write_text("!define x: 42\nval: ${x}")
+        loader = DraconLoader(trace=True)
+        result = loader.load(str(tmp_path / "d.yaml"))
+        assert result["val"] == 42
+
+    def test_compose_stores_last_composition(self, loader, base_path, override_path):
+        """compose() sets _last_composition."""
+        result = loader.compose([base_path, override_path])
+        assert loader._last_composition is result
+
+    def test_compose_custom_merge_key(self, tmp_path):
+        """Custom merge key propagates through stack layers."""
+        (tmp_path / "x.yaml").write_text("items: [1, 2]")
+        (tmp_path / "y.yaml").write_text("items: [3, 4]")
+        loader = DraconLoader(trace=True)
+        # list append
+        result = loader.load(
+            [str(tmp_path / "x.yaml"), str(tmp_path / "y.yaml")],
+            merge_key="<<{<+}[+>]",
+        )
+        assert list(result["items"]) == [1, 2, 3, 4]
+
+    def test_compose_non_mapping_base(self, tmp_path):
+        """List base + dict override replaces correctly."""
+        (tmp_path / "lst.yaml").write_text("- item1\n- item2")
+        (tmp_path / "dct.yaml").write_text("a: 1")
+        loader = DraconLoader(trace=True)
+        result = loader.load([str(tmp_path / "lst.yaml"), str(tmp_path / "dct.yaml")])
+        assert dict(result) == {"a": 1}
+
+
 # -- helpers --
 
 def _node_to_dict(node):

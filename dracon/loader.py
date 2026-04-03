@@ -351,64 +351,24 @@ class DraconLoader:
         config_paths: Union[str, Path, List[Union[str, Path]]],
         merge_key: str = "<<{<+}[<~]",
     ):
-        """
-        Compose configuration from one or more paths.
-
-        If multiple paths are provided, they are merged sequentially
-        using the specified merge_key strategy.
-
-        Args:
-            config_paths: A single path (str or Path) or a list of paths.
-            merge_key: The Dracon merge key string to use when merging multiple files.
-                       Defaults to "<<{<+}[<~]" (recursive append dicts, new wins; replace list, new wins).
-
-        Returns:
-            The loaded and potentially merged configuration object.
-        """
-
         self.reset_context()
 
         if not isinstance(config_paths, list):
-            paths = [config_paths]
-        else:
-            paths = list(config_paths)  # ensure it's a mutable list
-
-        if not paths:
+            config_paths = [config_paths]
+        if not config_paths:
             raise ValueError("No configuration paths provided.")
 
-        processed_paths = []
-        for p in paths:
-            if isinstance(p, Path):
-                p_str = p.resolve().as_posix()
-            else:
-                p_str = str(p)
-
-            if ":" not in p_str:
-                processed_paths.append(f"file:{p_str}")
-            else:
-                processed_paths.append(p_str)
-
-        # load the first configuration as the base
-        base_comp_res = compose_from_include_str(
-            self, processed_paths[0], custom_loaders=self.custom_loaders
-        )
-
-        # trace is initialized inside post_process_composed (called by compose_from_include_str)
-        # no need to re-init here
-
-        mkey = cached_merge_key(merge_key)
-
-        for layer_idx, next_path in enumerate(processed_paths[1:], 2):
-            next_comp_res = compose_from_include_str(
-                self, next_path, custom_loaders=self.custom_loaders
+        from dracon.stack import CompositionStack, LayerSpec
+        layers = [
+            LayerSpec(
+                source=(p.resolve().as_posix() if isinstance(p, Path) else str(p)),
+                merge_key=merge_key,
             )
-            prev_comp = base_comp_res
-            base_comp_res = base_comp_res.merged(next_comp_res, mkey)
-            if base_comp_res.trace is not None:
-                _record_file_layer_trace(base_comp_res, next_comp_res, layer_idx, next_path)
-
-        final_comp_res = self.post_process_composed(base_comp_res)
-        return final_comp_res
+            for p in config_paths
+        ]
+        result = CompositionStack(self, layers).composed
+        self._last_composition = result
+        return result
 
     def merge(
         self,
@@ -458,7 +418,6 @@ class DraconLoader:
             The loaded and potentially merged configuration object.
         """
         final_comp_res = self.compose(config_paths, merge_key=merge_key)
-        self._last_composition = final_comp_res
         return self.load_node(final_comp_res.root)
 
     @ftrace(watch=[])
