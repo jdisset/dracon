@@ -1,0 +1,2 @@
+!set_default x: 0
+value: ${x}

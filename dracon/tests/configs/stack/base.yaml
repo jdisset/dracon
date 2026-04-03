@@ -1,0 +1,5 @@
+name: base
+items: [1, 2]
+nested:
+  a: 10
+  b: 20

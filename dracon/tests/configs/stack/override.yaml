@@ -1,0 +1,5 @@
+name: override
+items: [3]
+nested:
+  b: 99
+  c: 30

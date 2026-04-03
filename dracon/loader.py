@@ -669,6 +669,15 @@ class DraconLoader:
     def dump_to_node(self, data):
         return dump_to_node(data)
 
+    def stack(self, *sources, **ctx) -> 'CompositionStack':
+        from dracon.stack import CompositionStack, LayerSpec
+        layers = [
+            LayerSpec(source=s, context=ctx if s is sources[0] else {})
+            if isinstance(s, str) else s
+            for s in sources
+        ]
+        return CompositionStack(self, layers)
+
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
