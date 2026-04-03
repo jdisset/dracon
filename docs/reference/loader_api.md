@@ -213,6 +213,86 @@ config = dr.load_file('config.yaml')
 yaml_str = dr.dump(config_object)
 ```
 
+### `stack(*sources, **ctx)`
+
+Create a `CompositionStack` for runtime-mutable layered composition. Returns a `CompositionStack` initialized with the given sources.
+
+```python
+stack = loader.stack("base.yaml", "override.yaml")
+stack.push("runtime-patch.yaml")
+config = stack.construct()
+
+# undo last layer
+stack.pop()
+
+# fork for speculative changes
+branch = stack.fork()
+branch.push("experimental.yaml")
+```
+
+See [CompositionStack](#compositionstack) below.
+
+## CompositionStack
+
+`CompositionStack` is a mutable, ordered layer list with prefix caching. It exposes the merge loop that `compose()` uses internally, letting you push, pop, fork, and reconstruct configurations at runtime.
+
+```python
+from dracon import CompositionStack, LayerSpec, LayerScope
+```
+
+### Layer Scopes
+
+Each layer has a `scope` controlling what it can see from preceding layers:
+
+| Scope | What later layers see |
+|-------|-----------------------|
+| `ISOLATED` (default) | Nothing. Each layer composes independently, then merges. |
+| `EXPORTS` | `!define`/`!set_default` vars accumulated from preceding layers. |
+| `EXPORTS_AND_PREV` | Exported vars + a `PREV` dict containing the previous merged result. |
+
+### LayerSpec
+
+```python
+class LayerSpec(BaseModel):
+    source: str | Node | CompositionResult  # file path, raw node, or pre-composed result
+    context: dict[str, Any] = {}            # per-layer context vars
+    merge_key: str = "<<{<+}[<~]"           # merge strategy for this layer
+    scope: LayerScope = LayerScope.ISOLATED  # what this layer sees from predecessors
+    label: str | None = None                 # trace provenance label
+```
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `push(layer, **ctx)` | Append a layer. Returns the new index. |
+| `pop(index=-1)` | Remove a layer. Invalidates cache from that index onward. |
+| `replace(index, layer, **ctx)` | Swap a layer in-place (hot-reload). Returns the old layer. |
+| `fork()` | Shallow-copy the stack. The fork diverges independently. |
+| `composed` (property) | The folded `CompositionResult`, computed incrementally via prefix caching. |
+| `construct(**kwargs)` | Compose + construct into Python objects. |
+
+### EXPORTS Scope Example
+
+```python
+stack = CompositionStack(loader, [
+    LayerSpec(source="base.yaml"),  # has: !define model: resnet
+    LayerSpec(source="conditional.yaml", scope=LayerScope.EXPORTS),
+])
+# conditional.yaml can use ${model} from base.yaml
+config = stack.construct()
+```
+
+### EXPORTS_AND_PREV Scope Example
+
+```python
+stack = CompositionStack(loader, [
+    LayerSpec(source="workspace.yaml"),
+    LayerSpec(source="add-surface.yaml", scope=LayerScope.EXPORTS_AND_PREV),
+])
+# add-surface.yaml can use !include var:PREV@surfaces and ${PREV} expressions
+```
+
 ## Example Usage
 
 ```python
