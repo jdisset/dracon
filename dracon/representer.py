@@ -214,6 +214,8 @@ class DraconRepresenter(RoundTripRepresenter):
             node.flow_style = (
                 self.default_flow_style if self.default_flow_style is not None else best_style
             )
+        # value was populated after __init__, refresh the key index
+        node._recompute_map()
         return node
 
     # --- main dispatch method ---

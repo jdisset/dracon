@@ -1,0 +1,4 @@
+surfaces:
+  dag: { scene: graph }
+  table: { scene: table }
+count: 2

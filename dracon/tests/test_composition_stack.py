@@ -432,6 +432,110 @@ class TestExportsScope:
         assert result["lr_used"] == 0.001
 
 
+# -- EXPORTS_AND_PREV scope tests --
+
+class TestExportsAndPrevScope:
+    """EXPORTS_AND_PREV scope: layers see exports + PREV snapshot of accumulated spec."""
+
+    def test_basic_prev_var_include(self, loader):
+        """Layer 2 with EXPORTS_AND_PREV can !include var:PREV@key to read layer 1 values."""
+        stack = CompositionStack(loader, [
+            LayerSpec(source=str(CONFIGS / "prev_base.yaml")),
+            LayerSpec(source=str(CONFIGS / "prev_reader.yaml"), scope=LayerScope.EXPORTS_AND_PREV),
+        ])
+        result = stack.construct()
+        # prev_reader merges PREV's surfaces with its own extra surface
+        assert "dag" in result["surfaces"]
+        assert "table" in result["surfaces"]
+        assert "extra" in result["surfaces"]
+
+    def test_prev_expression_len(self, loader):
+        """${len(PREV)} resolves to number of top-level keys in previous result."""
+        stack = CompositionStack(loader, [
+            LayerSpec(source=str(CONFIGS / "prev_base.yaml")),
+            LayerSpec(source=str(CONFIGS / "prev_reader.yaml"), scope=LayerScope.EXPORTS_AND_PREV),
+        ])
+        result = stack.construct()
+        # prev_base has 2 top-level keys: surfaces, count
+        assert result["inherited_count"] == 2
+
+    def test_prev_is_snapshot(self, tmp_path, loader):
+        """Mutating PREV in a layer does not affect earlier layers' fold result."""
+        (tmp_path / "l1.yaml").write_text("a: 1\nb: 2")
+        (tmp_path / "l2.yaml").write_text("c: ${PREV.get('a', 'missing')}")
+        stack = CompositionStack(loader, [
+            LayerSpec(source=str(tmp_path / "l1.yaml")),
+            LayerSpec(source=str(tmp_path / "l2.yaml"), scope=LayerScope.EXPORTS_AND_PREV),
+        ])
+        result = stack.construct()
+        assert result["c"] == 1
+        # original layer 0 cache is unchanged
+        l0 = _node_to_dict(stack._cache[0].root)
+        assert l0 == {"a": 1, "b": 2}
+
+    def test_prev_conditional(self, tmp_path, loader):
+        """!if on PREV values works correctly."""
+        (tmp_path / "l1.yaml").write_text("surfaces:\n  a: 1\n  b: 2\n  c: 3")
+        (tmp_path / "l2.yaml").write_text(
+            "!if ${len(PREV.get('surfaces', {})) > 2}:\n"
+            "  then:\n    layout: dense\n  else:\n    layout: spacious"
+        )
+        stack = CompositionStack(loader, [
+            LayerSpec(source=str(tmp_path / "l1.yaml")),
+            LayerSpec(source=str(tmp_path / "l2.yaml"), scope=LayerScope.EXPORTS_AND_PREV),
+        ])
+        result = stack.construct()
+        assert result["layout"] == "dense"
+
+    def test_prev_not_in_isolated(self, tmp_path, loader):
+        """ISOLATED scope does not inject PREV."""
+        (tmp_path / "l1.yaml").write_text("a: 1")
+        # use PREV in a way that fails during composition, not lazy construction
+        (tmp_path / "l2.yaml").write_text("b: !include var:PREV@a")
+        stack = CompositionStack(loader, [
+            LayerSpec(source=str(tmp_path / "l1.yaml")),
+            LayerSpec(source=str(tmp_path / "l2.yaml"), scope=LayerScope.ISOLATED),
+        ])
+        with pytest.raises(Exception):
+            stack.construct()
+
+    def test_prev_not_in_exports_only(self, tmp_path, loader):
+        """EXPORTS scope does not inject PREV (only EXPORTS_AND_PREV does)."""
+        (tmp_path / "l1.yaml").write_text("a: 1")
+        (tmp_path / "l2.yaml").write_text("b: !include var:PREV@a")
+        stack = CompositionStack(loader, [
+            LayerSpec(source=str(tmp_path / "l1.yaml")),
+            LayerSpec(source=str(tmp_path / "l2.yaml"), scope=LayerScope.EXPORTS),
+        ])
+        with pytest.raises(Exception):
+            stack.construct()
+
+    def test_prev_first_layer_no_crash(self, tmp_path, loader):
+        """First layer with EXPORTS_AND_PREV: no PREV injected, no crash."""
+        (tmp_path / "l1.yaml").write_text("a: 1")
+        stack = CompositionStack(loader, [
+            LayerSpec(source=str(tmp_path / "l1.yaml"), scope=LayerScope.EXPORTS_AND_PREV),
+        ])
+        result = stack.construct()
+        assert result["a"] == 1
+
+    def test_multi_layer_prev_chain(self, tmp_path, loader):
+        """4 layers all EXPORTS_AND_PREV: each PREV is the accumulated result of all prior."""
+        (tmp_path / "l1.yaml").write_text("items:\n  - a")
+        (tmp_path / "l2.yaml").write_text("items:\n  - b")
+        (tmp_path / "l3.yaml").write_text("items:\n  - c")
+        (tmp_path / "l4.yaml").write_text("count: ${len(PREV.get('items', []))}")
+        stack = CompositionStack(loader, [
+            LayerSpec(source=str(tmp_path / "l1.yaml"), scope=LayerScope.EXPORTS_AND_PREV),
+            LayerSpec(source=str(tmp_path / "l2.yaml"), scope=LayerScope.EXPORTS_AND_PREV, merge_key="<<{<+}[<+]"),
+            LayerSpec(source=str(tmp_path / "l3.yaml"), scope=LayerScope.EXPORTS_AND_PREV, merge_key="<<{<+}[<+]"),
+            LayerSpec(source=str(tmp_path / "l4.yaml"), scope=LayerScope.EXPORTS_AND_PREV, merge_key="<<{<+}[<+]"),
+        ])
+        result = stack.construct()
+        # l4's PREV sees items from l1+l2+l3 accumulated via list append merges
+        assert result["count"] == 3
+
+
 # -- helpers --
 
 def _node_to_dict(node):

@@ -1,0 +1,4 @@
+inherited_count: ${len(PREV)}
+surfaces:
+  <<[+]: !include var:PREV@surfaces
+  extra: { scene: metrics }

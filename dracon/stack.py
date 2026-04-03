@@ -116,6 +116,10 @@ class CompositionStack:
             else:
                 ctx = layer.context
 
+            # inject PREV snapshot for EXPORTS_AND_PREV scope
+            if layer.scope == LayerScope.EXPORTS_AND_PREV and i > 0:
+                ctx = {**ctx, "PREV": _make_prev_snapshot(self._cache[i - 1], self._loader)}
+
             comp = self._compose_layer(layer, ctx)
 
             if i == 0:
@@ -174,6 +178,15 @@ class CompositionStack:
             if saved_ctx is not None:
                 self._loader.context.clear()
                 self._loader.context.update(saved_ctx)
+
+
+def _make_prev_snapshot(comp: CompositionResult, loader: DraconLoader) -> dict:
+    """Construct a plain dict from the accumulated composition result for PREV injection."""
+    from dracon.loader import DraconLoader as DL
+    snap_loader = DL()
+    snap_loader.yaml.constructor.yaml_base_dict_type = dict
+    snap_loader.yaml.constructor.yaml_base_list_type = list
+    return snap_loader.load_node(comp.root)
 
 
 def _record_layer_trace(acc: CompositionResult, comp: CompositionResult, index: int, layer: LayerSpec):
