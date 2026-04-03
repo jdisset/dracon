@@ -536,6 +536,320 @@ class TestExportsAndPrevScope:
         assert result["count"] == 3
 
 
+# -- E2E tests --
+
+class TestCompositionStackE2E:
+    """End-to-end tests: stack + advanced dracon features."""
+
+    # 1. pydantic model construction through the stack
+
+    def test_pydantic_model_via_stack(self, tmp_path):
+        from pydantic import BaseModel
+
+        class ServerConfig(BaseModel):
+            host: str = "localhost"
+            port: int = 8080
+            debug: bool = False
+
+        (tmp_path / "base.yaml").write_text("!ServerConfig\nhost: example.com\nport: 443\n")
+        (tmp_path / "dev.yaml").write_text("debug: true\nport: 9090\n")
+
+        loader = DraconLoader(context={"ServerConfig": ServerConfig})
+        stack = CompositionStack(loader)
+        stack.push(str(tmp_path / "base.yaml"))
+        stack.push(str(tmp_path / "dev.yaml"))
+        result = stack.construct()
+        assert isinstance(result, ServerConfig)
+        assert result.host == "example.com"
+        assert result.port == 9090
+        assert result.debug is True
+
+    # 2. stack + !fn templates
+
+    def test_fn_template_across_layers(self, tmp_path):
+        (tmp_path / "fns.yaml").write_text(
+            "!define make_url: !fn\n"
+            "  !require host: 'hostname'\n"
+            "  !set_default port: 80\n"
+            "  url: https://${host}:${port}\n"
+        )
+        (tmp_path / "use.yaml").write_text(
+            "api: ${make_url(host='api.example.com', port=443)}\n"
+            "internal: ${make_url(host='internal.local')}\n"
+        )
+        loader = DraconLoader()
+        stack = CompositionStack(loader)
+        stack.push(str(tmp_path / "fns.yaml"))
+        stack.push(LayerSpec(
+            source=str(tmp_path / "use.yaml"),
+            scope=LayerScope.EXPORTS,
+        ))
+        result = stack.construct()
+        assert result["api"]["url"] == "https://api.example.com:443"
+        assert result["internal"]["url"] == "https://internal.local:80"
+
+    # 3. stack + !pipe
+
+    def test_pipe_across_layers(self, tmp_path):
+        (tmp_path / "stages.yaml").write_text(
+            "!define double: !fn\n"
+            "  !require x: 'val'\n"
+            "  val: ${x * 2}\n"
+            "!define add_ten: !fn\n"
+            "  !require val: 'val'\n"
+            "  result: ${val + 10}\n"
+            "!define pipeline: !pipe [double, add_ten]\n"
+        )
+        (tmp_path / "run.yaml").write_text("out: ${pipeline(x=5)}\n")
+        loader = DraconLoader()
+        stack = CompositionStack(loader)
+        stack.push(str(tmp_path / "stages.yaml"))
+        stack.push(LayerSpec(
+            source=str(tmp_path / "run.yaml"),
+            scope=LayerScope.EXPORTS,
+        ))
+        result = stack.construct()
+        # (5*2)=10, 10+10=20
+        assert result["out"]["result"] == 20
+
+    # 4. stack + !deferred
+
+    def test_deferred_survives_stack(self, tmp_path):
+        from dracon.deferred import DeferredNode
+        (tmp_path / "base.yaml").write_text(
+            "static: hello\n"
+            "lazy: !deferred\n"
+            "  greeting: hi ${name}\n"
+        )
+        loader = DraconLoader()
+        stack = CompositionStack(loader)
+        stack.push(str(tmp_path / "base.yaml"))
+        result = stack.construct()
+        assert result["static"] == "hello"
+        assert isinstance(result["lazy"], DeferredNode)
+        resolved = result["lazy"].copy().construct(context={"name": "world"})
+        assert resolved["greeting"] == "hi world"
+
+    # 5. stack + !include with cascading
+
+    def test_include_across_stack_layers(self, tmp_path):
+        (tmp_path / "fragment.yaml").write_text("db_host: postgres.local\ndb_port: 5432\n")
+        (tmp_path / "base.yaml").write_text(
+            "app: myapp\n"
+            "database: !include file:$DIR/fragment.yaml\n"
+        )
+        (tmp_path / "override.yaml").write_text("app: myapp-prod\n")
+        loader = DraconLoader()
+        stack = CompositionStack(loader)
+        stack.push(str(tmp_path / "base.yaml"))
+        stack.push(str(tmp_path / "override.yaml"))
+        result = stack.construct()
+        assert result["app"] == "myapp-prod"
+        assert result["database"]["db_host"] == "postgres.local"
+        assert result["database"]["db_port"] == 5432
+
+    # 6. stack + !each iteration
+
+    def test_each_via_stack(self, tmp_path):
+        (tmp_path / "defs.yaml").write_text("!define envs: ${['dev', 'staging', 'prod']}\n")
+        (tmp_path / "gen.yaml").write_text(
+            "services:\n"
+            "  !each(e) ${envs}:\n"
+            "    ${e}_db:\n"
+            "      host: db.${e}.local\n"
+        )
+        loader = DraconLoader()
+        stack = CompositionStack(loader)
+        stack.push(str(tmp_path / "defs.yaml"))
+        stack.push(LayerSpec(
+            source=str(tmp_path / "gen.yaml"),
+            scope=LayerScope.EXPORTS,
+        ))
+        result = stack.construct()
+        assert "dev_db" in result["services"]
+        assert "prod_db" in result["services"]
+        assert result["services"]["staging_db"]["host"] == "db.staging.local"
+
+    # 7. deep keypath PREV access
+
+    def test_deep_keypath_prev(self, tmp_path):
+        (tmp_path / "l1.yaml").write_text(
+            "level1:\n"
+            "  level2:\n"
+            "    level3:\n"
+            "      secret: 42\n"
+            "      items: [a, b, c]\n"
+        )
+        (tmp_path / "l2.yaml").write_text(
+            "deep_val: !include var:PREV@level1.level2.level3.secret\n"
+            "deep_items: !include var:PREV@level1.level2.level3.items\n"
+        )
+        loader = DraconLoader()
+        stack = CompositionStack(loader)
+        stack.push(str(tmp_path / "l1.yaml"))
+        stack.push(LayerSpec(
+            source=str(tmp_path / "l2.yaml"),
+            scope=LayerScope.EXPORTS_AND_PREV,
+        ))
+        result = stack.construct()
+        assert result["deep_val"] == 42
+        assert list(result["deep_items"]) == ["a", "b", "c"]
+
+    # 8. prefix cache stress test
+
+    def test_prefix_cache_stress(self, tmp_path):
+        # create 10 layers with unique keys
+        for i in range(10):
+            (tmp_path / f"l{i}.yaml").write_text(f"key_{i}: {i}\n")
+
+        # build reference stack with all layers fresh
+        def fresh_stack(indices):
+            loader = DraconLoader()
+            s = CompositionStack(loader)
+            for i in indices:
+                s.push(str(tmp_path / f"l{i}.yaml"))
+            return dict(s.construct())
+
+        # push/pop/re-push in various patterns
+        loader = DraconLoader()
+        stack = CompositionStack(loader)
+        for i in range(10):
+            stack.push(str(tmp_path / f"l{i}.yaml"))
+        # pop last 3
+        stack.pop()
+        stack.pop()
+        stack.pop()
+        # re-push different ones
+        stack.push(str(tmp_path / "l5.yaml"))
+        stack.push(str(tmp_path / "l2.yaml"))
+
+        actual = dict(stack.construct())
+        expected = fresh_stack([0, 1, 2, 3, 4, 5, 6, 5, 2])
+        assert actual == expected
+
+    # 9. stack + CLI context vars
+
+    def test_cli_context_vars_via_layer_context(self, tmp_path):
+        (tmp_path / "cfg.yaml").write_text(
+            "!set_default runname: default\n"
+            "!set_default lr: 0.001\n"
+            "experiment: ${runname}\n"
+            "learning_rate: ${lr}\n"
+        )
+        loader = DraconLoader()
+        stack = CompositionStack(loader)
+        # simulate ++runname=my_exp ++lr=0.01
+        stack.push(str(tmp_path / "cfg.yaml"), runname="my_exp", lr=0.01)
+        result = stack.construct()
+        assert result["experiment"] == "my_exp"
+        assert result["learning_rate"] == 0.01
+
+    # 10. EXPORTS chain with !define overrides
+
+    def test_exports_chain_define_overrides(self, tmp_path):
+        (tmp_path / "l1.yaml").write_text(
+            "!define a: 1\n!set_default b: 10\n!define c: 100\nl1: yes\n"
+        )
+        (tmp_path / "l2.yaml").write_text(
+            "!define b: 20\n!set_default c: 200\na_val: ${a}\nl2: yes\n"
+        )
+        (tmp_path / "l3.yaml").write_text(
+            "!set_default a: 999\n!define d: 40\nb_val: ${b}\nc_val: ${c}\nl3: yes\n"
+        )
+        (tmp_path / "l4.yaml").write_text(
+            "all: ${a}_${b}_${c}_${d}\nl4: yes\n"
+        )
+        loader = DraconLoader()
+        stack = CompositionStack(loader, [
+            LayerSpec(source=str(tmp_path / "l1.yaml")),
+            LayerSpec(source=str(tmp_path / "l2.yaml"), scope=LayerScope.EXPORTS),
+            LayerSpec(source=str(tmp_path / "l3.yaml"), scope=LayerScope.EXPORTS),
+            LayerSpec(source=str(tmp_path / "l4.yaml"), scope=LayerScope.EXPORTS),
+        ])
+        result = stack.construct()
+        # a=1 (hard from l1, l3's set_default doesn't override)
+        # b=20 (hard from l2 overrides l1's soft)
+        # c=100 (hard from l1, l2's set_default doesn't override)
+        # d=40 (from l3)
+        assert result["a_val"] == 1
+        assert result["b_val"] == 20
+        assert result["c_val"] == 100
+        assert result["all"] == "1_20_100_40"
+
+    # 11. fork + divergent mutations
+
+    def test_fork_divergent_mutations(self, tmp_path):
+        (tmp_path / "base.yaml").write_text("shared: true\nval: 0\n")
+        (tmp_path / "branch_a.yaml").write_text("val: 1\nonly_a: yes\n")
+        (tmp_path / "branch_b.yaml").write_text("val: 2\nonly_b: yes\n")
+        (tmp_path / "extra_a.yaml").write_text("extra: from_a\n")
+
+        loader = DraconLoader()
+        stack = CompositionStack(loader)
+        stack.push(str(tmp_path / "base.yaml"))
+        _ = stack.composed  # warm cache
+
+        fork_a = stack.fork()
+        fork_b = stack.fork()
+
+        fork_a.push(str(tmp_path / "branch_a.yaml"))
+        fork_a.push(str(tmp_path / "extra_a.yaml"))
+        fork_b.push(str(tmp_path / "branch_b.yaml"))
+
+        result_a = dict(fork_a.construct())
+        result_b = dict(fork_b.construct())
+        result_orig = dict(stack.construct())
+
+        # divergent results
+        assert result_a["val"] == 1
+        assert result_a["only_a"] == "yes"
+        assert result_a["extra"] == "from_a"
+        assert "only_b" not in result_a
+
+        assert result_b["val"] == 2
+        assert result_b["only_b"] == "yes"
+        assert "only_a" not in result_b
+        assert "extra" not in result_b
+
+        # original untouched
+        assert result_orig["val"] == 0
+        assert "only_a" not in result_orig
+        assert "only_b" not in result_orig
+
+    # 12. replace + cache invalidation correctness
+
+    def test_replace_cache_invalidation(self, tmp_path):
+        for i in range(5):
+            (tmp_path / f"l{i}.yaml").write_text(f"key_{i}: v{i}\n")
+        (tmp_path / "alt1.yaml").write_text("key_1: alt1\n")
+        (tmp_path / "alt3.yaml").write_text("key_3: alt3\n")
+
+        def fresh_result(sources):
+            l = DraconLoader()
+            s = CompositionStack(l)
+            for src in sources:
+                s.push(str(tmp_path / src))
+            return dict(s.construct())
+
+        loader = DraconLoader()
+        stack = CompositionStack(loader)
+        for i in range(5):
+            stack.push(str(tmp_path / f"l{i}.yaml"))
+        _ = stack.composed  # warm full cache
+
+        # replace layer 1
+        stack.replace(1, str(tmp_path / "alt1.yaml"))
+        actual = dict(stack.construct())
+        expected = fresh_result(["l0.yaml", "alt1.yaml", "l2.yaml", "l3.yaml", "l4.yaml"])
+        assert actual == expected
+
+        # replace layer 3
+        stack.replace(3, str(tmp_path / "alt3.yaml"))
+        actual2 = dict(stack.construct())
+        expected2 = fresh_result(["l0.yaml", "alt1.yaml", "l2.yaml", "alt3.yaml", "l4.yaml"])
+        assert actual2 == expected2
+
+
 # -- helpers --
 
 def _node_to_dict(node):
