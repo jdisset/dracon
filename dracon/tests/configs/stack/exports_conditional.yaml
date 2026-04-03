@@ -1,0 +1,6 @@
+!if ${model == 'resnet'}:
+  then:
+    augmentation: heavy
+  else:
+    augmentation: light
+lr_used: ${lr}

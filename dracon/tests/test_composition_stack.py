@@ -331,6 +331,107 @@ class TestComposeUsesStack:
         assert dict(result) == {"a": 1}
 
 
+# -- EXPORTS scope tests --
+
+class TestExportsScope:
+    """EXPORTS scope: later layers see !define/!set_default from earlier layers."""
+
+    def test_basic_exports(self, loader):
+        """Layer 2 with EXPORTS sees layer 1's !define."""
+        stack = CompositionStack(loader, [
+            LayerSpec(source=str(CONFIGS / "exports_base.yaml")),
+            LayerSpec(source=str(CONFIGS / "exports_conditional.yaml"), scope=LayerScope.EXPORTS),
+        ])
+        result = stack.construct()
+        assert result["augmentation"] == "heavy"
+        assert result["lr_used"] == 0.001
+
+    def test_soft_hard_priority(self, loader):
+        """!define overrides earlier !set_default, !set_default doesn't override earlier !define."""
+        stack = CompositionStack(loader, [
+            LayerSpec(source=str(CONFIGS / "exports_base.yaml")),
+            LayerSpec(source=str(CONFIGS / "exports_override_lr.yaml"), scope=LayerScope.EXPORTS),
+        ])
+        result = stack.construct()
+        # layer 1: !define model: resnet (hard), !set_default lr: 0.001 (soft)
+        # layer 2: !define lr: 0.01 (hard overrides soft), !set_default model: vgg (soft, doesn't override hard)
+        assert result["name"] == "base"
+        assert result["training"] is True
+        # check the accumulated vars on the composed result
+        comp = stack.composed
+        assert comp.defined_vars["model"] == "resnet"  # hard from layer 1 survives
+        assert comp.defined_vars["lr"] == 0.01  # hard from layer 2 overrides soft from layer 1
+
+    def test_isolated_no_exports(self, loader):
+        """Layer with ISOLATED scope cannot see earlier layer's !define."""
+        stack = CompositionStack(loader, [
+            LayerSpec(source=str(CONFIGS / "exports_base.yaml")),
+            LayerSpec(source=str(CONFIGS / "exports_conditional.yaml"), scope=LayerScope.ISOLATED),
+        ])
+        # model is undefined in layer 2 -> !if should fail
+        with pytest.raises(Exception):
+            stack.construct()
+
+    def test_dynamic_include_on_export(self, tmp_path, loader):
+        """!include file:${dataset}.yaml in layer 2, dataset defined in layer 1."""
+        (tmp_path / "train.yaml").write_text("split: train\nsamples: 1000")
+        define_layer = tmp_path / "define_dataset.yaml"
+        define_layer.write_text("!define dataset_file: " + str(tmp_path / "train.yaml"))
+        include_layer = tmp_path / "use_dataset.yaml"
+        include_layer.write_text("data: !include file:${dataset_file}")
+        stack = CompositionStack(loader, [
+            LayerSpec(source=str(define_layer)),
+            LayerSpec(source=str(include_layer), scope=LayerScope.EXPORTS),
+        ])
+        result = stack.construct()
+        assert result["data"]["split"] == "train"
+        assert result["data"]["samples"] == 1000
+
+    def test_export_override_by_layer_context(self, loader):
+        """Layer context overrides exported vars."""
+        stack = CompositionStack(loader, [
+            LayerSpec(source=str(CONFIGS / "exports_base.yaml")),
+            LayerSpec(
+                source=str(CONFIGS / "exports_conditional.yaml"),
+                scope=LayerScope.EXPORTS,
+                context={"model": "vgg"},
+            ),
+        ])
+        result = stack.construct()
+        # layer context model=vgg overrides exported model=resnet
+        assert result["augmentation"] == "light"
+
+    def test_mixed_scopes(self, loader, tmp_path):
+        """[ISOLATED, EXPORTS, ISOLATED, EXPORTS] -- each EXPORTS sees accumulated state."""
+        (tmp_path / "l1.yaml").write_text("!define a: 1\nfrom_l1: yes")
+        (tmp_path / "l2.yaml").write_text("a_val: ${a}\nfrom_l2: yes")
+        (tmp_path / "l3.yaml").write_text("from_l3: yes")
+        (tmp_path / "l4.yaml").write_text("a_val_again: ${a}\nfrom_l4: yes")
+        stack = CompositionStack(loader, [
+            LayerSpec(source=str(tmp_path / "l1.yaml")),                         # ISOLATED
+            LayerSpec(source=str(tmp_path / "l2.yaml"), scope=LayerScope.EXPORTS), # sees a=1
+            LayerSpec(source=str(tmp_path / "l3.yaml")),                         # ISOLATED
+            LayerSpec(source=str(tmp_path / "l4.yaml"), scope=LayerScope.EXPORTS), # sees a=1
+        ])
+        result = stack.construct()
+        assert result["a_val"] == 1
+        assert result["a_val_again"] == 1
+        assert result["from_l3"] == "yes"
+
+    def test_push_with_exports(self, loader):
+        """Push an EXPORTS layer at runtime, verify it sees accumulated state."""
+        stack = CompositionStack(loader)
+        stack.push(str(CONFIGS / "exports_base.yaml"))
+        _ = stack.composed  # cache layer 0
+        stack.push(LayerSpec(
+            source=str(CONFIGS / "exports_conditional.yaml"),
+            scope=LayerScope.EXPORTS,
+        ))
+        result = stack.construct()
+        assert result["augmentation"] == "heavy"
+        assert result["lr_used"] == 0.001
+
+
 # -- helpers --
 
 def _node_to_dict(node):

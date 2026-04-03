@@ -1,0 +1,3 @@
+!define lr: 0.01
+!set_default model: vgg
+training: true

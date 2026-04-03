@@ -1,0 +1,3 @@
+!define model: resnet
+!set_default lr: 0.001
+name: base
