@@ -289,7 +289,7 @@ def test_error_enrichment_from_loader(tmp_yaml):
 # ── help text ────────────────────────────────────────────────────────────────
 
 def test_help_text_mentions_trace():
-    from dracon_print import HELP_TEXT
+    from dracon.cli import HELP_TEXT
     assert "--trace" in HELP_TEXT
     assert "--trace-all" in HELP_TEXT
 

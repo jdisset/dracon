@@ -1,13 +1,11 @@
-"""Tests for dracon-print CLI tool."""
+"""Tests for dracon-print CLI tool (now in dracon.cli)."""
 import json
 import sys
 from pathlib import Path
 
 import pytest
 
-# insert project root so we can import dracon_print
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from dracon_print import DraconPrint, parse_argv
+from dracon.cli import DraconPrint, parse_argv
 
 CONFIGS = Path(__file__).parent / "configs"
 

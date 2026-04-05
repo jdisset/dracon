@@ -33,7 +33,7 @@ docs = [
 ]
 
 [project.scripts]
-dracon-print = "dracon_print:main"
+dracon = "dracon.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["dracon"]
