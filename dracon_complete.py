@@ -60,6 +60,25 @@ def _extract_flags(program_name: str):
     return None
 
 
+def _extract_subcommands(program_name: str):
+    """Extract subcommand names from source by finding @subcommand decorators."""
+    from importlib.metadata import entry_points
+    try:
+        eps = entry_points(group='console_scripts', name=program_name)
+        for ep in eps:
+            mod_path = ep.value.split(':')[0]
+            src_path = _find_module_source(mod_path)
+            if not src_path:
+                continue
+            with open(src_path) as f:
+                source = f.read()
+            # find @subcommand("name") decorators
+            return re.findall(r'@subcommand\(["\'](\w+)["\']\)', source) or None
+    except Exception:
+        pass
+    return None
+
+
 def main():
     """Handle 'dracon _complete <program>' without importing dracon."""
     argv = sys.argv[1:]
@@ -95,18 +114,13 @@ def main():
                     print(f)
             return
 
-    # subcommand/dynamic completion -- need full import (rare, acceptable)
-    try:
-        from dracon.cli import _discover_program
-        from dracon.commandline import make_program, _handle_complete
-        program_cls = _discover_program(program_name)
-        if program_cls:
-            cfg = program_cls._dracon_program_config
-            prog = make_program(program_cls, name=cfg['name'],
-                                default_auto_dash_alias=cfg.get('default_auto_dash_alias', True))
-            _handle_complete(program_cls, prog)
-    except Exception:
-        pass
+    # subcommand completion via source scan -- no import needed
+    subcmds = _extract_subcommands(program_name)
+    if subcmds:
+        for s in subcmds:
+            if s.startswith(prefix):
+                print(s)
+    # if no subcommands found, just return nothing (shell falls back to default)
 
 
 if __name__ == "__main__":
