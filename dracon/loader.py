@@ -19,6 +19,7 @@ from dracon.composer import (
     CompositionResult,
     DraconComposer,
     delete_unset_nodes,
+    fast_copy_node_tree,
 )
 
 from dracon.draconstructor import Draconstructor
@@ -768,8 +769,18 @@ def compose_config_from_str(yaml, content):
 
 
 def cached_compose_config_from_str(yaml, content):
-    cop = deepcopy(_cached_compose_config_from_str(yaml, content))
-    return cop
+    cached = _cached_compose_config_from_str(yaml, content)
+    # fast tree copy instead of generic deepcopy
+    new_root = fast_copy_node_tree(cached.root)
+    return CompositionResult(
+        root=new_root,
+        special_nodes={},
+        anchor_paths=deepcopy(cached.anchor_paths) if cached.anchor_paths else None,
+        defined_vars=deepcopy(cached.defined_vars) if cached.defined_vars else {},
+        default_vars=set(cached.default_vars),
+        pending_requirements=list(cached.pending_requirements),
+        trace=None,
+    )
 
 
 @cached(LRUCache(maxsize=128), key=lambda yaml, content: hashkey(content))

@@ -79,10 +79,14 @@ class CompositionResult(BaseModel):
     def __hash__(self):
         return hash(self.root)
 
+    _SPECIAL_NODE_CATEGORIES = ('include', 'merge', 'instruction', 'interpolable')
+
     def model_post_init(self, *args, **kwargs):
         super().model_post_init(*args, **kwargs)
-        for category in SpecialNodeCategory.__args__:
-            self.special_nodes.setdefault(category, [])
+        sn = self.special_nodes
+        for cat in self._SPECIAL_NODE_CATEGORIES:
+            if cat not in sn:
+                sn[cat] = []
         if self.node_map is None:
             self.make_map()
         if self.anchor_paths is None:
@@ -216,7 +220,7 @@ class CompositionResult(BaseModel):
         callback: Callable[[Node], None],
     ):
         assert self.node_map is not None
-        for _, node in self.node_map.items():
+        for node in self.node_map.values():
             callback(node)
 
     def walk(
@@ -298,16 +302,18 @@ def walk_node(node, callback, start_path=None):
 
     _new = KeyPath.__new__
     _KP = KeyPath
+    _MK = MAPPING_KEY
 
     def __walk_node(node, path):
         callback(node, path)
-        # defer removed_mapping_key — only needed for container nodes with children
+        # defer removed_mapping_key - only needed for container nodes with children
         if isinstance(node, DraconMappingNode):
             # strip mapping key marker before building child paths
-            if len(path.parts) >= 2 and path.parts[-2] is MAPPING_KEY:
-                parts = path.parts[:-2] + path.parts[-1:]
+            _parts = path.parts
+            if len(_parts) >= 2 and _parts[-2] is _MK:
+                parts = _parts[:-2] + _parts[-1:]
             else:
-                parts = path.parts
+                parts = _parts
             directive_count = {}
             merge_count = 0
             for k_node, v_node in node.value:
@@ -321,24 +327,26 @@ def walk_node(node, callback, start_path=None):
                     merge_count += 1
                 else:
                     path_key = k_node.value
+                # build key path and value path using direct list construction
                 kp = _new(_KP)
-                kp.parts = parts + [MAPPING_KEY, path_key]
+                kp.parts = [*parts, _MK, path_key]
                 kp.is_simple = False
                 kp._hash = None
                 __walk_node(k_node, kp)
                 vp = _new(_KP)
-                vp.parts = parts + [path_key]
+                vp.parts = [*parts, path_key]
                 vp.is_simple = False
                 vp._hash = None
                 __walk_node(v_node, vp)
         elif isinstance(node, DraconSequenceNode):
-            if len(path.parts) >= 2 and path.parts[-2] is MAPPING_KEY:
-                parts = path.parts[:-2] + path.parts[-1:]
+            _parts = path.parts
+            if len(_parts) >= 2 and _parts[-2] is _MK:
+                parts = _parts[:-2] + _parts[-1:]
             else:
-                parts = path.parts
+                parts = _parts
             for i, v in enumerate(node.value):
                 vp = _new(_KP)
-                vp.parts = parts + [str(i)]
+                vp.parts = [*parts, str(i)]
                 vp.is_simple = False
                 vp._hash = None
                 __walk_node(v, vp)
@@ -547,6 +555,124 @@ class DraconComposer(Composer):
 
 ## {{{                           --     utils     --
 
+
+def fast_copy_node_tree(node):
+    """Fast, specialized tree copy for Dracon node trees.
+
+    Much faster than copy.deepcopy because it avoids the generic dispatch,
+    memo dict, and reconstructor overhead. Shares immutable attributes
+    (tags, marks, styles) and only copies mutable structure (value lists,
+    context dicts).
+    """
+    cls = type(node)
+    if cls is DraconMappingNode:
+        # recursively copy children
+        new_value = [
+            (fast_copy_node_tree(k), fast_copy_node_tree(v))
+            for k, v in node.value
+        ]
+        n = DraconMappingNode.__new__(DraconMappingNode)
+        n.tag = node.tag
+        n.value = new_value
+        n.start_mark = node.start_mark
+        n.end_mark = node.end_mark
+        n.flow_style = node.flow_style
+        n.comment = node.comment
+        n.anchor = node.anchor
+        n.ctag = node.ctag
+        n.id = node.id
+        n._source_context = node._source_context
+        n._recompute_map()
+        ctx = getattr(node, 'context', None)
+        if ctx is not None:
+            n.context = ctx.copy() if hasattr(ctx, 'copy') else dict(ctx)
+        return n
+    elif cls is DraconSequenceNode:
+        new_value = [fast_copy_node_tree(v) for v in node.value]
+        n = DraconSequenceNode.__new__(DraconSequenceNode)
+        n.tag = node.tag
+        n.value = new_value
+        n.start_mark = node.start_mark
+        n.end_mark = node.end_mark
+        n.flow_style = node.flow_style
+        n.comment = node.comment
+        n.anchor = node.anchor
+        n.ctag = node.ctag
+        n.id = node.id
+        n._source_context = node._source_context
+        ctx = getattr(node, 'context', None)
+        if ctx is not None:
+            n.context = ctx.copy() if hasattr(ctx, 'copy') else dict(ctx)
+        return n
+    elif cls is InterpolableNode:
+        # InterpolableNode has mutable context - must copy
+        new = InterpolableNode(
+            value=node.value,
+            start_mark=node.start_mark,
+            end_mark=node.end_mark,
+            tag=node.tag,
+            anchor=node.anchor,
+            comment=node.comment,
+            context=node.context.copy() if hasattr(node.context, 'copy') else dict(node.context),
+            init_outermost_interpolations=node.init_outermost_interpolations,
+            source_context=node._source_context,
+        )
+        new.referenced_nodes = deepcopy(node.referenced_nodes)
+        return new
+    elif cls is IncludeNode:
+        return IncludeNode(
+            value=node.value,
+            start_mark=node.start_mark,
+            end_mark=node.end_mark,
+            tag=node.tag,
+            anchor=node.anchor,
+            comment=node.comment,
+            context=node.context.copy() if hasattr(node.context, 'copy') else dict(node.context),
+            optional=node.optional,
+            source_context=node._source_context,
+        )
+    elif cls is MergeNode:
+        n = MergeNode.__new__(MergeNode)
+        n.merge_key_raw = node.merge_key_raw
+        n.tag = node.tag
+        n.value = node.value
+        n.start_mark = node.start_mark
+        n.end_mark = node.end_mark
+        n.style = node.style
+        n.comment = node.comment
+        n.anchor = node.anchor
+        n.ctag = node.ctag
+        n.id = node.id
+        n._source_context = node._source_context
+        return n
+    elif cls is UnsetNode:
+        return UnsetNode(
+            start_mark=node.start_mark,
+            end_mark=node.end_mark,
+            tag=node.tag,
+            anchor=node.anchor,
+            comment=node.comment,
+        )
+    else:
+        # DraconScalarNode or any other node type - immutable value, just copy structure
+        n = cls.__new__(cls)
+        n.tag = node.tag
+        n.value = node.value
+        n.start_mark = node.start_mark
+        n.end_mark = node.end_mark
+        n.comment = node.comment
+        n.anchor = node.anchor
+        n._source_context = getattr(node, '_source_context', None)
+        if hasattr(node, 'style'):
+            n.style = node.style
+        if hasattr(node, 'ctag'):
+            n.ctag = node.ctag
+        if hasattr(node, 'id'):
+            n.id = node.id
+        ctx = getattr(node, 'context', None)
+        if ctx is not None:
+            n.context = ctx.copy() if hasattr(ctx, 'copy') else dict(ctx)
+        return n
 
 
 def delete_unset_nodes(comp_res: CompositionResult):

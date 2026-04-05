@@ -82,38 +82,38 @@ class Instruction:
 
 @ftrace()
 def process_instructions(comp_res: CompositionResult, loader) -> CompositionResult:
-    instruction_nodes = []
     seen_paths = set()
 
-    def find_instruction_nodes(node: Node, path: KeyPath):
-        nonlocal instruction_nodes
-        nonlocal seen_paths
-        tag = getattr(node, 'tag', None)
-        if tag:
-            if (path not in seen_paths) and (inst := match_instruct(tag)):
-                # defer instructions with deferred=True to a separate pass
-                if not getattr(inst, 'deferred', False):
-                    instruction_nodes.append((inst, path))
+    def _find_instructions():
+        """Scan node_map for instruction nodes, return sorted list."""
+        result = []
+        assert comp_res.node_map is not None
+        for path, node in comp_res.node_map.items():
+            if path in seen_paths:
+                continue
+            tag = getattr(node, 'tag', None)
+            if tag:
+                inst = match_instruct(tag)
+                if inst is not None and not getattr(inst, 'deferred', False):
+                    result.append((inst, path))
+        result.sort(key=lambda x: len(x[1]))
+        return result
 
-    def refresh_instruction_nodes():
-        nonlocal instruction_nodes
-        instruction_nodes = []
-        comp_res.make_map()
-        comp_res.walk(find_instruction_nodes)
-        instruction_nodes = sorted(instruction_nodes, key=lambda x: len(x[1]))
-
-    refresh_instruction_nodes()
+    comp_res.make_map()
+    instruction_nodes = _find_instructions()
 
     while instruction_nodes:
         inst, path = instruction_nodes.pop(0)
         assert path not in seen_paths, f"Instruction {inst} at {path} already processed"
         seen_paths.add(path)
         comp_res = inst.process(comp_res, path.copy(), loader)
-        refresh_instruction_nodes()
+        comp_res.make_map()
+        instruction_nodes = _find_instructions()
 
     return comp_res
 
 
+@ftrace()
 @ftrace()
 def process_assertions(comp_res: CompositionResult, loader) -> CompositionResult:
     """Process all !assert instructions after other instructions have resolved."""
@@ -394,10 +394,15 @@ class Define(Instruction):
         var_name, value, parent_node = self.get_name_and_value(comp_res, path, loader)
 
         def _add_and_harden(node):
-            add_to_context({var_name: value}, node)
-            sk = getattr(getattr(node, 'context', None), '_soft_keys', None)
-            if sk is not None:
-                sk.discard(var_name)
+            # fast path: directly set the key on the context instead of going through merged()
+            ctx = getattr(node, 'context', None)
+            if ctx is not None:
+                ctx[var_name] = value
+                sk = getattr(ctx, '_soft_keys', None)
+                if sk is not None:
+                    sk.discard(var_name)
+            else:
+                add_to_context({var_name: value}, node)
 
         walk_node(node=parent_node, callback=_add_and_harden)
 
@@ -1000,8 +1005,15 @@ def register_instruction(tag: str, instruction_cls: type[Instruction]):
     INSTRUCTION_REGISTRY[tag] = instruction_cls
 
 
+_match_instruct_neg_cache: set[str] = set()
+
+
 def match_instruct(value) -> Optional[Instruction]:
     value = str(value) if not isinstance(value, str) else value
+
+    # negative cache: skip values we already know aren't instructions
+    if value in _match_instruct_neg_cache:
+        return None
 
     # fast path: exact tag match
     cls = INSTRUCTION_REGISTRY.get(value)
@@ -1026,4 +1038,6 @@ def match_instruct(value) -> Optional[Instruction]:
                     f"YAML interprets `{value} key: val` as a tag named '{value}' (colon is part "
                     f"of the tag). Use `{stripped} key: val` (space, no colon after tag) instead."
                 )
+
+    _match_instruct_neg_cache.add(value)
     return None

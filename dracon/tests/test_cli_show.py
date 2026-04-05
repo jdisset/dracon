@@ -91,8 +91,15 @@ class TestShowRawMode:
 
     def test_verbose_flag(self):
         """verbose shouldn't break anything"""
-        result = self._run_show([str(CONFIGS / "simple.yaml"), "-v"])
-        assert isinstance(result, str)
+        import logging
+        prev_root = logging.root.level
+        prev_dracon = logging.getLogger("dracon").level
+        try:
+            result = self._run_show([str(CONFIGS / "simple.yaml"), "-v"])
+            assert isinstance(result, str)
+        finally:
+            logging.root.setLevel(prev_root)
+            logging.getLogger("dracon").setLevel(prev_dracon)
 
 
 class TestShowModeDetection:

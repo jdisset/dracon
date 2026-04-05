@@ -144,14 +144,25 @@ def metadata_dict_like(obj) -> bool:
 _DICT_METHODS = ('keys', 'values', 'items', '__getitem__', '__contains__', '__setitem__')
 
 
+_dict_like_cache: dict[type, bool] = {}
+
+
 def dict_like(obj) -> bool:
+    cls = type(obj)
+    cached = _dict_like_cache.get(cls)
+    if cached is not None:
+        return cached
     # fast path: most dict-like objects are dict or MutableMapping subclasses
-    if type(obj) is dict or isinstance(obj, MutableMapping):
+    if cls is dict or isinstance(obj, MutableMapping):
+        _dict_like_cache[cls] = True
         return True
     # fast reject: scalars and nodes that are never dict-like
     if isinstance(obj, (str, bytes, int, float, bool, type(None))):
+        _dict_like_cache[cls] = False
         return False
-    return all(callable(getattr(obj, m, None)) for m in _DICT_METHODS)
+    result = all(callable(getattr(obj, m, None)) for m in _DICT_METHODS)
+    _dict_like_cache[cls] = result
+    return result
 
 
 @runtime_checkable
@@ -194,16 +205,26 @@ class ListLike(Generic[E], metaclass=ListLikeMeta):
 _LIST_METHODS = ('__getitem__', '__add__', '__iter__', '__len__')
 
 
+_list_like_cache: dict[type, bool] = {}
+
+
 def list_like(obj) -> bool:
-    # fast reject: strings and dicts are not list-like
+    cls = type(obj)
+    cached = _list_like_cache.get(cls)
+    if cached is not None:
+        return cached
     if isinstance(obj, (str, bytes, dict, MutableMapping)):
+        _list_like_cache[cls] = False
         return False
     if isinstance(obj, (list, tuple)):
+        _list_like_cache[cls] = True
         return True
-    return (
+    result = (
         all(callable(getattr(obj, m, None)) for m in _LIST_METHODS)
         and not dict_like(obj)
     )
+    _list_like_cache[cls] = result
+    return result
 
 
 def values_equal(a: object, b: object) -> bool:
@@ -327,10 +348,13 @@ def build_nested_dict(flat_args: Dict[str, Any]) -> Dict[str, Any]:
 ## {{{                         --     deepcopy     --
 
 
+_SER_DEBUG_ENABLED = bool(os.getenv('ENABLE_SER_DEBUG', ''))
+
+
 def debug_serialization(
     obj, operation='pickle', path='', max_depth=20, max_size_mb=None, seen=None
 ):
-    if not os.getenv('ENABLE_SER_DEBUG', False):
+    if not _SER_DEBUG_ENABLED:
         return
 
     if seen is None:
@@ -490,6 +514,8 @@ def debug_serialization(
 
 
 def ser_debug(obj, operation='deepcopy', **kwargs):
+    if not _SER_DEBUG_ENABLED:
+        return None
     out = debug_serialization(obj, operation=operation, **kwargs)
     if out:
         errors = {}

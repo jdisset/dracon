@@ -42,6 +42,17 @@ logger = logging.getLogger("dracon")
 ## {{{                        --     type utils     --
 
 
+_type_adapter_cache: dict[type, TypeAdapter] = {}
+
+
+def _get_type_adapter(target_type) -> TypeAdapter:
+    adapter = _type_adapter_cache.get(target_type)
+    if adapter is None:
+        adapter = TypeAdapter(target_type)
+        _type_adapter_cache[target_type] = adapter
+    return adapter
+
+
 def pydantic_validate(target_type, value, localns=None, root_obj=None, current_path=None):
     if isinstance(target_type, str):  # if it's a string, we need to resolve it
         target_type = resolve_type(target_type, localns=localns)
@@ -49,7 +60,7 @@ def pydantic_validate(target_type, value, localns=None, root_obj=None, current_p
     if not is_lazy_compatible(target_type) and target_type is not Any:
         resolve_all_lazy(value)
     try:
-        return TypeAdapter(target_type).validate_python(value)
+        return _get_type_adapter(target_type).validate_python(value)
     except PydanticSchemaGenerationError as e:
         instance = target_type(value)  # we try a simple construction
         return instance

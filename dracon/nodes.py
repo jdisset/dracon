@@ -27,25 +27,35 @@ _DIRECTIVE_SUFFIXES = frozenset({
 _DIRECTIVE_TYPED_PREFIXES = ('!define:', '!define?:', '!set_default:')
 
 
+_directive_str_cache: dict[str, bool] = {}
+
+
 def _is_directive_key(key_node):
     """Check if a key node has a directive tag (consumed during instruction processing)."""
     tag = key_node.tag
     if tag is None:
         return False
-    # tag can be str or Tag object depending on ruamel.yaml context
-    tag_str = tag if tag.__class__ is str else str(tag)
-    if tag_str in DIRECTIVE_TAGS:
-        return True
-    # typed directive variants: !define:float, !define?:int, !set_default:str, ...
-    if any(tag_str.startswith(p) for p in _DIRECTIVE_TYPED_PREFIXES):
-        return True
-    if tag.__class__ is not str:
+    # get tag string (cached per string value)
+    if tag.__class__ is str:
+        tag_str = tag
+    else:
         try:
-            suffix = tag.suffix
-            return suffix in _DIRECTIVE_SUFFIXES
-        except AttributeError:
-            pass
-    return False
+            tag_str = str(tag)
+        except Exception:
+            return False
+    cached = _directive_str_cache.get(tag_str)
+    if cached is not None:
+        return cached
+    result = False
+    if tag_str in DIRECTIVE_TAGS:
+        result = True
+    else:
+        for p in _DIRECTIVE_TYPED_PREFIXES:
+            if tag_str.startswith(p):
+                result = True
+                break
+    _directive_str_cache[tag_str] = result
+    return result
 
 DEFAULT_MAP_TAG = 'tag:yaml.org,2002:map'
 DEFAULT_SEQ_TAG = 'tag:yaml.org,2002:seq'
@@ -382,19 +392,15 @@ class DraconMappingNode(SourceContextMixin, MappingNode):
 
     def __deepcopy__(self, memo):
         copied_value = deepcopy(self.value, memo)
-        n = self.__class__(
-            tag=self.tag,
-            value=copied_value,
-            start_mark=self.start_mark,
-            end_mark=self.end_mark,
-            flow_style=self.flow_style,
-            comment=self.comment,
-            anchor=self.anchor,
-            source_context=self._source_context,
-        )
+        # bypass __init__ to avoid expensive _recompute_map() - set map directly
+        n = DraconMappingNode.__new__(DraconMappingNode)
+        MappingNode.__init__(n, self.tag, copied_value, self.start_mark, self.end_mark,
+                             self.flow_style, self.comment, self.anchor)
+        n._source_context = self._source_context
+        # rebuild map from copied values
+        n._recompute_map()
         n.ctag = self.ctag
         n.id = self.id
-        # preserve dynamically-set context (e.g. from !define propagation)
         ctx = getattr(self, 'context', None)
         if ctx is not None:
             n.context = ctx.copy() if hasattr(ctx, 'copy') else ctx

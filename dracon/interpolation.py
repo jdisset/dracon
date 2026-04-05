@@ -314,10 +314,12 @@ def preprocess_expr(expr: str):
     return expr
 
 
+_IDENT_RE = re.compile(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b')
+
+
 def _extract_identifiers(expr: str) -> set:
     """extract potential variable names from an expression using simple regex."""
-    pattern = r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
-    return set(re.findall(pattern, expr))
+    return set(_IDENT_RE.findall(expr))
 
 
 def _analyze_eval_error(expr: str, error: Exception, symbols: Optional[dict]) -> str:
@@ -374,7 +376,7 @@ def do_safe_eval(expr: str, engine: str, symbols: Optional[dict] = None, source_
 
     # pre-access symbols that appear in the expression to trigger tracking
     # this ensures accesses are recorded before copying to eval namespace
-    # also resolve any lazy symbols so the eval engine gets concrete values
+    # resolve any lazy symbols so the eval engine gets concrete values
     if symbols is not None:
         identifiers = _extract_identifiers(expr)
         for ident in identifiers:
@@ -394,11 +396,49 @@ def do_safe_eval(expr: str, engine: str, symbols: Optional[dict] = None, source_
         return UNRESOLVED_SENTINEL
 
 
+_asteval_proto: Optional[Interpreter] = None
+_asteval_base_symtable: Optional[dict] = None
+_asteval_depth: int = 0  # reentrancy depth counter
+
+
+def _get_asteval_proto() -> tuple[Interpreter, dict]:
+    """lazily create a reusable asteval prototype interpreter + base symtable."""
+    global _asteval_proto, _asteval_base_symtable
+    if _asteval_proto is None:
+        _asteval_proto = Interpreter(max_string_length=1000)
+        _asteval_base_symtable = dict(_asteval_proto.symtable)
+    return _asteval_proto, _asteval_base_symtable
+
+
+def _asteval_eval(expr: str, symbols: Optional[dict]) -> Any:
+    """eval an expression reusing a single Interpreter prototype (5x faster).
+    Falls back to fresh Interpreter on reentrant calls to avoid symtable corruption."""
+    global _asteval_depth
+    _asteval_depth += 1
+    try:
+        if _asteval_depth > 1:
+            # reentrant: fall back to fresh instance to avoid symtable clobber
+            interp = Interpreter(user_symbols=symbols or {}, max_string_length=1000)
+            return interp.eval(expr, raise_errors=True)
+        proto, base = _get_asteval_proto()
+        proto.symtable.clear()
+        proto.symtable.update(base)
+        if symbols:
+            proto.symtable.update(symbols)
+        proto.error = []
+        proto.retval = None
+        proto.expr = None
+        proto._calldepth = 0
+        proto.lineno = 0
+        return proto.eval(expr, raise_errors=True)
+    finally:
+        _asteval_depth -= 1
+
+
 def _do_safe_eval_engine(expr: str, engine: str, symbols: Optional[dict], source_context: Optional[SourceContext], original_expr: str) -> Any:
     if engine == 'asteval':
-        safe_eval = Interpreter(user_symbols=symbols or {}, max_string_length=1000)
         try:
-            res = safe_eval.eval(expr, raise_errors=True)
+            res = _asteval_eval(expr, symbols)
         except Exception as e:
             # detect undefined name errors before generic handling
             if isinstance(e, NameError):
@@ -407,9 +447,10 @@ def _do_safe_eval_engine(expr: str, engine: str, symbols: Optional[dict], source
                     raise UndefinedNameError(m.group(1), context=source_context, cause=e, expression=original_expr, available_symbols=symbols) from e
             hint = _analyze_eval_error(expr, e, symbols)
             # asteval populates error list even when raising - extract location info
+            proto, _ = _get_asteval_proto()
             error_location = ""
-            if safe_eval.error:
-                err_holder = safe_eval.error[0]
+            if proto.error:
+                err_holder = proto.error[0]
                 if err_holder.node and hasattr(err_holder.node, 'col_offset'):
                     col = err_holder.node.col_offset
                     end_col = getattr(err_holder.node, 'end_col_offset', col + 1)
@@ -422,9 +463,9 @@ def _do_safe_eval_engine(expr: str, engine: str, symbols: Optional[dict], source
                 msg += f"\n\nHint:\n{hint}"
             raise EvaluationError(msg, context=source_context, cause=e, expression=original_expr, available_symbols=symbols) from e
 
-        errors = safe_eval.error
-        if errors:
-            errormsg = '\n'.join(': '.join(e.get_error()) for e in errors)
+        proto, _ = _get_asteval_proto()
+        if proto.error:
+            errormsg = '\n'.join(': '.join(e.get_error()) for e in proto.error)
             raise EvaluationError(f"Expression evaluation failed:\n{errormsg}", context=source_context, expression=original_expr, available_symbols=symbols)
         return res
 
@@ -507,21 +548,18 @@ def prepare_symbols(current_path, root_obj, context):
     else:
         symbols = dict(context) if context else {}
 
-    # add base symbols and dracon-specific symbols
-    base_symbols = copy(BASE_DRACON_SYMBOLS)
-    base_symbols.update(
-        {
-            "__DRACON__CURRENT_PATH": current_path,
-            "__DRACON__PARENT_PATH": current_path.parent,
-            "__DRACON__CURRENT_ROOT_OBJ": root_obj,
-            "__DRACON_RESOLVE": dracon_resolve,
-            "__dracon_KeyPath": KeyPath,
-        }
-    )
-    # update symbols with base (context values take precedence for non-internal keys)
-    for k, v in base_symbols.items():
-        if k.startswith('__') or k not in symbols:
+    # add dracon-specific internal symbols (always override)
+    symbols["__DRACON__CURRENT_PATH"] = current_path
+    symbols["__DRACON__PARENT_PATH"] = current_path.parent
+    symbols["__DRACON__CURRENT_ROOT_OBJ"] = root_obj
+    symbols["__DRACON_RESOLVE"] = dracon_resolve
+    symbols["__dracon_KeyPath"] = KeyPath
+
+    # add base symbols only if not already in context
+    for k, v in BASE_DRACON_SYMBOLS.items():
+        if k not in symbols:
             symbols[k] = v
+
     return symbols
 
 
@@ -631,7 +669,7 @@ def evaluate_expression(
     if permissive and not made_progress:
         return endexpr
 
-    if allow_recurse != 0 and isinstance(endexpr, str):
+    if allow_recurse != 0 and isinstance(endexpr, str) and '${' in endexpr:
         return evaluate_expression(
             endexpr,
             current_path,

@@ -301,6 +301,14 @@ def cached_merge_key(raw: str) -> MergeKey:
 def merged(existing: Any, new: Any, k: MergeKey = DEFAULT_ADD_TO_CONTEXT_MERGE_KEY) -> DictLike:
     from dracon.deferred import DeferredNode
 
+    # pre-compute flags to avoid repeated attribute access in inner loops
+    _existing_wins = k.dict_priority == MergePriority.EXISTING
+    _dict_append = k.dict_mode == MergeMode.APPEND
+    _dict_depth = k.dict_depth
+    _list_replace = k.list_mode == MergeMode.REPLACE
+    _list_existing_wins = k.list_priority == MergePriority.EXISTING
+    _list_depth = k.list_depth
+
     def merge_value(v1: Any, v2: Any, depth: int = 0) -> Any:
         if type(v1) is DeferredNode:
             return merge_value(v1.value, v2, depth)
@@ -314,33 +322,26 @@ def merged(existing: Any, new: Any, k: MergeKey = DEFAULT_ADD_TO_CONTEXT_MERGE_K
         elif list_like(v1) and list_like(v2):
             return merge_lists(v1, v2, depth + 1)
         else:
-            return v1 if k.dict_priority == MergePriority.EXISTING else v2
+            return v1 if _existing_wins else v2
 
     def merge_dicts(dict1: DictLike, dict2: DictLike, depth: int = 0) -> DictLike:
-        pdict, other = (
-            (dict1, dict2) if k.dict_priority == MergePriority.EXISTING else (dict2, dict1)
-        )
+        pdict, other = (dict1, dict2) if _existing_wins else (dict2, dict1)
 
-        if k.dict_depth is not None and depth > k.dict_depth:
+        if _dict_depth is not None and depth > _dict_depth:
             return pdict
 
-        # preserve special dict types (like TrackedContext) when they're in the non-priority position
-        # but only for non-node dicts (nodes have 'tag' attribute)
         if hasattr(other, 'merged_with') and not hasattr(other, 'tag') and not hasattr(pdict, 'tag'):
-            # use other.copy() to preserve type, then update with pdict values
             result = other.copy()
             result.update(pdict)
         else:
             result = pdict.copy()
 
         if hasattr(pdict, 'tag') and hasattr(other, 'tag'):
-            # we're dealing with nodes
             if pdict.tag.startswith('!'):
                 result.tag = pdict.tag
             elif other.tag.startswith('!'):
                 result.tag = other.tag
 
-        # soft priority: hard values always beat soft regardless of merge direction
         pdict_soft = getattr(pdict, '_soft_keys', None)
         other_soft = getattr(other, '_soft_keys', None)
         result_soft = getattr(result, '_soft_keys', None)
@@ -354,18 +355,18 @@ def merged(existing: Any, new: Any, k: MergeKey = DEFAULT_ADD_TO_CONTEXT_MERGE_K
                 result[key] = value
                 if result_soft is not None:
                     result_soft.discard(key)
-            elif k.dict_mode == MergeMode.APPEND:
+            elif _dict_append:
                 result[key] = (
                     merge_value(result[key], value, depth + 1)
-                    if k.dict_priority == MergePriority.EXISTING
+                    if _existing_wins
                     else merge_value(value, result[key], depth + 1)
                 )
         return result
 
     def merge_lists(list1: ListLike, list2: ListLike, depth: int = 0) -> ListLike:
-        if (k.list_depth is not None and depth > k.list_depth) or k.list_mode == MergeMode.REPLACE:
-            return list1 if k.list_priority == MergePriority.EXISTING else list2
-        return list1 + list2 if k.list_priority == MergePriority.EXISTING else list2 + list1
+        if (_list_depth is not None and depth > _list_depth) or _list_replace:
+            return list1 if _list_existing_wins else list2
+        return list1 + list2 if _list_existing_wins else list2 + list1
 
     return merge_value(existing, new)
 
@@ -391,17 +392,30 @@ def add_to_context(new_context, existing_item, merge_key=DEFAULT_ADD_TO_CONTEXT_
     if not skip_clean:
         new_context = clean_context_keys(new_context)
 
-    if hasattr(existing_item, 'context'):
-        existing_item.context = _ensure_soft_dict(existing_item.context)
-        if merge_key.context_propagation:
-            mode_char = '+' if merge_key.dict_mode == MergeMode.APPEND else '~'
-            effective_key = cached_merge_key(f"{{{mode_char}<}}")
+    ctx = getattr(existing_item, 'context', None)
+    if ctx is not None:
+        # fast path: skip_clean=True signals we're in the bulk context propagation loop.
+        # for replace+existing with no soft keys on either side, just add missing keys.
+        if (skip_clean
+            and not merge_key.context_propagation
+            and merge_key.dict_mode == MergeMode.REPLACE
+            and merge_key.dict_priority == MergePriority.EXISTING
+            and not getattr(ctx, '_soft_keys', None)
+            and not getattr(new_context, '_soft_keys', None)):
+            for k, v in new_context.items():
+                if k not in ctx:
+                    ctx[k] = v
         else:
-            effective_key = merge_key
-        existing_item.context = merged(existing_item.context, new_context, effective_key)
+            existing_item.context = _ensure_soft_dict(ctx)
+            if merge_key.context_propagation:
+                mode_char = '+' if merge_key.dict_mode == MergeMode.APPEND else '~'
+                effective_key = cached_merge_key(f"{{{mode_char}<}}")
+            else:
+                effective_key = merge_key
+            existing_item.context = merged(existing_item.context, new_context, effective_key)
     else:
         existing_item.context = _ensure_soft_dict(new_context)
-    
+
     if hasattr(existing_item, '_clear_ctx') and existing_item._clear_ctx:
         for k in existing_item._clear_ctx:
             if k in existing_item.context:
