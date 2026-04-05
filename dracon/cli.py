@@ -931,15 +931,47 @@ def _emit_shell_script(shell: str) -> str:
 
 
 _SHELL_RC = {"bash": ".bashrc", "zsh": ".zshrc"}
-_SHELL_EVAL = {
-    "bash": 'eval "$(dracon completions bash 2>/dev/null)"',
-    "zsh": 'eval "$(dracon completions zsh 2>/dev/null)"',
-    "fish": None,  # fish uses conf.d
+
+# source from cache file; regen in background if stale (>1h)
+_SHELL_SOURCE = {
+    "bash": """\
+[[ -f ~/.dracon/completions.bash ]] && source ~/.dracon/completions.bash
+(dracon completions --regen bash &>/dev/null &)""",
+    "zsh": """\
+[[ -f ~/.dracon/completions.zsh ]] && source ~/.dracon/completions.zsh
+(dracon completions --regen zsh &>/dev/null &)""",
 }
 
 
+def _cache_path(shell: str) -> str:
+    return os.path.join(os.path.expanduser("~"), ".dracon", f"completions.{shell}")
+
+
+def _write_cache(shell: str):
+    """Write completion script to cache file."""
+    path = _cache_path(shell)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    script = _emit_shell_script(shell)
+    with open(path, "w") as f:
+        f.write(script)
+    return path
+
+
+def _regen_if_stale(shell: str):
+    """Regenerate cache if older than 1 hour."""
+    import time
+    path = _cache_path(shell)
+    try:
+        age = time.time() - os.path.getmtime(path)
+        if age < 3600:
+            return  # fresh enough
+    except OSError:
+        pass  # file doesn't exist, regen
+    _write_cache(shell)
+
+
 def _install_completions():
-    """Auto-detect shell and append eval line to rc file."""
+    """Auto-detect shell, write cache file, add source line to rc."""
     shell_path = os.environ.get("SHELL", "")
     shell = os.path.basename(shell_path)
     if shell not in ("bash", "zsh", "fish"):
@@ -953,27 +985,30 @@ def _install_completions():
         os.makedirs(conf_dir, exist_ok=True)
         target = os.path.join(conf_dir, "dracon.fish")
         script = _emit_shell_script("fish")
-        # idempotent: overwrite
         with open(target, "w") as f:
             f.write(script)
         print(f"wrote {target}")
         return
 
-    rc_file = os.path.join(home, _SHELL_RC[shell])
-    eval_line = _SHELL_EVAL[shell]
+    # write the cache file
+    cache = _write_cache(shell)
+    print(f"wrote {cache}")
 
-    # read existing content for idempotency check
+    # add source line to rc
+    rc_file = os.path.join(home, _SHELL_RC[shell])
+    source_lines = _SHELL_SOURCE[shell]
+
     existing = ""
     if os.path.exists(rc_file):
         with open(rc_file) as f:
             existing = f.read()
 
-    if eval_line in existing:
+    if f"completions.{shell}" in existing:
         print(f"already installed in {rc_file}")
         return
 
     with open(rc_file, "a") as f:
-        f.write(f"\n{eval_line}\n")
+        f.write(f"\n{source_lines}\n")
     print(f"added to {rc_file}")
 
 
@@ -984,8 +1019,13 @@ def _install_completions():
 class CompletionsCmd(BaseModel):
     """Install or emit shell completion scripts for dracon programs."""
     targets: Annotated[list[str], Arg(positional=True, help="shell name (bash/zsh/fish) or 'install'")] = []
+    regen: Annotated[bool, Arg(help="regenerate cache if stale (called from shell bg)")] = False
 
     def run(self, ctx=None):
+        if self.regen and self.targets:
+            _regen_if_stale(self.targets[0])
+            return ""
+
         if not self.targets:
             print("usage: dracon completions {bash|zsh|fish|install}", file=sys.stderr)
             sys.exit(1)

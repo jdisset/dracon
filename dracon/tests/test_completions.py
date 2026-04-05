@@ -72,7 +72,9 @@ class TestCompletionsInstall:
             with patch('sys.exit'):
                 DraconCLI.cli(argv=["completions", "install"])
         content = rc.read_text()
-        assert 'eval "$(dracon completions bash 2>/dev/null)"' in content
+        assert 'completions.bash' in content
+        # cache file should be written
+        assert (tmp_path / ".dracon" / "completions.bash").exists()
 
     def test_install_zsh(self, tmp_path):
         rc = tmp_path / ".zshrc"
@@ -82,18 +84,18 @@ class TestCompletionsInstall:
             with patch('sys.exit'):
                 DraconCLI.cli(argv=["completions", "install"])
         content = rc.read_text()
-        assert 'eval "$(dracon completions zsh 2>/dev/null)"' in content
+        assert 'completions.zsh' in content
+        assert (tmp_path / ".dracon" / "completions.zsh").exists()
 
     def test_install_idempotent(self, tmp_path):
         rc = tmp_path / ".bashrc"
-        rc.write_text('eval "$(dracon completions bash 2>/dev/null)"\n')
+        rc.write_text('source ~/.dracon/completions.bash\n')
         with patch.dict(os.environ, {"SHELL": "/bin/bash", "HOME": str(tmp_path)}):
             from dracon.cli import DraconCLI
             with patch('sys.exit'):
                 DraconCLI.cli(argv=["completions", "install"])
-        # should not duplicate
         content = rc.read_text()
-        assert content.count('dracon completions bash') == 1
+        assert content.count('completions.bash') == 1
 
 
 # ── --_complete protocol tests ───────────────────────────────────────────────
