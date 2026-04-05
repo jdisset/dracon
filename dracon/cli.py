@@ -527,6 +527,22 @@ def _get_program_schema(program_cls) -> dict:
     return program_cls.model_json_schema()
 
 
+def _construct_defaults(program_cls):
+    """Construct a model instance using only fields that have defaults.
+
+    Skips required fields (like Subcommand) so we can show the config
+    defaults of any program without needing a valid subcommand selection.
+    """
+    from pydantic.fields import PydanticUndefined
+    defaults = {}
+    for name, field in program_cls.model_fields.items():
+        if field.default is not PydanticUndefined:
+            defaults[name] = field.default
+        elif field.default_factory is not None:
+            defaults[name] = field.default_factory()
+    return program_cls.model_construct(**defaults)
+
+
 def _iter_dracon_entry_points():
     """Yield (ep_name, dracon_program_class) for all installed dracon programs."""
     import importlib
@@ -544,11 +560,21 @@ def _iter_dracon_entry_points():
 
 
 def _discover_program(name: str):
-    """Try to find a @dracon_program class by entry point name."""
+    """Try to find a @dracon_program class by entry point name.
+
+    Fast path: look up the specific entry point directly instead of
+    scanning all console_scripts.
+    """
+    import importlib
+    from importlib.metadata import entry_points
     try:
-        for ep_name, cls in _iter_dracon_entry_points():
-            if ep_name == name:
-                return cls
+        eps = entry_points(group='console_scripts', name=name)
+        for ep in eps:
+            mod = importlib.import_module(ep.value.split(':')[0])
+            for attr_name in dir(mod):
+                attr = getattr(mod, attr_name)
+                if isinstance(attr, type) and hasattr(attr, '_dracon_program_config'):
+                    return attr
     except Exception:
         pass
     return None
@@ -580,7 +606,7 @@ class ShowCmd(BaseModel):
         if not self.targets:
             return True
         first = self.targets[0]
-        return first.startswith('+') or first.endswith(('.yaml', '.yml')) or os.path.exists(first)
+        return first.startswith('+') or first.endswith(('.yaml', '.yml')) or os.path.isfile(first)
 
     def run(self, ctx=None):
         _setup_logging(self.verbose)
@@ -675,18 +701,28 @@ class ShowCmd(BaseModel):
             sys.exit(1)
 
         extra_configs = self.targets[1:]
-        try:
-            instance = program_cls.from_config(*extra_configs)
-        except Exception as e:
-            print(f"Error loading program config: {e}", file=sys.stderr)
-            sys.exit(1)
+
+        if extra_configs:
+            try:
+                instance = program_cls.from_config(*extra_configs)
+            except SystemExit:
+                print(f"Error: failed to load config for '{program_name}'", file=sys.stderr)
+                sys.exit(1)
+            except Exception as e:
+                print(f"Error loading program config: {e}", file=sys.stderr)
+                sys.exit(1)
+        else:
+            # bare defaults -- construct with field defaults, skip required fields
+            instance = _construct_defaults(program_cls)
 
         data = instance.model_dump()
-
+        if not data:
+            # no defaulted fields (e.g. subcommand-only CLI)
+            print(f"'{program_name}' has no config defaults. Use --schema to see its model.", file=sys.stderr)
+            return ""
         if self.select:
             kp = KeyPath(self.select)
             data = kp.get_obj(data)
-
         if self.json_output or self.no_docs:
             output = json.dumps(data, indent=2, default=str)
         else:
