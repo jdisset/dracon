@@ -527,22 +527,28 @@ def _get_program_schema(program_cls) -> dict:
     return program_cls.model_json_schema()
 
 
-def _discover_program(name: str):
-    """Try to find a @dracon_program class by entry point name.
+def _iter_dracon_entry_points():
+    """Yield (ep_name, dracon_program_class) for all installed dracon programs."""
+    import importlib
+    from importlib.metadata import entry_points
+    for ep in entry_points(group='console_scripts'):
+        try:
+            mod = importlib.import_module(ep.value.split(':')[0])
+            for attr_name in dir(mod):
+                attr = getattr(mod, attr_name)
+                if isinstance(attr, type) and hasattr(attr, '_dracon_program_config'):
+                    yield ep.name, attr
+                    break
+        except Exception:
+            continue
 
-    Returns the class if found, None otherwise.
-    """
+
+def _discover_program(name: str):
+    """Try to find a @dracon_program class by entry point name."""
     try:
-        import importlib
-        from importlib.metadata import entry_points
-        for ep in entry_points(group='console_scripts'):
-            if ep.name == name:
-                mod = importlib.import_module(ep.value.split(':')[0])
-                for attr_name in dir(mod):
-                    attr = getattr(mod, attr_name)
-                    if (isinstance(attr, type) and issubclass(attr, BaseModel)
-                            and hasattr(attr, '_dracon_program_config')):
-                        return attr
+        for ep_name, cls in _iter_dracon_entry_points():
+            if ep_name == name:
+                return cls
     except Exception:
         pass
     return None
@@ -719,6 +725,131 @@ def _setup_logging(verbose: bool):
     )
 
 
+# ── completions helpers ──────────────────────────────────────────────────────
+
+
+def _discover_dracon_programs() -> list[str]:
+    """Find all installed console_scripts that are @dracon_program powered."""
+    try:
+        return [name for name, _ in _iter_dracon_entry_points()]
+    except Exception:
+        return ["dracon"]
+
+
+_BASH_SCRIPT = """\
+_dracon_complete() {{
+    local IFS=$'\\n'
+    COMPREPLY=($(COMP_LINE="$COMP_LINE" COMP_POINT="$COMP_POINT" \\
+        "${{COMP_WORDS[0]}}" --_complete 2>/dev/null))
+}}
+{register_lines}
+"""
+
+_ZSH_SCRIPT = """\
+_dracon_complete() {{
+    local completions
+    completions=(${{(f)"$(COMP_LINE="$BUFFER" COMP_POINT="$CURSOR" \\
+        "${{words[1]}}" --_complete 2>/dev/null)"}})
+    compadd -a completions
+}}
+{register_lines}
+"""
+
+_FISH_SCRIPT = """\
+{register_lines}
+"""
+
+
+def _emit_shell_script(shell: str) -> str:
+    programs = _discover_dracon_programs()
+    if shell == "bash":
+        lines = "\n".join(f"complete -o default -F _dracon_complete {p}" for p in programs)
+        return _BASH_SCRIPT.format(register_lines=lines)
+    elif shell == "zsh":
+        lines = "\n".join(f"compdef _dracon_complete {p}" for p in programs)
+        return _ZSH_SCRIPT.format(register_lines=lines)
+    elif shell == "fish":
+        lines = "\n".join(
+            f"complete -c {p} -a '(COMP_LINE=(commandline) COMP_POINT=(commandline -C) {p} --_complete 2>/dev/null)'"
+            for p in programs
+        )
+        return _FISH_SCRIPT.format(register_lines=lines)
+    raise ValueError(f"unsupported shell: {shell}")
+
+
+_SHELL_RC = {"bash": ".bashrc", "zsh": ".zshrc"}
+_SHELL_EVAL = {
+    "bash": 'eval "$(dracon completions bash)"',
+    "zsh": 'eval "$(dracon completions zsh)"',
+    "fish": None,  # fish uses conf.d
+}
+
+
+def _install_completions():
+    """Auto-detect shell and append eval line to rc file."""
+    shell_path = os.environ.get("SHELL", "")
+    shell = os.path.basename(shell_path)
+    if shell not in ("bash", "zsh", "fish"):
+        print(f"unsupported shell: {shell}", file=sys.stderr)
+        sys.exit(1)
+
+    home = os.path.expanduser("~")
+
+    if shell == "fish":
+        conf_dir = os.path.join(home, ".config", "fish", "conf.d")
+        os.makedirs(conf_dir, exist_ok=True)
+        target = os.path.join(conf_dir, "dracon.fish")
+        script = _emit_shell_script("fish")
+        # idempotent: overwrite
+        with open(target, "w") as f:
+            f.write(script)
+        print(f"wrote {target}")
+        return
+
+    rc_file = os.path.join(home, _SHELL_RC[shell])
+    eval_line = _SHELL_EVAL[shell]
+
+    # read existing content for idempotency check
+    existing = ""
+    if os.path.exists(rc_file):
+        with open(rc_file) as f:
+            existing = f.read()
+
+    if eval_line in existing:
+        print(f"already installed in {rc_file}")
+        return
+
+    with open(rc_file, "a") as f:
+        f.write(f"\n{eval_line}\n")
+    print(f"added to {rc_file}")
+
+
+# ── CompletionsCmd subcommand ────────────────────────────────────────────────
+
+
+@subcommand("completions")
+class CompletionsCmd(BaseModel):
+    """Install or emit shell completion scripts for dracon programs."""
+    targets: Annotated[list[str], Arg(positional=True, help="shell name (bash/zsh/fish) or 'install'")] = []
+
+    def run(self, ctx=None):
+        if not self.targets:
+            print("usage: dracon completions {bash|zsh|fish|install}", file=sys.stderr)
+            sys.exit(1)
+
+        action = self.targets[0]
+        if action == "install":
+            _install_completions()
+            return ""
+        if action in ("bash", "zsh", "fish"):
+            print(_emit_shell_script(action))
+            return ""
+
+        print(f"unknown completions action: {action}", file=sys.stderr)
+        print("usage: dracon completions {bash|zsh|fish|install}", file=sys.stderr)
+        sys.exit(1)
+
+
 # ── DraconCLI (the root @dracon_program) ────────────────────────────────────
 
 def _get_version():
@@ -732,7 +863,7 @@ def _get_version():
 @dracon_program(name="dracon", version=_get_version())
 class DraconCLI(BaseModel):
     """Dracon configuration toolkit."""
-    command: Subcommand(ShowCmd)
+    command: Subcommand(ShowCmd, CompletionsCmd)
 
 
 def main():

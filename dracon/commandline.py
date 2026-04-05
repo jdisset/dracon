@@ -1,5 +1,6 @@
 # Copyright (c) 2025 Jean Disset
 # MIT License - see LICENSE file for details.
+import os
 import sys
 import typing
 import logging
@@ -1584,6 +1585,58 @@ class Program(BaseModel, Generic[T]):
                 print(trace.format_path(trace_path))
 
 
+def _handle_complete(cls, prog: "Program"):
+    """Handle --_complete: emit completion candidates and exit."""
+    import glob as globmod
+
+    line = os.environ.get("COMP_LINE", "")
+    point = int(os.environ.get("COMP_POINT", str(len(line))))
+    tokens = line[:point].split()
+    prefix = tokens[-1] if len(tokens) > 1 else ""
+    if line[:point].endswith(" "):
+        prefix = ""
+
+    candidates = []
+
+    # determine if a subcommand has been selected
+    subcmd_selected = None
+    subcmd_type = None
+    if prog._subcommand_map:
+        for t in tokens[1:]:
+            if t in prog._subcommand_map:
+                subcmd_selected = t
+                subcmd_type = prog._subcommand_map[t]
+                break
+
+    if prefix.startswith("+") and not prefix.startswith("++"):
+        # +file completion: glob for yaml files
+        partial = prefix[1:]
+        matches = globmod.glob(partial + "*.yaml") + globmod.glob(partial + "*.yml")
+        candidates = ["+" + m for m in matches]
+    elif prefix.startswith("--"):
+        # flag completion
+        all_flags = [f"--{a.long}" for a in prog._args if a.long and a.real_name != "help"]
+        if subcmd_type:
+            child = Program[subcmd_type](conf_type=subcmd_type, name=subcmd_selected,
+                                         default_auto_dash_alias=prog.default_auto_dash_alias)
+            disc = prog._subcommand_discriminator
+            all_flags += [f"--{a.long}" for a in child._args if a.long and a.real_name not in ("help", disc)]
+        candidates = [f for f in all_flags if f.startswith(prefix)]
+    elif prefix.startswith("-"):
+        short_flags = [f"-{a.short}" for a in prog._args if a.short and a.real_name != "help"]
+        candidates = [f for f in short_flags if f.startswith(prefix)]
+    elif prog._subcommand_map and not subcmd_selected:
+        # complete subcommand names
+        candidates = [n for n in prog._subcommand_map if n.startswith(prefix)]
+    elif hasattr(cls, "__dracon_complete__"):
+        candidates = cls.__dracon_complete__(prefix, tokens)
+    # default: shell handles file completion via -o default
+
+    for c in candidates:
+        print(c)
+    sys.exit(0)
+
+
 def make_program(conf_type: type, **kwargs):
     if not issubclass(conf_type, BaseModel):
         raise ValueError("make_program requires a BaseModel subclass")
@@ -1673,9 +1726,12 @@ def dracon_program(
         @classmethod
         def cli(cls, argv=None):
             cfg = cls._dracon_program_config
+            effective = argv if argv is not None else sys.argv[1:]
             prog = _make_prog(cfg)
+            if "--_complete" in effective or os.environ.get("COMP_LINE"):
+                _handle_complete(cls, prog)
             instance, _ = prog.parse_args(
-                _auto_config_argv(cfg) + (argv if argv is not None else sys.argv[1:]),
+                _auto_config_argv(cfg) + effective,
                 deferred_paths=cfg['deferred_paths'],
                 context=cfg['context'],
             )
