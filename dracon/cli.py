@@ -543,6 +543,69 @@ def _construct_defaults(program_cls):
     return program_cls.model_construct(**defaults)
 
 
+def _full_defaults(model_cls, depth: Optional[int] = None, _current_depth: int = 0) -> dict:
+    """Recursively build a dict of all defaults, expanding nested models.
+
+    - Optional[Model] fields with None default -> expanded with model defaults
+    - list[Model] fields with [] default -> one example item with defaults
+    - Respects depth limit: stops recursing at the limit
+    """
+    import typing
+    from pydantic.fields import PydanticUndefined
+
+    result = {}
+    at_limit = depth is not None and _current_depth >= depth
+
+    for name, field in model_cls.model_fields.items():
+        ann = field.annotation
+        has_default = field.default is not PydanticUndefined or field.default_factory is not None
+        list_model = _is_list_of_model(ann)
+        inner_model = _extract_model_type(ann)
+
+        if list_model and not at_limit:
+            item = _full_defaults(list_model, depth, _current_depth + 1)
+            result[name] = [item]
+        elif inner_model and not at_limit:
+            result[name] = _full_defaults(inner_model, depth, _current_depth + 1)
+        elif has_default:
+            val = field.default if field.default is not PydanticUndefined else field.default_factory()
+            if isinstance(val, BaseModel):
+                if at_limit:
+                    result[name] = {}
+                else:
+                    result[name] = _full_defaults(type(val), depth, _current_depth + 1)
+            else:
+                result[name] = val
+    return result
+
+
+def _extract_model_type(ann) -> Optional[type]:
+    """Extract a BaseModel subclass from an annotation (handles Optional[M], M | N, etc.)."""
+    import types
+    import typing
+    origin = getattr(ann, '__origin__', None)
+    if origin is typing.Union or isinstance(ann, types.UnionType):
+        args = [a for a in ann.__args__ if a is not type(None)]
+        for a in args:
+            if isinstance(a, type) and issubclass(a, BaseModel):
+                return a
+    if isinstance(ann, type) and issubclass(ann, BaseModel):
+        return ann
+    return None
+
+
+def _is_list_of_model(ann) -> Optional[type]:
+    """If ann is list[SomeModel], return SomeModel. Else None."""
+    origin = getattr(ann, '__origin__', None)
+    if origin is list:
+        args = getattr(ann, '__args__', ())
+        if args:
+            inner = _extract_model_type(args[0])
+            if inner:
+                return inner
+    return None
+
+
 def _iter_dracon_entry_points():
     """Yield (ep_name, dracon_program_class) for all installed dracon programs."""
     import importlib
@@ -594,6 +657,7 @@ class ShowCmd(BaseModel):
     json_output: Annotated[bool, Arg(short="j", long="json", help="output as JSON")] = False
     no_docs: Annotated[bool, Arg(help="suppress inline descriptions")] = False
     emit_schema: Annotated[bool, Arg(long="schema", help="emit JSON Schema for a program model")] = False
+    full: Annotated[bool, Arg(help="exhaustive config template with all nested defaults expanded")] = False
     diff: Annotated[bool, Arg(help="show delta from bare defaults")] = False
     depth: Annotated[Optional[int], Arg(help="limit recursion depth")] = None
     show_vars: Annotated[bool, Arg(help="print defined variables table")] = False
@@ -702,7 +766,9 @@ class ShowCmd(BaseModel):
 
         extra_configs = self.targets[1:]
 
-        if extra_configs:
+        if self.full:
+            data = _full_defaults(program_cls, depth=self.depth)
+        elif extra_configs:
             try:
                 instance = program_cls.from_config(*extra_configs)
             except SystemExit:
@@ -711,13 +777,12 @@ class ShowCmd(BaseModel):
             except Exception as e:
                 print(f"Error loading program config: {e}", file=sys.stderr)
                 sys.exit(1)
+            data = instance.model_dump()
         else:
-            # bare defaults -- construct with field defaults, skip required fields
             instance = _construct_defaults(program_cls)
+            data = instance.model_dump()
 
-        data = instance.model_dump()
         if not data:
-            # no defaulted fields (e.g. subcommand-only CLI)
             print(f"'{program_name}' has no config defaults. Use --schema to see its model.", file=sys.stderr)
             return ""
         if self.select:
@@ -765,27 +830,65 @@ def _setup_logging(verbose: bool):
 
 
 def _discover_dracon_programs() -> list[str]:
-    """Find all installed console_scripts that are @dracon_program powered."""
+    """Find installed console_scripts that are @dracon_program powered.
+
+    Locates each entry point's source file on disk and greps for
+    'dracon_program' without importing anything. Fast even with
+    many installed packages.
+    """
+    from importlib.metadata import entry_points
+
+    results = []
     try:
-        return [name for name, _ in _iter_dracon_entry_points()]
+        for ep in entry_points(group='console_scripts'):
+            mod_path = ep.value.split(':')[0]
+            src = _find_module_source(mod_path)
+            if src:
+                try:
+                    with open(src) as f:
+                        head = f.read(4096)
+                    if 'dracon_program' in head:
+                        results.append(ep.name)
+                except Exception:
+                    pass
     except Exception:
-        return ["dracon"]
+        pass
+    return results or ["dracon"]
 
 
 _BASH_SCRIPT = """\
 _dracon_complete() {{
+    local cur="${{COMP_WORDS[COMP_CWORD]}}"
     local IFS=$'\\n'
+    # fast path: +file completion handled in shell (no python)
+    if [[ "$cur" == +* && "$cur" != ++* ]]; then
+        local prefix="${{cur:1}}"
+        local files=($(compgen -f -- "$prefix" | while read -r f; do
+            if [[ -d "$f" ]]; then echo "+$f/";
+            elif [[ "$f" == *.yaml || "$f" == *.yml ]]; then echo "+$f";
+            fi
+        done))
+        COMPREPLY=("${{files[@]}}")
+        return
+    fi
     COMPREPLY=($(COMP_LINE="$COMP_LINE" COMP_POINT="$COMP_POINT" \\
-        "${{COMP_WORDS[0]}}" --_complete 2>/dev/null))
+        dracon _complete "${{COMP_WORDS[0]}}" 2>/dev/null))
 }}
 {register_lines}
 """
 
 _ZSH_SCRIPT = """\
 _dracon_complete() {{
+    local cur="${{words[CURRENT]}}"
+    # +file: strip the + prefix, do native zsh path completion, re-add +
+    if [[ "$cur" == +* && "$cur" != ++* ]]; then
+        compset -P '+'
+        _files -g '*.yaml *.yml'
+        return
+    fi
     local completions
     completions=(${{(f)"$(COMP_LINE="$BUFFER" COMP_POINT="$CURSOR" \\
-        "${{words[1]}}" --_complete 2>/dev/null)"}})
+        dracon _complete "${{words[1]}}" 2>/dev/null)"}})
     compadd -a completions
 }}
 {register_lines}
@@ -806,7 +909,7 @@ def _emit_shell_script(shell: str) -> str:
         return _ZSH_SCRIPT.format(register_lines=lines)
     elif shell == "fish":
         lines = "\n".join(
-            f"complete -c {p} -a '(COMP_LINE=(commandline) COMP_POINT=(commandline -C) {p} --_complete 2>/dev/null)'"
+            f"complete -c {p} -a '(COMP_LINE=(commandline) COMP_POINT=(commandline -C) dracon _complete {p} 2>/dev/null)'"
             for p in programs
         )
         return _FISH_SCRIPT.format(register_lines=lines)
@@ -815,8 +918,8 @@ def _emit_shell_script(shell: str) -> str:
 
 _SHELL_RC = {"bash": ".bashrc", "zsh": ".zshrc"}
 _SHELL_EVAL = {
-    "bash": 'eval "$(dracon completions bash)"',
-    "zsh": 'eval "$(dracon completions zsh)"',
+    "bash": 'eval "$(dracon completions bash 2>/dev/null)"',
+    "zsh": 'eval "$(dracon completions zsh 2>/dev/null)"',
     "fish": None,  # fish uses conf.d
 }
 

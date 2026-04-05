@@ -1728,7 +1728,7 @@ def dracon_program(
             cfg = cls._dracon_program_config
             effective = argv if argv is not None else sys.argv[1:]
             prog = _make_prog(cfg)
-            if "--_complete" in effective or os.environ.get("COMP_LINE"):
+            if "--_complete" in effective:
                 _handle_complete(cls, prog)
             instance, _ = prog.parse_args(
                 _auto_config_argv(cfg) + effective,

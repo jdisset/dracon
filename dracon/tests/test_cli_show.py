@@ -138,6 +138,91 @@ class TestShowProgramMode:
         assert "port" in schema["properties"]
 
 
+class TestFullDefaults:
+    """--full flag generates exhaustive config template with all nested defaults."""
+
+    def test_full_simple_model(self):
+        from dracon.cli import _full_defaults
+
+        class Inner(BaseModel):
+            x: int = 10
+            y: str = "hello"
+
+        class Outer(BaseModel):
+            name: str = "test"
+            inner: Inner = Inner()
+
+        data = _full_defaults(Outer)
+        assert data["name"] == "test"
+        assert data["inner"]["x"] == 10
+        assert data["inner"]["y"] == "hello"
+
+    def test_full_optional_nested(self):
+        """Optional[Model] fields with None default get expanded."""
+        from dracon.cli import _full_defaults
+        from typing import Optional
+
+        class Config(BaseModel):
+            threshold: float = 0.5
+
+        class App(BaseModel):
+            config: Optional[Config] = None
+
+        data = _full_defaults(App)
+        assert data["config"]["threshold"] == 0.5
+
+    def test_full_list_of_models(self):
+        """list[Model] fields get one example item."""
+        from dracon.cli import _full_defaults
+
+        class Item(BaseModel):
+            value: int = 42
+
+        class Container(BaseModel):
+            items: list[Item] = []
+
+        data = _full_defaults(Container)
+        assert len(data["items"]) == 1
+        assert data["items"][0]["value"] == 42
+
+    def test_full_skips_non_defaultable(self):
+        """Fields with no default and no model type are skipped."""
+        from dracon.cli import _full_defaults
+
+        class M(BaseModel):
+            name: str = "ok"
+            required_str: str  # no default, not a model -- skip
+
+        data = _full_defaults(M)
+        assert data["name"] == "ok"
+        assert "required_str" not in data
+
+    def test_full_depth_limit(self):
+        from dracon.cli import _full_defaults
+
+        class Deep(BaseModel):
+            val: int = 1
+
+        class Mid(BaseModel):
+            deep: Deep = Deep()
+
+        class Top(BaseModel):
+            mid: Mid = Mid()
+
+        # depth=1: expand 1 level (mid is shown, but deep inside mid is {})
+        data = _full_defaults(Top, depth=1)
+        assert "mid" in data
+        assert data["mid"] == {"deep": {}}
+
+        # depth=0: fields listed but nested models are empty
+        data0 = _full_defaults(Top, depth=0)
+        assert data0 == {"mid": {}}
+
+        # depth=None (unlimited): full expansion
+        full = _full_defaults(Top)
+        assert full["mid"]["deep"]["val"] == 1
+
+
 class TestDraconCLIStructure:
     """Test that the DraconCLI is properly structured as a @dracon_program."""
 
