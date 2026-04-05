@@ -94,7 +94,7 @@ nav:
       - "Instruction Tags": "reference/instruction_tags.md"
       - "CLI (`Arg`) Parameters": "reference/cli_arg.md"
       - "KeyPaths": "reference/keypaths.md"
-      - "dracon-print CLI": "reference/dracon_print.md"
+      - "dracon CLI": "reference/dracon_print.md"
 # Add static assets if needed (e.g., logo)
 # extra:
 #   generator: false # Disable MkDocs generator tag in footer

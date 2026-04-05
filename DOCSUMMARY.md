@@ -614,7 +614,7 @@ class TraceEntry:
 
 ## 13. Debugging & Tooling
 
-- **`dracon-print <file>`**: Load and print composed configuration tree with filtering.
+- **`dracon show <file>`**: Load and print composed configuration tree with filtering, tracing, and program-aware inspection.
 - **`compose(deferred_node, context={})`**: Compose a `DeferredNode` with runtime context, returning a `CompositionResult` for inspection before construction.
 - **`construct(node_or_comp, context={})`**: Construct a `DeferredNode` or `CompositionResult` into Python objects.
 - **`resolve_all_lazy(obj)`**: Recursively force evaluation of all `LazyInterpolable` values.

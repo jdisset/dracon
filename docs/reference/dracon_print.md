@@ -1,10 +1,13 @@
-# `dracon-print` Reference
+# `dracon show` Reference
 
 Command-line tool for inspecting, composing, and dry-running Dracon configuration files.
 
 ```
-dracon-print [OPTIONS] CONFIG [CONFIG ...]
+dracon show [OPTIONS] CONFIG [CONFIG ...]
 ```
+
+!!! note
+    `dracon show` replaces the old `dracon-print` command. If you have scripts using `dracon-print`, change them to `dracon show`.
 
 ## Arguments
 
@@ -23,12 +26,22 @@ dracon-print [OPTIONS] CONFIG [CONFIG ...]
 | `-j` | `--json` | Output as JSON. Implies `-c`. |
 | | `--str-output` | Output raw `str()` representation instead of YAML |
 | | `--show-vars` | Print table of all defined variables to stderr |
+| | `--schema` | Emit JSON Schema for a program's model (program-aware mode only) |
+| | `--diff` | Show delta from bare defaults (program-aware mode only) |
+| | `--depth N` | Limit recursion into nested models |
+| | `--no-docs` | Suppress inline field descriptions (program-aware mode) |
 | `-v` | `--verbose` | Enable debug logging |
-| `-f` | `--file PATH` | Config file (legacy syntax, prefer positional args) |
 | `-h` | `--help` | Show help message |
 | | `--version` | Show version |
 
 Short flags can be combined: `-crj` is equivalent to `-c -r -j`.
+
+## Two Modes
+
+`dracon show` detects the mode from the first argument:
+
+- **Raw YAML mode**: if the first target is a `.yaml` file path or starts with `+`, it works like the old `dracon-print` -- compose, construct, resolve raw YAML.
+- **Program-aware mode**: if the first target is a program name (an installed `@dracon_program`), it resolves through the full program stack: `ConfigFile` auto-discovery, model defaults, CLI arg parsing, layering.
 
 ## Context Variables
 
@@ -74,40 +87,46 @@ Can also be enabled via the `DRACON_TRACE=1` environment variable.
 
 ```bash
 # Compose a single file
-dracon-print config.yaml
+dracon show config.yaml
 
 # Construct with full evaluation
-dracon-print config.yaml -c
+dracon show config.yaml -c
 
 # Layer multiple files, construct, and resolve
-dracon-print base.yaml prod.yaml -cr
+dracon show base.yaml prod.yaml -cr
 
 # Inject context variables and get JSON output
-dracon-print start.yaml ++runname=exp1 ++model=large -cj
+dracon show start.yaml ++runname=exp1 ++model=large -cj
 
 # Select a subtree
-dracon-print config.yaml -c -s database.connections
+dracon show config.yaml -c -s database.connections
 
 # Permissive resolve (partial evaluation)
-dracon-print config.yaml -rp ++known_var=42
+dracon show config.yaml -rp ++known_var=42
 
 # Show defined variables
-dracon-print config.yaml --show-vars
+dracon show config.yaml --show-vars
 
 # Debug with verbose logging
-dracon-print config.yaml -v
+dracon show config.yaml -v
 
 # Dracon +file convention
-dracon-print +defaults.yaml +env/prod.yaml +local.yaml
+dracon show +defaults.yaml +env/prod.yaml +local.yaml
 
 # Pipe JSON subtree to jq
-dracon-print config.yaml -cjs database | jq '.host'
+dracon show config.yaml -cjs database | jq '.host'
 
 # Trace where a value came from across layers
-dracon-print base.yaml prod.yaml --trace db.port
+dracon show base.yaml prod.yaml --trace db.port
 
 # Trace all values
-dracon-print base.yaml prod.yaml --trace-all
+dracon show base.yaml prod.yaml --trace-all
+
+# Program-aware mode: show a program's resolved config
+dracon show myprogram
+
+# Program-aware: emit JSON Schema for a program
+dracon show myprogram --schema
 ```
 
 ## Python API
@@ -115,7 +134,7 @@ dracon-print base.yaml prod.yaml --trace-all
 The tool's core logic is also usable programmatically:
 
 ```python
-from dracon_print import DraconPrint
+from dracon.cli import DraconPrint
 
 printer = DraconPrint(
     config_files=["base.yaml", "override.yaml"],
