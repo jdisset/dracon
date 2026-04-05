@@ -79,6 +79,56 @@ def _extract_subcommands(program_name: str):
     return None
 
 
+def _get_entry_point_module(program_name: str):
+    """Get the module path for a program's entry point."""
+    from importlib.metadata import entry_points
+    try:
+        eps = entry_points(group='console_scripts', name=program_name)
+        for ep in eps:
+            return ep.value.split(':')[0]
+    except Exception:
+        pass
+    return None
+
+
+def _has_dynamic_completions(program_name: str) -> bool:
+    """Check if a program defines __dracon_complete__ (source scan, no import)."""
+    mod_path = _get_entry_point_module(program_name)
+    if not mod_path:
+        return False
+    src = _find_module_source(mod_path)
+    if not src:
+        return False
+    try:
+        with open(src) as f:
+            return '__dracon_complete__' in f.read()
+    except Exception:
+        return False
+
+
+def _run_dynamic_completions(program_name: str, prefix: str, tokens: list[str]):
+    """Import the program and call __dracon_complete__. Slow but only used
+    when dynamic completions are actually needed."""
+    import importlib
+    mod_path = _get_entry_point_module(program_name)
+    if not mod_path:
+        return
+    # convention: tokens includes the partial prefix as last element
+    # so __dracon_complete__ can check tokens[-2] for the previous token
+    full_tokens = tokens + [prefix] if not prefix or tokens[-1:] != [prefix] else tokens
+    try:
+        mod = importlib.import_module(mod_path)
+        for attr_name in dir(mod):
+            attr = getattr(mod, attr_name)
+            if isinstance(attr, type) and hasattr(attr, '__dracon_complete__'):
+                candidates = attr.__dracon_complete__(prefix, full_tokens)
+                for c in candidates:
+                    print(c)
+                return
+    except Exception:
+        pass
+
+
 def main():
     """Handle 'dracon _complete <program>' without importing dracon."""
     argv = sys.argv[1:]
@@ -114,13 +164,33 @@ def main():
                     print(f)
             return
 
-    # subcommand completion via source scan -- no import needed
+    # check if a subcommand is already selected
     subcmds = _extract_subcommands(program_name)
+    selected_subcmd = None
     if subcmds:
+        for t in tokens[1:]:
+            if t in subcmds:
+                selected_subcmd = t
+                break
+
+    # if previous token is a flag, this is a flag-value position --
+    # try dynamic completions (e.g. broodmon --name <TAB>)
+    prev = tokens[-2] if len(tokens) >= 2 and not line[:point].endswith(" ") else (tokens[-1] if tokens else "")
+    if line[:point].endswith(" "):
+        prev = tokens[-1] if tokens else ""
+    completing_flag_value = prev.startswith("--") and prev != prefix
+
+    if not selected_subcmd and subcmds and not completing_flag_value:
+        # no subcommand yet -- complete subcommand names
         for s in subcmds:
             if s.startswith(prefix):
                 print(s)
-    # if no subcommands found, just return nothing (shell falls back to default)
+        return
+
+    # subcommand selected, flag value position, or no subcommands:
+    # try dynamic completions via __dracon_complete__
+    if _has_dynamic_completions(program_name):
+        _run_dynamic_completions(program_name, prefix, tokens)
 
 
 if __name__ == "__main__":
