@@ -3,7 +3,8 @@ import re
 import pytest
 import weakref
 import types
-from dracon import dump, loads
+from dracon import dump, loads, compose, construct
+from dracon.composer import CompositionResult
 from dracon.loader import DraconLoader
 from dracon.deferred import DeferredNode, make_deferred
 from dracon.dracontainer import Dracontainer, Mapping, Sequence, resolve_all_lazy
@@ -1059,3 +1060,420 @@ def test_deferred_with_numpy_array_and_merge(tmp_path):
     assert len(result_3d["data"]) == 5
     assert result_3d["config"]["color"] == "red"
     assert result_3d["config"]["params"] == {"x": 1, "y": 2, "z": 3}
+
+
+## {{{          --     two-step compose/construct API     --
+
+
+def test_deferred_compose_returns_composition_result():
+    yaml_content = """
+    node: !deferred
+        value: ${x}
+        fixed: 42
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+    node = config.node.copy()
+    result = node.compose(context={'x': 10})
+    assert isinstance(result, CompositionResult)
+    assert hasattr(result, '_loader_instance')
+    assert result._loader_instance is not None
+
+
+def test_two_step_compose_construct():
+    yaml_content = """
+    node: !deferred
+        value: ${x}
+        fixed: 42
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+
+    composed = compose(config.node, context={'x': 10})
+    assert isinstance(composed, CompositionResult)
+    result = construct(composed)
+    assert result.value == 10
+    assert result.fixed == 42
+
+
+def test_compose_auto_copies():
+    yaml_content = """
+    node: !deferred
+        value: ${x}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+
+    # compose twice from same node -- must not fail
+    r1 = compose(config.node, context={'x': 1})
+    r2 = compose(config.node, context={'x': 2})
+    assert construct(r1).value == 1
+    assert construct(r2).value == 2
+
+
+def test_backward_compat_construct():
+    yaml_content = """
+    node: !deferred
+        value: ${x}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+
+    # old-style direct construct still works
+    r = config.node.copy().construct(context={'x': 42})
+    assert r.value == 42
+
+
+def test_deferred_if_at_runtime():
+    yaml_content = """
+    node: !deferred
+        !if ${mode == 'fast'}:
+            speed: high
+        !if ${mode == 'slow'}:
+            speed: low
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+
+    r1 = config.node.copy().construct(context={'mode': 'fast'})
+    assert r1.speed == 'high'
+
+    r2 = config.node.copy().construct(context={'mode': 'slow'})
+    assert r2.speed == 'low'
+
+
+def test_deferred_fn_at_runtime():
+    yaml_content = """
+    node: !deferred
+        !define process: !fn ${x * factor}
+        result: ${process(x=5)}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+
+    r = config.node.copy().construct(context={'factor': 3})
+    assert r.result == 15
+
+
+def test_deferred_nested_if_each():
+    yaml_content = """
+    node: !deferred
+        !if ${include_items}:
+            entries:
+                !each(i) ${range(n)}:
+                    - value: ${i}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+
+    r1 = config.node.copy().construct(context={'include_items': True, 'n': 3})
+    assert len(r1.entries) == 3
+    assert r1.entries[0].value == 0
+    assert r1.entries[2].value == 2
+
+    r2 = config.node.copy().construct(context={'include_items': False, 'n': 3})
+    assert not hasattr(r2, 'entries')
+
+
+def test_deferred_merge_key_at_runtime():
+    yaml_content = """
+    node: !deferred
+        a: ${x}
+        <<{<+}:
+            b: ${x + 1}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+
+    r = config.node.copy().construct(context={'x': 10})
+    assert r.a == 10
+    assert r.b == 11
+
+
+def test_construct_accepts_composition_result():
+    yaml_content = """
+    node: !deferred
+        value: ${x}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+
+    comp = config.node.copy().compose(context={'x': 99})
+    assert isinstance(comp, CompositionResult)
+
+    result = construct(comp)
+    assert result.value == 99
+
+
+## {{{          --     e2e: deferred with composition directives     --
+
+
+def test_deferred_template_reuse_with_different_contexts():
+    """same deferred node composed with different contexts should produce
+    structurally different results (different !if branches, different !each lengths)"""
+    yaml_content = """
+    template: !deferred
+        !set_default env: dev
+        !if ${env == 'prod'}:
+            replicas: 3
+            debug: false
+        !if ${env == 'dev'}:
+            replicas: 1
+            debug: true
+        workers:
+            !each(i) ${range(n_workers)}:
+                - id: ${i}
+                  host: "worker-${i}.${env}.local"
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+
+    dev = compose(config.template, context={'env': 'dev', 'n_workers': 2})
+    prod = compose(config.template, context={'env': 'prod', 'n_workers': 4})
+
+    dev_r = construct(dev)
+    assert dev_r.replicas == 1
+    assert dev_r.debug is True
+    assert len(dev_r.workers) == 2
+    assert dev_r.workers[0].host == "worker-0.dev.local"
+
+    prod_r = construct(prod)
+    assert prod_r.replicas == 3
+    assert prod_r.debug is False
+    assert len(prod_r.workers) == 4
+    assert prod_r.workers[3].host == "worker-3.prod.local"
+
+
+def test_deferred_typed_pydantic_two_step():
+    """!deferred:Type with directives inside, composed then constructed into pydantic model"""
+
+    class Worker(BaseModel):
+        name: str
+        gpu: bool = False
+
+    class JobConfig(BaseModel):
+        workers: List[Worker]
+        total: int
+
+    yaml_content = """
+    job: !deferred:JobConfig
+        !define gpu_flag: ${use_gpu}
+        workers:
+            !each(name) ${worker_names}:
+                - !Worker
+                  name: ${name}
+                  gpu: ${gpu_flag}
+        total: ${len(worker_names)}
+    """
+    loader = DraconLoader(
+        enable_interpolation=True,
+        context={'Worker': Worker, 'JobConfig': JobConfig},
+    )
+    config = loader.loads(yaml_content)
+
+    composed = compose(config.job, context={'worker_names': ['a', 'b', 'c'], 'use_gpu': True})
+    result = construct(composed)
+    assert isinstance(result, JobConfig)
+    assert len(result.workers) == 3
+    assert all(w.gpu is True for w in result.workers)
+    assert result.total == 3
+    assert result.workers[1].name == 'b'
+
+
+def test_deferred_chained_outer_each_inner_deferred():
+    """outer deferred with !each producing inner deferred nodes.
+    construct outer, then construct each inner with its own context"""
+    yaml_content = """
+    pipeline: !deferred
+        stages:
+            !each(stage_name) ${stage_names}:
+                - !deferred
+                  !define sname: ${stage_name}
+                  name: ${sname}
+                  config:
+                      batch_size: ${batch_size}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+
+    outer = config.pipeline.copy().construct(context={'stage_names': ['train', 'eval', 'test']})
+    assert len(outer.stages) == 3
+    assert all(isinstance(s, DeferredNode) for s in outer.stages)
+
+    # construct each inner stage with different batch sizes
+    results = []
+    for i, stage in enumerate(outer.stages):
+        r = stage.copy().construct(context={'batch_size': (i + 1) * 16})
+        results.append(r)
+
+    assert results[0].name == 'train'
+    assert results[0].config.batch_size == 16
+    assert results[1].name == 'eval'
+    assert results[1].config.batch_size == 32
+    assert results[2].name == 'test'
+    assert results[2].config.batch_size == 48
+
+
+def test_deferred_require_at_runtime():
+    """!require inside deferred should only be checked at runtime compose,
+    not during initial loading"""
+    yaml_content = """
+    node: !deferred
+        !require api_key: "API key must be provided at runtime"
+        endpoint: "https://api.example.com"
+        auth: "Bearer ${api_key}"
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    # should load fine -- !require is inside deferred, not evaluated yet
+    config = loader.loads(yaml_content)
+    assert isinstance(config.node, DeferredNode)
+
+    # constructing without api_key should fail
+    from dracon.diagnostics import CompositionError
+    with pytest.raises(CompositionError, match="api_key"):
+        config.node.copy().construct()
+
+    # constructing with api_key should work
+    r = config.node.copy().construct(context={'api_key': 'sk-123'})
+    assert r.auth == "Bearer sk-123"
+
+
+def test_deferred_assert_at_runtime():
+    """!assert inside deferred evaluated at runtime with runtime context"""
+    yaml_content = """
+    node: !deferred
+        !assert ${port > 0 and port < 65536}: "port out of range"
+        host: localhost
+        port: ${port}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+
+    r = config.node.copy().construct(context={'port': 8080})
+    assert r.port == 8080
+
+    from dracon.diagnostics import CompositionError
+    with pytest.raises(CompositionError):
+        config.node.copy().construct(context={'port': 99999})
+
+
+def test_deferred_fn_each_interaction():
+    """!fn defined inside deferred, used to transform !each items"""
+    yaml_content = """
+    node: !deferred
+        !define transform: !fn ${prefix + "_" + str(x)}
+        results:
+            !each(item) ${raw_items}:
+                - label: ${transform(x=item)}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+
+    r = config.node.copy().construct(context={'raw_items': ['a', 'b', 'c'], 'prefix': 'exp1'})
+    assert [x.label for x in r.results] == ['exp1_a', 'exp1_b', 'exp1_c']
+
+    r2 = config.node.copy().construct(context={'raw_items': ['x'], 'prefix': 'run'})
+    assert r2.results[0].label == 'run_x'
+
+
+def test_deferred_clear_ctx_with_directives():
+    """clear_ctx + directives inside deferred: cleared var falls back to
+    !set_default, runtime context can override"""
+    yaml_content = """
+    !set_default multiplier: 10
+    node: !deferred::clear_ctx=multiplier
+        !set_default multiplier: 1
+        results:
+            !each(i) ${range(n)}:
+                - value: ${i * multiplier}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+
+    # multiplier cleared, falls back to inner !set_default (1)
+    r1 = config.node.copy().construct(context={'n': 3})
+    assert [x.value for x in r1.results] == [0, 1, 2]
+
+    # runtime multiplier overrides
+    r2 = config.node.copy().construct(context={'n': 3, 'multiplier': 5})
+    assert [x.value for x in r2.results] == [0, 5, 10]
+
+
+def test_deferred_cross_reference_and_directives():
+    """deferred block with directives that reference constructed nodes outside itself"""
+    yaml_content = """
+    !define base_port: 8000
+
+    services:
+        - name: api
+          port: ${base_port}
+        - name: worker
+          port: ${base_port + 1}
+
+    deployment: !deferred
+        !define svc_count: ${len(construct(&/services))}
+        total_services: ${svc_count}
+        replicas:
+            !each(i) ${range(n_replicas)}:
+                - id: ${i}
+                  service_count: ${svc_count}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+
+    assert config.services[0].port == 8000
+    assert config.services[1].port == 8001
+
+    r = config.deployment.copy().construct(context={'n_replicas': 2})
+    assert r.total_services == 2
+    assert len(r.replicas) == 2
+    assert r.replicas[0].id == 0
+    assert r.replicas[0].service_count == 2
+
+
+def test_two_step_compose_with_deferred_paths():
+    """two-step API preserving inner deferred nodes via deferred_paths"""
+    yaml_content = """
+    node: !deferred
+        !define scale: ${factor}
+        outer_val: ${scale * 10}
+        inner:
+            val: ${scale * 100}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+
+    # compose the outer deferred, but keep /inner as a nested DeferredNode
+    r = config.node.copy().construct(
+        context={'factor': 3}, deferred_paths=['/inner']
+    )
+    assert r.outer_val == 30
+    assert isinstance(r.inner, DeferredNode)
+
+    # now construct the inner deferred
+    inner_r = r.inner.construct()
+    assert inner_r.val == 300
+
+
+def test_deferred_include_at_runtime(tmp_path):
+    """!include inside deferred resolved at runtime, not during initial load"""
+    # write a fragment file
+    fragment = tmp_path / "fragment.yaml"
+    fragment.write_text("extra_key: ${extra_val}\nfrom_file: true\n")
+
+    yaml_content = f"""
+    node: !deferred
+        base_key: ok
+        <<: !include file:{fragment}
+    """
+    loader = DraconLoader(enable_interpolation=True)
+    config = loader.loads(yaml_content)
+    assert isinstance(config.node, DeferredNode)
+
+    r = config.node.copy().construct(context={'extra_val': 'hello'})
+    assert r.base_key == 'ok'
+    assert r.from_file is True
+    assert r.extra_key == 'hello'
+
+
+##────────────────────────────────────────────────────────────────────────────}}}

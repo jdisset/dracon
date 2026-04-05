@@ -58,11 +58,51 @@ print(final_db_config.connection_string)
 config.database_config = final_db_config
 ```
 
+**Two-Step API (compose then construct):**
+
+If you need to inspect or modify the composed tree before constructing Python objects, use the two-step API:
+
+```python
+import dracon as dr
+
+# Step 1: compose -- processes directives (!each, !if, <<:, etc.) with runtime context
+composed = dr.compose(config.database_config, context=runtime_context)
+
+# Step 2: construct -- builds Python objects from the composed result
+final_db_config = dr.construct(composed)
+```
+
+This is useful when you want to separate directive processing from object instantiation, or when you need to compose once and inspect the result before committing to construction.
+
+**Composition directives inside `!deferred`:**
+
+Directives like `!each`, `!if`, `!fn`, `<<:`, and `!include` inside a `!deferred` block are preserved as-is during initial loading. They are only evaluated at runtime when you call `.construct()` or the two-step `compose()`/`construct()`:
+
+```yaml
+job_template: !deferred
+  !if ${gpu_available}:
+    accelerator: gpu
+  !each(step) ${pipeline_steps}:
+    - name: ${step}
+      workers: ${num_workers}
+```
+
+```python
+config = loader.loads(yaml_content)
+# job_template is a DeferredNode -- inner !if and !each are NOT yet evaluated
+
+result = config.job_template.copy().construct(
+    context={'gpu_available': True, 'pipeline_steps': ['train', 'eval'], 'num_workers': 4}
+)
+# NOW the !if and !each are processed with the runtime context
+```
+
 **Key Points for `DeferredNode`:**
 
 - Pauses construction of the _entire tagged node_ and its children.
-- Captures the YAML node structure and the context available _at load time_.
-- Requires calling `.construct()` manually, providing any missing context.
+- Preserves the raw pre-composition subtree -- composition directives are stored as-is.
+- Captures the context available _at load time_.
+- Requires calling `.construct()` or the two-step `compose()`/`construct()` manually, providing any missing context.
 - Useful for late-binding, resource initialization, or conditional construction.
 - Can be targeted implicitly using `DraconLoader(deferred_paths=['/path/to/defer'])`.
 - Use `!deferred::clear_ctx=VAR` or `!deferred::clear_ctx` to control context inheritance.

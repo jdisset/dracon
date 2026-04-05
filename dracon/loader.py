@@ -79,9 +79,25 @@ DEFAULT_CONTEXT = {
 
 
 @ftrace(watch=[])
+def compose(source, **kwargs) -> CompositionResult:
+    """Compose a DeferredNode with runtime context.
+
+    Returns a CompositionResult that can be passed to dracon.construct().
+    Auto-copies the source DeferredNode to prevent mutation.
+    """
+    if isinstance(source, DeferredNode):
+        return source.copy().compose(**kwargs)
+    raise TypeError(f"compose() expects DeferredNode, got {type(source)}")
+
+
+@ftrace(watch=[])
 def construct(node_or_val, resolve=True, **kwargs):
     if isinstance(node_or_val, DeferredNode):
         n = node_or_val.construct(**kwargs)
+    elif isinstance(node_or_val, CompositionResult):
+        loader = getattr(node_or_val, '_loader_instance', None) or DraconLoader(**kwargs)
+        target_type = getattr(node_or_val, '_obj_type', None)
+        n = loader.load_node(node_or_val.root, target_type=target_type)
     elif isinstance(node_or_val, Node):
         loader = DraconLoader(**kwargs)
         compres = CompositionResult(root=node_or_val)

@@ -13,7 +13,7 @@
 ### 2.1. Loading
 
 ```python
-from dracon import load, loads, dump, DraconLoader
+from dracon import load, loads, dump, compose, construct, DraconLoader
 
 # 1. Simple Load
 cfg = load(["base.yaml", "override.yaml"], context={"MyModel": MyModel})
@@ -40,6 +40,10 @@ stack.push("runtime-patch.yaml")     # extend
 config = stack.construct()           # compose + construct
 stack.pop()                          # undo last layer
 branch = stack.fork()                # speculative branch
+
+# 6. Two-step deferred: compose then construct separately
+composed = compose(cfg.deferred_field, context={"run_id": 42})
+result = construct(composed)
 ```
 
 ### 2.2. Return Types
@@ -418,11 +422,12 @@ Mechanisms for values unavailable at load time (runtime secrets, Python loop obj
 
 ### 9.1. `!deferred` / `DeferredNode`
 
-Pauses the construction of an entire branch.
+Pauses the construction of an entire branch. Composition directives inside (`!each`, `!if`, `!fn`, `<<:`, `!include`) are preserved as-is and only evaluated at runtime.
 
 - **YAML:** `output: !deferred "/tmp/${run_id}"`
-- **Result:** `DeferredNode` object holding the raw node and context.
-- **Usage:** Manually call `dracon.construct(node, context={'run_id': 123})`.
+- **Result:** `DeferredNode` object holding the raw pre-composition subtree and context.
+- **One-step:** `node.copy().construct(context={'run_id': 123})` -- compose + construct in one call.
+- **Two-step:** `composed = compose(node, context={...})` then `result = construct(composed)` -- inspect or modify the composed tree between phases.
 - **Options:** `!deferred::clear_ctx=True` optimizes memory by dropping load-time context.
 
 ### 9.2. `Resolvable[T]`
@@ -610,6 +615,8 @@ class TraceEntry:
 ## 13. Debugging & Tooling
 
 - **`dracon-print <file>`**: Load and print composed configuration tree with filtering.
+- **`compose(deferred_node, context={})`**: Compose a `DeferredNode` with runtime context, returning a `CompositionResult` for inspection before construction.
+- **`construct(node_or_comp, context={})`**: Construct a `DeferredNode` or `CompositionResult` into Python objects.
 - **`resolve_all_lazy(obj)`**: Recursively force evaluation of all `LazyInterpolable` values.
 - **`--trace-all`** (CLI flag): Enable composition tracing for `@dracon_program` apps.
 - **Env Vars:**

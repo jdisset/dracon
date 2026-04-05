@@ -140,7 +140,7 @@ class DeferredNode(ContextNode, Generic[T]):
         context: Optional[Dict[str, Any]] = None,
         deferred_paths: Optional[list[KeyPath | str]] = None,
         use_original_root: bool = False,
-    ) -> Node:
+    ) -> 'CompositionResult':
         from dracon.loader import DraconLoader as LoaderCls
 
         if self._loader is None:
@@ -172,6 +172,10 @@ class DeferredNode(ContextNode, Generic[T]):
 
         composition.set_at(self.path, value)
 
+        # update loader context with runtime values so !require checks see them
+        if context:
+            self._loader.update_context(context)
+
         composition.walk_no_path(
             callback=partial(
                 add_to_context, self._loader.context, merge_key=cached_merge_key('{<~}[<~]')
@@ -185,7 +189,12 @@ class DeferredNode(ContextNode, Generic[T]):
 
         compres = self._loader.post_process_composed(composition)
 
-        return self.path.get_obj(compres.root)
+        # return a CompositionResult rooted at the deferred subtree
+        subtree = self.path.get_obj(compres.root)
+        result = CompositionResult(root=subtree)
+        result._loader_instance = self._loader
+        result._obj_type = self.obj_type
+        return result
 
     @ftrace(watch=[])
     def construct(self, **kwargs) -> T:  # type: ignore
@@ -193,10 +202,8 @@ class DeferredNode(ContextNode, Generic[T]):
         from dracon.dracontainer import Dracontainer
         try:
             context = kwargs.get('context')
-            composed_node = self.compose(**kwargs)
-            if context:
-                self._loader.update_context(context)
-            result = self._loader.load_node(composed_node, target_type=self.obj_type)
+            comp_result = self.compose(**kwargs)
+            result = self._loader.load_node(comp_result.root, target_type=self.obj_type)
             # resolve lazy values for non-Dracontainer types (like plain dict/list)
             # Dracontainer handles lazy resolution on access, but plain types don't
             if not isinstance(result, Dracontainer):

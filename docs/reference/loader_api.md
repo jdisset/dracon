@@ -213,6 +213,28 @@ config = dr.load_file('config.yaml')
 yaml_str = dr.dump(config_object)
 ```
 
+### `compose(source, **kwargs)`
+
+Compose a `DeferredNode` with runtime context, returning a `CompositionResult`. This processes composition directives (`!each`, `!if`, `!fn`, `<<:`, etc.) without building Python objects. The result can be passed to `construct()`.
+
+Auto-copies the source DeferredNode to prevent mutation.
+
+```python
+composed = dr.compose(config.deferred_field, context={'run_id': 42})
+result = dr.construct(composed)
+```
+
+### `construct(node_or_val, resolve=True, **kwargs)`
+
+Construct a value into Python objects. Accepts:
+
+- **`DeferredNode`**: Composes and constructs in one step (calls `.construct()` internally).
+- **`CompositionResult`**: Constructs from an already-composed result (e.g. output of `compose()`). Uses the attached loader for interpolation resolution.
+- **`Node`**: Creates a loader and constructs from raw YAML node.
+- **Other values**: Returned as-is.
+
+When `resolve=True` (default), lazy interpolations are resolved after construction.
+
 ### `stack(*sources, **ctx)`
 
 Create a `CompositionStack` for runtime-mutable layered composition. Returns a `CompositionStack` initialized with the given sources.

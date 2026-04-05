@@ -4,18 +4,19 @@ Dracon offers two mechanisms for delaying parts of the configuration processing:
 
 ## `DeferredNode` (`!deferred`)
 
-- **What it does:** Pauses the _entire construction_ of the tagged YAML node branch. Dracon stops processing this branch during the initial load.
+- **What it does:** Pauses the _entire composition and construction_ of the tagged YAML node branch. Dracon stores the raw subtree without evaluating composition directives (`!each`, `!if`, `!fn`, `<<:`, `!include`) inside it.
 - **Mechanism:** Creates a `dracon.deferred.DeferredNode` object as a placeholder in the configuration structure. This object holds:
-  - The original YAML node structure.
+  - The raw, pre-composition YAML node structure (directives preserved as-is).
   - A snapshot of the context available when the node was encountered.
   - A reference to the `DraconLoader` instance.
   - Information about which context variables to potentially ignore (`clear_ctx`).
 - **When to Use:**
   - **Late Context Binding:** When the construction of a component requires context (variables, functions) that is only available _after_ the main configuration load (e.g., secrets fetched from a vault, runtime parameters).
+  - **Runtime Directives:** When composition directives like `!if` or `!each` depend on runtime values (e.g., `!if ${gpu_available}:`).
   - **Resource Management:** To delay the initialization of resource-intensive objects (like database connections) until they are actually needed.
   - **Conditional Construction:** To decide _whether_ or _how_ to construct a component based on other parts of the _already loaded_ configuration (though `!if` might be simpler for basic cases).
   - **Manual Orchestration:** To explicitly control the initialization order of components with dependencies.
-- **Trigger:** Manual call to the `deferred_node.construct(context=...)` method. This resumes the Dracon loading process (composition, construction, validation) specifically for that node branch, merging the provided runtime `context` with the captured context.
+- **Trigger:** Either a one-step `deferred_node.construct(context=...)` call, or a two-step `dracon.compose(node, context=...)` followed by `dracon.construct(composed)`. Both resume the Dracon loading process (composition, construction, validation) specifically for that node branch, merging the provided runtime `context` with the captured context. The two-step API lets you inspect the composed tree before construction.
 - **Granularity:** Affects an entire node and its children in the YAML tree.
 
 **Analogy:** `DeferredNode` is like receiving a flat-pack furniture box (`DeferredNode`) with instructions (`captured node/context`). You need to manually assemble it (`.construct()`) later, possibly using extra tools (`runtime context`).
@@ -58,9 +59,9 @@ You still need `!deferred` when:
 
 | Feature            | Lazy `!define`                      | `DeferredNode` (`!deferred`)        | `Resolvable[T]`                         |
 | :----------------- | :---------------------------------- | :---------------------------------- | :-------------------------------------- |
-| **What's Delayed** | Object construction in `!define`    | Entire Node Branch **Construction** | Single Field **Value Processing**       |
+| **What's Delayed** | Object construction in `!define`    | Entire Node Branch **Composition + Construction** | Single Field **Value Processing**       |
 | **Stage**          | During composition, on first access | During initial `load`/`loads`       | After initial load, before final use    |
-| **Trigger**        | Automatic (first `${x}` access)    | Manual `.construct(context=...)`    | Manual `.resolve(context=...)`          |
+| **Trigger**        | Automatic (first `${x}` access)    | Manual `.construct()` or two-step `compose()`/`construct()` | Manual `.resolve(context=...)`          |
 | **Context**        | Full composition context            | Captured snapshot + runtime context | YAML Node, Expected Type `T`, Ctor Ref  |
 | **Granularity**    | Single variable binding             | Whole Node Tree Branch              | Single Field/Value                      |
 | **Primary Use**    | Object pipelines, forward refs      | Late Context, Resource Init, Order  | CLI Post-Processing, Field Finalization |

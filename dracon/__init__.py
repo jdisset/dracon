@@ -9,6 +9,7 @@ from dracon.loader import (
     DraconLoader,
     load_node,
     load_file,
+    compose,
     compose_config_from_str,
     LoadedConfig,
     serialize_loaded_config,
