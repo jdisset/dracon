@@ -614,7 +614,12 @@ class TraceEntry:
 
 ## 13. Debugging & Tooling
 
-- **`dracon show <file>`**: Load and print composed configuration tree with filtering, tracing, and program-aware inspection.
+### 13.0. `dracon` CLI
+
+Unified command with subcommands `show` and `completions`.
+
+- **`dracon show <file|program> [OPTIONS]`**: Inspect configs in raw YAML mode (files) or program-aware mode (installed `@dracon_program` names). Supports `-c` (construct), `-r` (resolve), `-j` (json), `-s` (select), `--full` (exhaustive nested defaults), `--schema` (JSON Schema), `--trace`/`--trace-all` (provenance), `--show-vars`.
+- **`dracon completions install`**: Install shell completions. Writes cached script to `~/.dracon/completions.{shell}`, background regen hourly. Completions are <50ms (source regex, no Python imports for common cases). Programs with `__dracon_complete__(prefix, tokens)` get dynamic completions (e.g. job names from daemon).
 - **`compose(deferred_node, context={})`**: Compose a `DeferredNode` with runtime context, returning a `CompositionResult` for inspection before construction.
 - **`construct(node_or_comp, context={})`**: Construct a `DeferredNode` or `CompositionResult` into Python objects.
 - **`resolve_all_lazy(obj)`**: Recursively force evaluation of all `LazyInterpolable` values.
