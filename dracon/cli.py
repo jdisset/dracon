@@ -829,6 +829,20 @@ def _setup_logging(verbose: bool):
 # ── completions helpers ──────────────────────────────────────────────────────
 
 
+def _find_module_source(dotted: str) -> Optional[str]:
+    """Locate a module's source file without importing it."""
+    parts = dotted.split('.')
+    for base in sys.path:
+        if not base or not os.path.isdir(base):
+            continue
+        rel = os.path.join(*parts)
+        for candidate in [f"{rel}.py", os.path.join(rel, "__init__.py")]:
+            full = os.path.join(base, candidate)
+            if os.path.isfile(full):
+                return full
+    return None
+
+
 def _discover_dracon_programs() -> list[str]:
     """Find installed console_scripts that are @dracon_program powered.
 
