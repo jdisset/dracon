@@ -176,5 +176,80 @@ def test_memory_usage():
     assert memory_increase < 10 * 1024 * 1024
 
 
+# Node context preservation tests
+
+class TestNodeDeepcopyCopiesContext:
+    """Ensure .context set via add_to_context survives deepcopy on all node types."""
+
+    def test_mapping_node_preserves_context(self):
+        from dracon.nodes import DraconMappingNode, DraconScalarNode
+        k = DraconScalarNode(tag='tag:yaml.org,2002:str', value='key')
+        v = DraconScalarNode(tag='tag:yaml.org,2002:str', value='val')
+        node = DraconMappingNode(tag='tag:yaml.org,2002:map', value=[(k, v)])
+        node.context = {'Agent': lambda **kw: kw}
+
+        clone = _deepcopy(node)
+        assert hasattr(clone, 'context')
+        assert 'Agent' in clone.context
+        # callable should be the same object (shared, not deep-copied)
+        assert clone.context['Agent'] is node.context['Agent']
+        # context dict itself should be a separate copy
+        assert clone.context is not node.context
+
+    def test_sequence_node_preserves_context(self):
+        from dracon.nodes import DraconSequenceNode, DraconScalarNode
+        item = DraconScalarNode(tag='tag:yaml.org,2002:str', value='x')
+        node = DraconSequenceNode(tag='tag:yaml.org,2002:seq', value=[item])
+        node.context = {'Relay': lambda **kw: kw}
+
+        clone = _deepcopy(node)
+        assert hasattr(clone, 'context')
+        assert 'Relay' in clone.context
+        assert clone.context['Relay'] is node.context['Relay']
+        assert clone.context is not node.context
+
+    def test_mapping_node_no_context_still_works(self):
+        from dracon.nodes import DraconMappingNode, DraconScalarNode
+        k = DraconScalarNode(tag='tag:yaml.org,2002:str', value='key')
+        v = DraconScalarNode(tag='tag:yaml.org,2002:str', value='val')
+        node = DraconMappingNode(tag='tag:yaml.org,2002:map', value=[(k, v)])
+        assert not hasattr(node, 'context')
+
+        clone = _deepcopy(node)
+        assert not hasattr(clone, 'context')
+
+    def test_nested_nodes_preserve_context_at_each_level(self):
+        """Context should survive deepcopy on inner nodes, not just the root."""
+        from dracon.nodes import DraconMappingNode, DraconSequenceNode, DraconScalarNode
+        inner_k = DraconScalarNode(tag='tag:yaml.org,2002:str', value='name')
+        inner_v = DraconScalarNode(tag='tag:yaml.org,2002:str', value='test')
+        inner_map = DraconMappingNode(tag='!Agent', value=[(inner_k, inner_v)])
+        inner_map.context = {'Agent': lambda **kw: kw}
+
+        seq = DraconSequenceNode(tag='tag:yaml.org,2002:seq', value=[inner_map])
+        outer_k = DraconScalarNode(tag='tag:yaml.org,2002:str', value='jobs')
+        outer = DraconMappingNode(tag='tag:yaml.org,2002:map', value=[(outer_k, seq)])
+
+        clone = _deepcopy(outer)
+        # find the inner mapping in the clone
+        cloned_seq = clone.value[0][1]
+        cloned_inner = cloned_seq.value[0]
+        assert hasattr(cloned_inner, 'context')
+        assert 'Agent' in cloned_inner.context
+
+    def test_context_with_shallow_dict(self):
+        """ShallowDict context should also survive deepcopy."""
+        from dracon.nodes import DraconMappingNode, DraconScalarNode
+        from dracon.utils import ShallowDict
+        k = DraconScalarNode(tag='tag:yaml.org,2002:str', value='key')
+        v = DraconScalarNode(tag='tag:yaml.org,2002:str', value='val')
+        node = DraconMappingNode(tag='tag:yaml.org,2002:map', value=[(k, v)])
+        node.context = ShallowDict({'Agent': lambda **kw: kw})
+
+        clone = _deepcopy(node)
+        assert hasattr(clone, 'context')
+        assert 'Agent' in clone.context
+
+
 if __name__ == '__main__':
     pytest.main([__file__])

@@ -394,6 +394,10 @@ class DraconMappingNode(SourceContextMixin, MappingNode):
         )
         n.ctag = self.ctag
         n.id = self.id
+        # preserve dynamically-set context (e.g. from !define propagation)
+        ctx = getattr(self, 'context', None)
+        if ctx is not None:
+            n.context = ctx.copy() if hasattr(ctx, 'copy') else ctx
         return n
 
     def append(self, newvalue: tuple[Node, Node]):
@@ -572,6 +576,10 @@ class DraconSequenceNode(SourceContextMixin, SequenceNode):
         )
         n.ctag = self.ctag
         n.id = self.id
+        # preserve dynamically-set context (e.g. from !define propagation)
+        ctx = getattr(self, 'context', None)
+        if ctx is not None:
+            n.context = ctx.copy() if hasattr(ctx, 'copy') else ctx
         return n
 
 

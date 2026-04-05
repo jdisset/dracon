@@ -585,3 +585,173 @@ class TestFnIntegration:
         """
         config = _loads(yaml)
         assert config['result'] == 7
+
+
+# --- nested !fn tag invocation ---
+
+
+class TestNestedFnTagInvocation:
+    """Sibling !define'd callables used as tags inside !fn bodies."""
+
+    def test_sibling_callable_tag_in_fn_body(self):
+        """!Inner tag inside !Outer's !fn body resolves at construction time."""
+        yaml = """
+        !define Inner: !fn
+          !require name: "identifier"
+          !fn :
+            result: hello ${name}
+        !define Outer: !fn
+          !require label: "what to build"
+          !fn :
+            items:
+              - !Inner { name: from-outer }
+        out: !Outer { label: test }
+        """
+        config = _loads(yaml)
+        assert config['out']['items'][0]['result'] == 'hello from-outer'
+
+    def test_nested_callable_tag_mapping_in_fn(self):
+        """Tag invocation with mapping kwargs inside !fn body."""
+        yaml = """
+        !define Agent: !fn
+          !require name: "agent name"
+          !require prompt: "what to do"
+          !fn :
+            agent_name: ${name}
+            agent_prompt: ${prompt}
+        !define Campaign: !fn
+          !require goal: "campaign goal"
+          !fn :
+            jobs:
+              - !Agent { name: director, prompt: "${goal}" }
+        result: !Campaign { goal: test-goal }
+        """
+        config = _loads(yaml)
+        assert config['result']['jobs'][0]['agent_name'] == 'director'
+        assert config['result']['jobs'][0]['agent_prompt'] == 'test-goal'
+
+    def test_multiple_sibling_tags_in_fn_body(self):
+        """Multiple different sibling !define tags in the same !fn body."""
+        yaml = """
+        !define Agent: !fn
+          !require name: "id"
+          !fn :
+            type: agent
+            name: ${name}
+        !define Relay: !fn
+          !require channel: "ch"
+          !fn :
+            type: relay
+            channel: ${channel}
+        !define System: !fn
+          !fn :
+            job: !Agent { name: front }
+            edge: !Relay { channel: events }
+        result: !System {}
+        """
+        config = _loads(yaml)
+        assert config['result']['job']['name'] == 'front'
+        assert config['result']['edge']['channel'] == 'events'
+
+    def test_three_level_nesting(self):
+        """Callable A used inside B, B used inside C -- three levels deep."""
+        yaml = """
+        !define Cell: !fn
+          !require val: "cell value"
+          !fn :
+            cell: ${val}
+        !define Row: !fn
+          !require a: "first"
+          !require b: "second"
+          !fn :
+            row:
+              - !Cell { val: "${a}" }
+              - !Cell { val: "${b}" }
+        !define Grid: !fn
+          !fn :
+            grid:
+              - !Row { a: x, b: y }
+        result: !Grid {}
+        """
+        config = _loads(yaml)
+        cells = config['result']['grid'][0]['row']
+        assert cells[0]['cell'] == 'x'
+        assert cells[1]['cell'] == 'y'
+
+    def test_callable_invoked_multiple_times_in_fn(self):
+        """Same sibling callable used more than once in one !fn body."""
+        yaml = """
+        !define Item: !fn
+          !require id: "item id"
+          !fn : ${id}
+        !define Bundle: !fn
+          !fn :
+            first: !Item { id: one }
+            second: !Item { id: two }
+            third: !Item { id: three }
+        result: !Bundle {}
+        """
+        config = _loads(yaml)
+        assert config['result']['first'] == 'one'
+        assert config['result']['second'] == 'two'
+        assert config['result']['third'] == 'three'
+
+    def test_scalar_callable_tag_in_fn_body(self):
+        """Scalar-returning callable used as tag inside !fn body."""
+        yaml = """
+        !define double: !fn ${x * 2}
+        !define Wrapper: !fn
+          !require n: "number"
+          !fn :
+            val: !double { x: "${n}" }
+        result: !Wrapper { n: 21 }
+        """
+        config = _loads(yaml)
+        assert config['result']['val'] == 42
+
+    def test_fn_body_callable_with_each(self):
+        """!each inside !fn body producing callable tag invocations."""
+        yaml = """
+        !define Agent: !fn
+          !require name: "agent name"
+          !require prompt: "prompt"
+          !fn :
+            agent_name: ${name}
+            agent_prompt: ${prompt}
+        !define Team: !fn
+          !require members: "member list"
+          !fn :
+            agents:
+              !each(m) ${members}:
+                - !Agent { name: "${m}", prompt: "do ${m}" }
+        result: !Team
+          members:
+            - alice
+            - bob
+        """
+        config = _loads(yaml)
+        agents = config['result']['agents']
+        assert len(agents) == 2
+        assert agents[0]['agent_name'] == 'alice'
+        assert agents[1]['agent_prompt'] == 'do bob'
+
+    def test_callable_reuse_across_separate_invocations(self):
+        """Same outer callable invoked twice -- inner tags resolve both times."""
+        yaml = """
+        !define Inner: !fn
+          !require x: "val"
+          !fn : ${x}
+        !define Outer: !fn
+          !require a: "first"
+          !require b: "second"
+          !fn :
+            first: !Inner { x: "${a}" }
+            second: !Inner { x: "${b}" }
+        r1: !Outer { a: hello, b: world }
+        r2: !Outer { a: foo, b: bar }
+        """
+        config = _loads(yaml)
+        assert config['r1']['first'] == 'hello'
+        assert config['r1']['second'] == 'world'
+        assert config['r2']['first'] == 'foo'
+        assert config['r2']['second'] == 'bar'
