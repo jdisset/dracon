@@ -868,8 +868,16 @@ class Program(BaseModel, Generic[T]):
                             defined_vars, actions, root_confs,
                         )
                     elif token.startswith('+'):
-                        subcmd_confs.append(token[1:])
-                        i += 1
+                        # if child has a pending list-like positional, treat as positional value
+                        if child_prog._positionals and child_prog._get_collection_type(child_prog._positionals[-1]) == "list_like":
+                            i = child_prog._parse_single_arg(
+                                after_args, i, subcmd_raw_args, subcmd_nested_args,
+                                defined_vars, actions, subcmd_confs,
+                                _force_positional=True,
+                            )
+                        else:
+                            subcmd_confs.append(token[1:])
+                            i += 1
                     elif token.startswith('--') or token.startswith('-'):
                         # check equals syntax
                         check_token = token.split('=', 1)[0] if '=' in token else token
@@ -1125,6 +1133,8 @@ class Program(BaseModel, Generic[T]):
         defined_vars: Dict,
         actions: List,
         confs_to_merge: List,
+        *,
+        _force_positional: bool = False,
     ) -> int:
         """parses one argument from argv at index i, returning the next index."""
 
@@ -1155,7 +1165,7 @@ class Program(BaseModel, Generic[T]):
                 var_value, i = self._read_value(argv, i)
             defined_vars[var_name] = var_value
 
-        elif argstr.startswith('+'):  # it's an include
+        elif argstr.startswith('+') and not _force_positional:  # it's an include
             confs_to_merge.append(argstr[1:])
 
         elif not argstr.startswith('-'):  # it's a positional argument

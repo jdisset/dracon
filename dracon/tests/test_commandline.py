@@ -2896,3 +2896,99 @@ def test_interpolation_into_int_field():
         f.flush()
         conf = CLI.cli([f"+{f.name}"])
         assert conf.count == 10
+
+
+# -- test +file tokens as positional list args in subcommands --
+
+def test_plus_prefixed_token_in_subcommand_list_positional():
+    """+file.yaml in a subcommand list[str] positional should be a list value, not a config layer.
+
+    Regression: the after_args loop intercepted all + prefixed tokens as config
+    files before they could reach the child program's positional arg handling.
+    """
+
+    @subcommand('add')
+    class AddCmd(BaseModel):
+        files: Annotated[list[str], Arg(positional=True, help="Config files")] = []
+
+    class CLI(BaseModel):
+        command: Subcommand(AddCmd)
+
+    prog = make_program(CLI, name="test-tool")
+    conf, _ = prog.parse_args(["add", "+spec.yaml"])
+    assert isinstance(conf.command, AddCmd)
+    assert conf.command.files == ["+spec.yaml"]
+
+
+def test_plus_prefixed_tokens_multiple_in_list_positional():
+    """multiple +file tokens collected into a single list positional."""
+
+    @subcommand('add')
+    class AddCmd(BaseModel):
+        files: Annotated[list[str], Arg(positional=True, help="Config files")] = []
+
+    class CLI(BaseModel):
+        command: Subcommand(AddCmd)
+
+    prog = make_program(CLI, name="test-tool")
+    conf, _ = prog.parse_args(["add", "+a.yaml", "+b.yaml", "+c.yaml"])
+    assert conf.command.files == ["+a.yaml", "+b.yaml", "+c.yaml"]
+
+
+def test_plus_tokens_mixed_with_plain_in_list_positional():
+    """mix of plain and + prefixed tokens all go into the list."""
+
+    @subcommand('add')
+    class AddCmd(BaseModel):
+        files: Annotated[list[str], Arg(positional=True, help="Config files")] = []
+
+    class CLI(BaseModel):
+        command: Subcommand(AddCmd)
+
+    prog = make_program(CLI, name="test-tool")
+    conf, _ = prog.parse_args(["add", "plain.yaml", "+spec.yaml", "+other.yaml"])
+    assert conf.command.files == ["plain.yaml", "+spec.yaml", "+other.yaml"]
+
+
+def test_plus_token_still_config_when_no_list_positional():
+    """+file.yaml is still a subcommand config when no list positional is pending."""
+
+    @subcommand('run')
+    class RunCmd(BaseModel):
+        count: int = 1
+
+    class CLI(BaseModel):
+        command: Subcommand(RunCmd)
+
+    prog = make_program(CLI, name="test-tool")
+    # +file with a subcommand that has no list positional -> should remain config behavior
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as f:
+        f.write("count: 42\n")
+        f.flush()
+        conf, _ = prog.parse_args(["run", f"+{f.name}"])
+        assert conf.command.count == 42
+
+
+def test_plus_token_with_nested_subcommand_list_positional():
+    """+file.yaml in a nested subcommand's list positional should be a value, not config.
+
+    This is the broodmon-like case: tool watcher add +spec.yaml
+    """
+
+    @subcommand('add')
+    class AddCmd(BaseModel):
+        files: Annotated[list[str], Arg(positional=True, help="Files to add")] = []
+
+    @subcommand('watcher')
+    class WatcherCmd(BaseModel):
+        sub: Subcommand(AddCmd)
+
+    class CLI(BaseModel):
+        command: Subcommand(WatcherCmd)
+
+    prog = make_program(CLI, name="test-tool")
+    conf, _ = prog.parse_args(["watcher", "add", "+spec.yaml", "+other.yaml"])
+    assert isinstance(conf.command, WatcherCmd)
+    assert isinstance(conf.command.sub, AddCmd)
+    assert conf.command.sub.files == ["+spec.yaml", "+other.yaml"]
