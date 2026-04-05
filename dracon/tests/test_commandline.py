@@ -2839,3 +2839,60 @@ def test_raw_false_still_parses_normally():
     config, _ = prog.parse_args(["42"])
     assert config.count == 42
     assert isinstance(config.count, int)
+
+
+# ── lazy interpolable resolution before model_validate ───────────────────────
+
+def test_set_default_interpolation_into_typed_field():
+    """${...} from !set_default resolves before pydantic validates typed fields."""
+    import tempfile
+
+    @subcommand('run')
+    class RunCmd(BaseModel):
+        action: str = 'run'
+        def run(self, ctx):
+            return ctx.items
+
+    @dracon_program(name="test-lazy-typed")
+    class CLI(BaseModel):
+        items: list[str] = []
+        command: Subcommand(RunCmd)
+
+    with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as f1:
+        f1.write("!set_default greeting: hello\n")
+        f1.flush()
+        with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as f2:
+            f2.write('items:\n  - "say ${greeting}"\n')
+            f2.flush()
+            result = CLI.cli([f"+{f1.name}", f"+{f2.name}", "run"])
+            assert result == ["say hello"]
+
+
+def test_interpolation_into_primitive_field():
+    """${...} into a plain str field on root model resolves before validation."""
+    import tempfile
+
+    @dracon_program(name="test-prim")
+    class CLI(BaseModel):
+        name: str = "default"
+
+    with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as f:
+        f.write('!set_default who: world\nname: "hello ${who}"\n')
+        f.flush()
+        conf = CLI.cli([f"+{f.name}"])
+        assert conf.name == "hello world"
+
+
+def test_interpolation_into_int_field():
+    """${...} arithmetic into an int field resolves before validation."""
+    import tempfile
+
+    @dracon_program(name="test-int")
+    class CLI(BaseModel):
+        count: int = 0
+
+    with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as f:
+        f.write('!set_default n: 5\ncount: "${n * 2}"\n')
+        f.flush()
+        conf = CLI.cli([f"+{f.name}"])
+        assert conf.count == 10

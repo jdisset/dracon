@@ -1512,7 +1512,19 @@ class Program(BaseModel, Generic[T]):
             self._print_trace(current_composition.trace, trace_path, trace_all)
             sys.exit(0)
 
+        # propagate defined_vars into loader context so !set_default / !define
+        # vars from one +file are visible to interpolations in other +files.
+        # use soft update: existing context (incl. CLI ++) takes precedence.
+        if current_composition.defined_vars:
+            for k, v in current_composition.defined_vars.items():
+                if k not in loader.context:
+                    loader.context[k] = v
+
         res = loader.load_node(current_composition.root)
+        # resolve lazy interpolations in the raw dict before pydantic
+        # validation so typed fields (list[str], int, ...) see concrete
+        # values instead of LazyInterpolable wrappers
+        resolve_all_lazy(res, root_obj=res, context_override=loader.context)
         res = self.conf_type.model_validate(res)
 
         resolve_all_lazy(res, root_obj=res, context_override=loader.context)
