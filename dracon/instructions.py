@@ -184,6 +184,44 @@ def _rewrite_fn_return_key(template_node):
     return found
 
 
+def _fn_from_loader_str(include_str, loader, source, name):
+    """Create a DraconCallable from a loader reference string (e.g. 'file:/path/foo.yaml')."""
+    from dracon.callable import DraconCallable
+    from dracon.diagnostics import CompositionError
+
+    if ':' not in include_str:
+        raise CompositionError(
+            f"!fn scalar must be a loader reference (file:..., pkg:...), got '{include_str}'",
+            context=source,
+        )
+    loader_name, path = include_str.split(':', 1)
+    if loader_name not in loader.custom_loaders:
+        available = ', '.join(sorted(loader.custom_loaders.keys()))
+        raise CompositionError(
+            f"!fn: unknown loader '{loader_name}'. Available: {available}",
+            context=source,
+        )
+    raw_content, file_ctx = loader.custom_loaders[loader_name](path, draconloader=loader)
+    if not isinstance(raw_content, str):
+        raise CompositionError(
+            f"!fn: loader '{loader_name}' returned {type(raw_content).__name__}, expected str",
+            context=source,
+        )
+    from dracon.loader import compose_config_from_str as raw_compose
+    raw_comp = raw_compose(loader.yaml, raw_content)
+    return DraconCallable(
+        template_node=raw_comp.root, loader=loader, source=source,
+        file_context=file_ctx, name=name,
+    )
+
+
+def _has_loader_scheme(value_str, loaders):
+    """Check if a string starts with a known loader scheme (file:, pkg:, etc.)."""
+    if ':' not in value_str:
+        return False
+    return value_str.split(':', 1)[0] in loaders
+
+
 def _create_fn_callable(value_node, loader, key_node):
     """Create a DraconCallable from an !fn value node."""
     from dracon.callable import DraconCallable
@@ -192,8 +230,14 @@ def _create_fn_callable(value_node, loader, key_node):
     source = node_source(key_node)
     name = key_node.value
 
-    # inline scalar expression: !fn ${expr}
+    # interpolable with loader scheme: !fn file:$DIR/path -> resolve vars, then load
     if isinstance(value_node, InterpolableNode):
+        if _has_loader_scheme(value_node.value, loader.custom_loaders):
+            resolved = value_node.evaluate(
+                engine=loader.interpolation_engine, context=value_node.context,
+            )
+            return _fn_from_loader_str(resolved, loader, source, name)
+        # pure expression lambda: !fn ${expr}
         from dracon.nodes import reset_tag
         template_node = deepcopy(value_node)
         reset_tag(template_node)
@@ -202,31 +246,7 @@ def _create_fn_callable(value_node, loader, key_node):
         )
 
     if isinstance(value_node, DraconScalarNode):
-        include_str = value_node.value
-        if ':' not in include_str:
-            raise CompositionError(
-                f"!fn scalar must be a loader reference (file:..., pkg:...), got '{include_str}'",
-                context=source,
-            )
-        loader_name, path = include_str.split(':', 1)
-        if loader_name not in loader.custom_loaders:
-            available = ', '.join(sorted(loader.custom_loaders.keys()))
-            raise CompositionError(
-                f"!fn: unknown loader '{loader_name}'. Available: {available}",
-                context=source,
-            )
-        raw_content, file_ctx = loader.custom_loaders[loader_name](path, draconloader=loader)
-        if not isinstance(raw_content, str):
-            raise CompositionError(
-                f"!fn: loader '{loader_name}' returned {type(raw_content).__name__}, expected str",
-                context=source,
-            )
-        from dracon.loader import compose_config_from_str as raw_compose
-        raw_comp = raw_compose(loader.yaml, raw_content)
-        return DraconCallable(
-            template_node=raw_comp.root, loader=loader, source=source,
-            file_context=file_ctx, name=name,
-        )
+        return _fn_from_loader_str(value_node.value, loader, source, name)
 
     elif isinstance(value_node, (DraconMappingNode, DraconSequenceNode)):
         from dracon.nodes import reset_tag

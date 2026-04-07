@@ -39,6 +39,11 @@ import logging
 
 logger = logging.getLogger("dracon")
 
+# construction-time directive tags: skip the node (and its key-value pair) during construction.
+# !noconstruct: strip raw template entries from constructed output
+# !unset: mark a key for deletion (survives composition & merging, removed at construction)
+_SKIP_TAGS = frozenset({'!noconstruct', '!unset'})
+
 ## {{{                        --     type utils     --
 
 
@@ -285,6 +290,9 @@ class Draconstructor(Constructor):
         tag = node.tag
 
         try:
+            if str(tag) in _SKIP_TAGS:
+                return None
+
             # !fn:path partial application
             if tag and isinstance(tag, str) and tag.startswith('!fn:') and target_type is None:
                 func_path = tag[4:]
@@ -488,7 +496,7 @@ class Draconstructor(Constructor):
             )
         mapping = self.yaml_base_dict_type()
         for key_node, value_node in node.value:
-            if key_node.tag == '!noconstruct' or value_node.tag == '!noconstruct':
+            if str(key_node.tag) in _SKIP_TAGS or str(value_node.tag) in _SKIP_TAGS:
                 continue
             key = self.construct_object(key_node, deep=True)
             if not isinstance(key, Hashable):
@@ -509,3 +517,16 @@ class Draconstructor(Constructor):
             mapping[key] = value
 
         return mapping
+
+    def construct_sequence(self, node, deep=False):
+        if not isinstance(node, SequenceNode):
+            raise ConstructorError(
+                None, None,
+                f"expected a sequence node, but found {node.id!s}",
+                node.start_mark,
+            )
+        return [
+            self.construct_object(child, deep=deep)
+            for child in node.value
+            if str(getattr(child, 'tag', '')) not in _SKIP_TAGS
+        ]

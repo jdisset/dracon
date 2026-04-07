@@ -755,3 +755,116 @@ class TestNestedFnTagInvocation:
         assert config['r1']['second'] == 'world'
         assert config['r2']['first'] == 'foo'
         assert config['r2']['second'] == 'bar'
+
+
+# --- !fn file:$DIR/ bug (interpolated loader scheme) ---
+
+
+class TestFnFileDollarDir:
+    """!fn file:$DIR/... must load the file, not return the path string."""
+
+    def test_fn_file_dollar_dir_basic(self, tmp_path):
+        """Core reproduction: !fn file:$DIR/template.yaml creates a callable."""
+        (tmp_path / "template.yaml").write_text(
+            "!require x: 'val'\nresult: ${x * 2}\n"
+        )
+        (tmp_path / "main.yaml").write_text(
+            "!define f: !fn file:$DIR/template.yaml\n"
+            "out: ${f(x=21)}\n"
+        )
+        loader = DraconLoader()
+        config = loader.load(str(tmp_path / "main.yaml"))
+        config.resolve_all_lazy()
+        assert config['out']['result'] == 42
+
+    def test_fn_file_dollar_dir_returns_mapping(self, tmp_path):
+        """Callable from file:$DIR returns proper template output, not path string."""
+        (tmp_path / "endpoint.yaml").write_text(
+            "!require name: 'svc'\nurl: https://${name}.example.com\n"
+        )
+        (tmp_path / "main.yaml").write_text(
+            "!define make_ep: !fn file:$DIR/endpoint.yaml\n"
+            "api: ${make_ep(name='api')}\n"
+        )
+        loader = DraconLoader()
+        config = loader.load(str(tmp_path / "main.yaml"))
+        config.resolve_all_lazy()
+        assert config['api']['url'] == 'https://api.example.com'
+
+    def test_fn_file_dollar_dir_tag_invocation(self, tmp_path):
+        """Callable from file:$DIR works with tag-style invocation."""
+        (tmp_path / "greet.yaml").write_text(
+            "!require who: 'name'\nmsg: hello ${who}\n"
+        )
+        (tmp_path / "main.yaml").write_text(
+            "!define greet: !fn file:$DIR/greet.yaml\n"
+            "result: !greet { who: world }\n"
+        )
+        loader = DraconLoader()
+        config = loader.load(str(tmp_path / "main.yaml"))
+        config.resolve_all_lazy()
+        assert config['result']['msg'] == 'hello world'
+
+    def test_fn_file_dollar_dir_in_subdir(self, tmp_path):
+        """$DIR resolves relative to the file containing the !fn."""
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "tmpl.yaml").write_text("!require v: 'v'\nval: ${v}\n")
+        (sub / "main.yaml").write_text(
+            "!define tmpl: !fn file:$DIR/tmpl.yaml\n"
+            "out: ${tmpl(v='hello')}\n"
+        )
+        loader = DraconLoader()
+        config = loader.load(str(sub / "main.yaml"))
+        config.resolve_all_lazy()
+        assert config['out']['val'] == 'hello'
+
+    def test_fn_file_dollar_dir_multiple_calls(self, tmp_path):
+        """Same $DIR-based callable invoked multiple times."""
+        (tmp_path / "double.yaml").write_text(
+            "!require x: 'val'\nresult: ${x * 2}\n"
+        )
+        (tmp_path / "main.yaml").write_text(
+            "!define dbl: !fn file:$DIR/double.yaml\n"
+            "a: ${dbl(x=5)}\n"
+            "b: ${dbl(x=10)}\n"
+        )
+        loader = DraconLoader()
+        config = loader.load(str(tmp_path / "main.yaml"))
+        config.resolve_all_lazy()
+        assert config['a']['result'] == 10
+        assert config['b']['result'] == 20
+
+    def test_fn_expression_lambda_still_works(self):
+        """Pure ${expr} interpolable is still treated as expression lambda."""
+        yaml = """
+        !define dbl: !fn ${x * 2}
+        result: ${dbl(x=21)}
+        """
+        config = _loads(yaml)
+        assert config['result'] == 42
+
+    def test_fn_pkg_still_works(self):
+        """Regression: pkg: scheme still works (no InterpolableNode involved)."""
+        yaml = """
+        !define f: !fn pkg:dracon:tests/fn_double.yaml
+        result: ${f(x=21)}
+        """
+        config = _loads(yaml)
+        assert config['result']['result'] == 42
+
+    def test_fn_file_dollar_dir_with_require(self, tmp_path):
+        """Template loaded via file:$DIR respects !require."""
+        (tmp_path / "strict.yaml").write_text(
+            "!require name: 'service name'\n"
+            "!require port: 'port number'\n"
+            "addr: ${name}:${port}\n"
+        )
+        (tmp_path / "main.yaml").write_text(
+            "!define mk: !fn file:$DIR/strict.yaml\n"
+            "svc: ${mk(name='web', port=8080)}\n"
+        )
+        loader = DraconLoader()
+        config = loader.load(str(tmp_path / "main.yaml"))
+        config.resolve_all_lazy()
+        assert config['svc']['addr'] == 'web:8080'
