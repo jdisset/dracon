@@ -46,7 +46,7 @@ broodmon +sweep.yaml
 broodmon +sweep.yaml ++lrs="[0.0001, 0.001]" -j 8
 ```
 
-You can also use `dracon show sweep.yaml -cr` to inspect the expanded config before running it.
+You can also use `dracon show sweep.yaml -c -r` to inspect the expanded config before running it.
 
 ## Typical patterns
 

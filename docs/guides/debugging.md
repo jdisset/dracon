@@ -17,10 +17,10 @@ Shows the composed YAML tree after includes and merges, but before construction 
 ### Compose + construct + resolve
 
 ```bash
-dracon show config.yaml -cr
+dracon show config.yaml -c -r
 ```
 
-The `-c` flag constructs Python objects. The `-r` flag resolves all lazy `${...}` interpolations. Together, `-cr` gives you the fully resolved config.
+The `-c` flag constructs Python objects. The `-r` flag resolves all lazy `${...}` interpolations. Together, `-c -r` gives you the fully resolved config.
 
 ### Layer multiple files
 
@@ -33,7 +33,7 @@ Files are merged left-to-right, just like they would be in your program. This sh
 ### Select a subtree
 
 ```bash
-dracon show config.yaml -cs database
+dracon show config.yaml -c -s database
 ```
 
 The `-s` flag extracts a subtree by keypath. Output just the `database` section. Combine with `-c` to construct first.
@@ -41,13 +41,13 @@ The `-s` flag extracts a subtree by keypath. Output just the `database` section.
 ### JSON output
 
 ```bash
-dracon show config.yaml -cj
+dracon show config.yaml -c -j
 ```
 
 The `-j` flag outputs JSON instead of YAML (implies `-c`). Useful for piping to `jq`:
 
 ```bash
-dracon show config.yaml -cjs database | jq '.port'
+dracon show config.yaml -c -j -s database | jq '.port'
 ```
 
 ### Inject context variables
@@ -69,7 +69,7 @@ The `--path.to.key value` syntax overrides a specific config value at a dotted k
 ### Permissive mode
 
 ```bash
-dracon show config.yaml -crp
+dracon show config.yaml -c -r -p
 ```
 
 The `-p` flag enables permissive resolution: unresolvable `${...}` expressions are left as strings instead of raising errors. Useful when you want to see what resolves with partial context.

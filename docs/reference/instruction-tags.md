@@ -170,14 +170,13 @@ Loads the file as a template. Each call deepcopies the template, injects kwargs 
 ### Inline mapping
 
 ```yaml
-!define greeting:
-  !fn:
-    !require name: "name is required"
-    !set_default greeting: "Hello"
-    message: "${greeting}, ${name}!"
+!define greeting: !fn
+  !require name: "name is required"
+  !set_default greeting: "Hello"
+  message: "${greeting}, ${name}!"
 ```
 
-The mapping body becomes the template. Use `!require` for mandatory parameters and `!set_default` for optional ones.
+The `!fn` tag goes on the value node, not as a separate key. The mapping body becomes the template. Use `!require` for mandatory parameters and `!set_default` for optional ones.
 
 ### Expression lambda
 
@@ -192,11 +191,10 @@ The value is an interpolation expression. Parameters come from the caller's kwar
 Inside a mapping template body, tagging a key with `!fn` marks it as the return value. The callable returns only that value instead of the whole mapping.
 
 ```yaml
-!define compute:
-  !fn:
-    !require x: "input"
-    intermediate: ${x * 2}
-    !fn : ${intermediate + 1}
+!define compute: !fn
+  !require x: "input"
+  intermediate: ${x * 2}
+  !fn : ${intermediate + 1}
 # compute(x=5) returns 11, not the whole mapping
 ```
 
@@ -333,11 +331,11 @@ config: !deferred::reroot=true:ServerConfig
 
 ## !noconstruct
 
-Skip construction for this subtree. The node remains as a raw YAML node in the constructed output.
+When used as a tag on a mapping key, `!noconstruct` causes the entire key-value pair to be skipped during construction. The pair does not appear in the constructed output at all.
 
 ```yaml
-raw_template: !noconstruct
-  key: ${expr}  # kept as literal, not evaluated during construction
+!noconstruct raw_template:
+  key: ${expr}  # this entire entry is removed from the constructed output
 ```
 
 ---

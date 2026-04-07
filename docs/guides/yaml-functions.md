@@ -22,10 +22,13 @@ If you just need the same block twice without changes, anchors work. If you need
 ### From a file
 
 ```yaml
-!define make_endpoint: !fn file:$DIR/templates/endpoint.yaml
+!define make_endpoint: !fn file:templates/endpoint.yaml
 ```
 
-The file at `templates/endpoint.yaml` becomes the function body. It can use `!require` and `!set_default` for parameters, just like an inline body. `$DIR` in the file resolves to the template file's directory, not the caller's.
+The file at `templates/endpoint.yaml` becomes the function body. It can use `!require` and `!set_default` for parameters, just like an inline body. The path is resolved relative to the file containing the `!fn` directive.
+
+!!! warning "Avoid `$DIR` in `!fn file:` paths"
+    `!fn file:$DIR/path` does not work because `$DIR` gets transformed into `${DIR}` by the shorthand variable expansion, which breaks the `!fn` file reference detection. Use plain relative paths instead.
 
 ### Inline mapping
 
@@ -107,7 +110,7 @@ endpoints:
     url: https://docs.example.com:9090
 ```
 
-This works for any callable in context, not just `!fn` templates. Python functions passed via `context` or `context_types` work too.
+This works for any callable in context, not just `!fn` templates. Python functions passed via `context` work too.
 
 ## Calling from expressions
 
@@ -171,7 +174,6 @@ The template node is deep-copied before each invocation, so there's no shared mu
 
 ```yaml
 !define sqrt: !fn:math.sqrt
-!define log10: !fn:math.log { base: 10 }
 !define my_transform: !fn:myproject.transforms.normalize { strategy: "minmax" }
 ```
 
@@ -179,7 +181,6 @@ Call them from expressions:
 
 ```yaml
 root: ${sqrt(16)}           # 4.0
-log_val: ${log10(x=1000)}   # 3.0
 normed: ${my_transform(data=raw_values)}
 ```
 
@@ -194,7 +195,7 @@ message: ${greet(name='world')}  # "hey world"
 
 When Dracon encounters `!fn:some.name`, it looks up the function in this order:
 
-1. The current loader context (variables passed via `context`, `context_types`, or `!define`)
+1. The current loader context (variables passed via `context` or `!define`)
 2. Dotted import from Python's module system
 
 This means you can override an importable function with a context variable of the same name.

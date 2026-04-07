@@ -71,10 +71,12 @@ Retrieves the final constructed value at a keypath, resolved relative to the cur
 ```yaml
 db:
   port: 5432
-  url: "postgres://localhost:${@db.port}/mydb"
+  url: "postgres://localhost:${@port}/mydb"
 ```
 
-Absolute paths start from the document root. Relative paths are resolved from the expression's location.
+Here `@port` is a relative reference to the sibling key `port` within the same mapping. You could also write `${@/db.port}` as an absolute path from the document root. Using `@db.port` from inside `db` would incorrectly resolve to `/db/db.port`.
+
+Absolute paths (starting with `/`) start from the document root. Relative paths are resolved from the expression's location.
 
 ### `&path` -- node copy reference
 

@@ -42,8 +42,8 @@ class ValidatePort(Instruction):
                 f"Invalid port: {port_value} (must be 1-65535)"
             )
 
-        # remove the instruction key, keep the value
-        parent_node.remove_key(key_node)
+        # remove the instruction key from the parent mapping
+        del parent_node[str(path[-1])]
 
         return comp_res
 ```

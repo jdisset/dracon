@@ -144,7 +144,7 @@ Every `@dracon_program` includes:
 - `++var=value` or `++var value` -- set context variable for `${...}` expressions
 - `--define.var=value` or `--define.var value` -- long form of `++`
 - `--flag value` or `--flag=value` -- set a named option
-- Short flags can be combined: `-crj` is equivalent to `-c -r -j`
+- Short flags cannot be combined: use `-c -r -j`, not `-crj`
 
 ---
 

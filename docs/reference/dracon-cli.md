@@ -39,7 +39,7 @@ The first positional argument determines the mode:
 | `-h`, `--help` | Show help. |
 | `--version` | Show version. |
 
-Short flags combine: `-crj` is equivalent to `-c -r -j`.
+Short flags cannot be combined: use `-c -r -j`, not `-crj`.
 
 ### Context Injection
 

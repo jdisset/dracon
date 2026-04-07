@@ -106,7 +106,12 @@ jobs:
       name: "random_lr_${lr}"
 ```
 
-`random` is available in expressions by default (it's part of Python's standard library, imported automatically by the expression engine).
+`random` is **not** available by default in expressions. You need to inject it via context:
+
+```python
+import random
+config = dracon.load('sweep.yaml', context={'random': random})
+```
 
 ### Combinations from structured data
 
@@ -137,9 +142,11 @@ When your parameter variations are full config files rather than simple values, 
 # sweep_from_files.yaml
 
 experiments:
-  !each(f) ${[x for x in listdir($DIR + '/configs') if x.endswith('.yaml')]}:
+  !each(f) ${[x for x in listdir(DIR + '/configs') if x.endswith('.yaml')]}:
     ${f.replace('.yaml', '')}: !include file:$DIR/configs/${f}
 ```
+
+Note the difference: inside `${...}` expressions, use `DIR` (the context variable) without the `$` prefix. The `$` prefix is only for the shorthand syntax outside of `${...}` blocks (like in `!include file:$DIR/...`).
 
 If `configs/` contains `small.yaml`, `medium.yaml`, `large.yaml`, the result is:
 
@@ -156,17 +163,19 @@ experiments:
 You can combine this with a template to layer shared settings over each config:
 
 ```yaml
-!define base_settings:
+__dracon__: &base_settings
   epochs: 100
   optimizer: adam
   output_root: /results
 
 experiments:
-  !each(f) ${[x for x in listdir($DIR + '/configs') if x.endswith('.yaml')]}:
+  !each(f) ${[x for x in listdir(DIR + '/configs') if x.endswith('.yaml')]}:
     ${f.replace('.yaml', '')}:
-      <<: ${base_settings}
+      <<: *base_settings
       <<{<+}: !include file:$DIR/configs/${f}
 ```
+
+Note: merge keys (`<<:`) need a concrete node at composition time, so `<<: ${base_settings}` with an interpolation doesn't work. Use a YAML anchor (`&`/`*`) instead. Also, use `DIR` (no `$` prefix) inside `${...}` expressions.
 
 ## 5. Sweep with !fn templates
 

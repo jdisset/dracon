@@ -72,19 +72,19 @@ database:
   host: db.prod.internal
   password: ${getenv('WEBMON_DB_PASSWORD')}
 
-<<{<+}: !include file:$DIR/../base.yaml
+<<{>+}: !include file:$DIR/../base.yaml
 ```
 
 The last line does the work. Let's unpack it:
 
 - `<<:` is the merge key. It says "merge another mapping into this one."
 - `!include file:$DIR/../base.yaml` loads the base config. `$DIR` is always the directory of the current file, so this resolves to `config/base.yaml` regardless of where you invoke things from.
-- `{<+}` is the merge strategy. The `<` means "the existing values (prod.yaml) win conflicts." The `+` means "merge dictionaries recursively instead of replacing them." So prod.yaml's `database.host` overrides the base, but `database.port` and `database.name` are kept from the base.
+- `{>+}` is the merge strategy. The `>` means "the existing values (prod.yaml) win conflicts." The `+` means "merge dictionaries recursively instead of replacing them." So prod.yaml's `database.host` overrides the base, but `database.port` and `database.name` are kept from the base.
 
 Without the `+`, the entire `database` mapping in prod would replace the base one, and you'd lose `port` and `name`. With `+`, they merge field by field.
 
 !!! tip
-    Think of `{<+}` as "I win, merge deep." You'll use this one a lot.
+    Think of `{>+}` as "I win, merge deep." You'll use this one a lot.
 
 ## Loading multiple files
 
@@ -96,7 +96,7 @@ import dracon
 config = dracon.load(["config/base.yaml", "config/env/prod.yaml"])
 ```
 
-When you pass a list, files are merged left to right. Later files override earlier ones. This is equivalent to what the `<<{<+}:` line does, but controlled from the loading side instead of inside the YAML.
+When you pass a list, files are merged left to right. Later files override earlier ones. This is equivalent to what the `<<{>+}:` line does, but controlled from the loading side instead of inside the YAML.
 
 From the CLI, it's the same idea:
 
@@ -132,7 +132,7 @@ database:
   host: db.prod.internal
   password: ${getenv('WEBMON_DB_PASSWORD')}
 
-<<{<+}: !include file:$DIR/../base.yaml
+<<{>+}: !include file:$DIR/../base.yaml
 ```
 
 `!include file:...` replaces itself with the contents of the included file. The `$DIR` variable always refers to the directory of the file that contains the `!include`, so relative paths work correctly even when files include each other across directories.
@@ -143,7 +143,7 @@ Not every developer on your team needs the same local tweaks. You can use `!incl
 
 ```yaml
 # config/env/dev.yaml
-<<{<+}: !include file:$DIR/../base.yaml
+<<{>+}: !include file:$DIR/../base.yaml
 <<{<+}: !include? file:$DIR/../local-overrides.yaml
 ```
 
@@ -171,7 +171,7 @@ base.yaml          -- shared defaults
   env/staging.yaml -- staging overrides (merges base)
 ```
 
-Each environment file includes the base with `<<{<+}:` and overrides only what it needs. When you add a new shared setting to `base.yaml`, every environment gets it automatically.
+Each environment file includes the base with `<<{>+}:` and overrides only what it needs. When you add a new shared setting to `base.yaml`, every environment gets it automatically.
 
 ## Precedence
 
@@ -236,7 +236,7 @@ Here's the full dev workflow:
 3. Run `dracon show config/base.yaml config/env/prod.yaml -r` to check.
 4. Run your app: `python webmon.py +config/env/prod.yaml`
 
-Or, if your environment files already include the base via `<<{<+}:`, you only need one file:
+Or, if your environment files already include the base via `<<{>+}:`, you only need one file:
 
 ```bash
 python webmon.py +config/env/prod.yaml
@@ -244,7 +244,7 @@ python webmon.py +config/env/prod.yaml
 
 ## What you've learned
 
-- Use `<<{<+}: !include file:$DIR/base.yaml` to merge a base config into an override file, with recursive dict merging and existing values winning
+- Use `<<{>+}: !include file:$DIR/base.yaml` to merge a base config into an override file, with recursive dict merging and existing values winning
 - Pass multiple files to `dracon.load(["base.yaml", "prod.yaml"])` or `+base.yaml +prod.yaml` for caller-controlled layering
 - `!include file:$DIR/...` pulls in fragments; `$DIR` is always the current file's directory
 - `!include?` silently skips missing files, good for optional local overrides

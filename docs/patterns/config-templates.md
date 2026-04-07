@@ -124,7 +124,7 @@ When you're calling the same template many times, `!fn` is cleaner than `!define
 ```yaml
 # services.yaml
 
-!define make_service: !fn file:$DIR/templates/service.yaml
+!define make_service: !fn file:templates/service.yaml
 
 services:
   auth: !make_service { name: auth, port: 8001, replicas: 3 }

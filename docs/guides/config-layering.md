@@ -76,7 +76,7 @@ The `cascade:` scheme walks up from the current working directory toward the fil
 
 ```yaml
 # loads .myapp.yaml from every parent directory, merges them
-<<{<+}: !include cascade:.myapp.yaml
+<<{>+}: !include cascade:.myapp.yaml
 ```
 
 This is good for monorepos where each subdirectory can have its own `.myapp.yaml` that inherits from a repo-wide one.
@@ -139,8 +139,8 @@ Merge keys control how two mappings or lists combine. The syntax is `<<{dict_opt
 | Key | Dict behavior | List behavior | Use case |
 |-----|--------------|---------------|----------|
 | `<<:` | Append new keys, existing wins, deep merge | Existing wins, replace | Standard YAML-like merge |
-| `<<{<+}:` | New wins, deep merge | (default list) | "I'm the override" |
-| `<<{>+}:` | Existing wins, deep merge | (default list) | "I'm the base" |
+| `<<{<+}:` | New wins, deep merge | (default list) | Included content overrides me |
+| `<<{>+}:` | Existing wins, deep merge | (default list) | I override the included content |
 | `<<{<~}:` | New wins, shallow replace | (default list) | Full key replacement |
 | `<<[+]:` | (default dict) | Append lists | Combine lists |
 | `<<[<+]:` | (default dict) | New wins, append | Override + combine lists |
@@ -158,10 +158,10 @@ check_interval: 15
 database:
   host: db.prod.internal
 
-<<{<+}: !include file:$DIR/../base.yaml
+<<{>+}: !include file:$DIR/../base.yaml
 ```
 
-`{<+}` means "I (prod.yaml) win conflicts, merge dicts recursively." So `database.host` comes from prod, but `database.port` and `database.name` are kept from base.
+`{>+}` means "I (prod.yaml) win conflicts, merge dicts recursively." So `database.host` comes from prod, but `database.port` and `database.name` are kept from base.
 
 ### Example: append to a list
 
@@ -196,7 +196,7 @@ api_url: "https://api.example.com/v${version}"
 
 ```yaml
 # main.yaml
-<<{<+}(<): !include file:$DIR/settings.yaml
+<<{>+}(<): !include file:$DIR/settings.yaml
 
 # version is now available here because of (<)
 banner: "Running version ${version}"
@@ -253,7 +253,7 @@ database:
   host: db.prod.internal
   password: ${getenv('DB_PASSWORD')}
 
-<<{<+}: !include file:$DIR/../base.yaml
+<<{>+}: !include file:$DIR/../base.yaml
 <<{<+}: !include? file:$DIR/../local-overrides.yaml
 ```
 

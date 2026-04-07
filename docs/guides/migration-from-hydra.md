@@ -36,14 +36,14 @@ db:
 
 **Dracon:**
 ```yaml
-<<{<+}: !include file:$DIR/db/postgres.yaml
-<<{<+}: !include file:$DIR/server/apache.yaml
+<<{>+}: !include file:$DIR/db/postgres.yaml
+<<{>+}: !include file:$DIR/server/apache.yaml
 
 db:
   timeout: 30
 ```
 
-The merge key `<<{<+}` means "merge recursively, later values override." Files are layered explicitly. The `_self_` concept doesn't exist because ordering is explicit: your local keys are always defined in place, and merges happen where you write them.
+The merge key `<<{>+}` means "merge recursively, my values (the current file) win conflicts." Files are layered explicitly. The `_self_` concept doesn't exist because ordering is explicit: your local keys are always defined in place, and merges happen where you write them.
 
 Alternatively, use the CLI layering:
 
@@ -61,7 +61,7 @@ defaults:
 
 **Dracon:**
 ```yaml
-<<{<+}: !include file:$DIR/db/${db_type}.yaml
+<<{>+}: !include file:$DIR/db/${db_type}.yaml
 ```
 
 The `${db_type}` is resolved during composition. Pass it as a context variable:
@@ -75,7 +75,7 @@ Or define it in the config itself:
 ```yaml
 !define db_type: postgres
 
-<<{<+}: !include file:$DIR/db/${db_type}.yaml
+<<{>+}: !include file:$DIR/db/${db_type}.yaml
 ```
 
 ### 3. Object instantiation to type tags

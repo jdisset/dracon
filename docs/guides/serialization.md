@@ -38,12 +38,14 @@ class DBConfig(BaseModel):
     host: str = "localhost"
     port: int = 5432
 
-config = DBConfig()
+config = DBConfig(host="db.prod.internal", port=5433)
 print(dracon.dump(config))
 # !mymodule.DBConfig
-# host: localhost
-# port: 5432
+# host: db.prod.internal
+# port: 5433
 ```
+
+Note that by default `exclude_defaults=True`, so fields equal to their Pydantic default value are omitted from the dump. To include all fields, set `exclude_defaults=False` on the representer (see [Controlling representation](#controlling-representation)).
 
 ## Round-trip: load, modify, dump
 
