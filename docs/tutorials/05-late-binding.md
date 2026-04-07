@@ -156,7 +156,7 @@ Each call gets its own independent construction.
 
 ## `Resolvable[T]`: deferred fields in Pydantic models
 
-When you're working with typed Pydantic models, you sometimes want a specific field to stay unresolved until you provide context. That's what `Resolvable[T]` does.
+When you're working with typed Pydantic models, you sometimes want a specific field to stay unresolved until you provide context. `Resolvable[T]` does this, but it works through the **YAML tag**, not the type annotation alone. The YAML value must be tagged with `!Resolvable[str]` to tell dracon to pause construction on that field:
 
 ```python
 # models.py
@@ -166,7 +166,7 @@ from dracon import Resolvable
 class WebmonConfig(BaseModel):
     sites: list[str] = []
     check_interval: int = 60
-    report_path: Resolvable[str]
+    report_path: Resolvable[str]   # Pydantic accepts Resolvable instances here
 ```
 
 ```yaml
@@ -175,7 +175,7 @@ class WebmonConfig(BaseModel):
 sites:
   - https://example.com
 check_interval: 30
-report_path: "/data/${run_id}/report.html"
+report_path: !Resolvable[str] "/data/${run_id}/report.html"
 ```
 
 ```python
@@ -186,11 +186,14 @@ config = dracon.load("config.yaml", context={"WebmonConfig": WebmonConfig})
 assert isinstance(config, WebmonConfig)
 
 # report_path is a Resolvable, not a string yet
-path = config.report_path.resolve(context={"run_id": "abc123"})
-print(path)  # /data/abc123/report.html
+lazy = config.report_path.resolve(context={"run_id": "abc123"})
+path = lazy.resolve()       # force the lazy interpolation
+print(path)                 # /data/abc123/report.html
 ```
 
-`Resolvable` is lighter than `DeferredNode`. It pauses a single field's construction rather than a whole subtree. The parent model is fully constructed and validated; only the `Resolvable` field waits.
+The Pydantic type `Resolvable[str]` tells Pydantic to accept `Resolvable` instances. The `!Resolvable[str]` YAML tag tells dracon's constructor to wrap the value instead of resolving it.
+
+For most cases, `!deferred` is simpler. Use `Resolvable` when you want the parent model fully constructed and validated, with only one field deferred.
 
 ## Worked example: webmon with deferred report paths
 

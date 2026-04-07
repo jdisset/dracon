@@ -95,36 +95,39 @@ The format is `!deferred::[options]:[TypeName]`.
 
 ## Resolvable[T] for Pydantic fields
 
-When you just need one field to stay unresolved, use `Resolvable[T]`:
+When you just need one field to stay unresolved, use `Resolvable[T]`. It works through the YAML tag, not the type annotation alone. Tag the YAML value with `!Resolvable[T]` to pause construction on that field:
 
 ```python
 from dracon import Resolvable
 from pydantic import BaseModel
 
 class Pipeline(BaseModel):
-    preprocessor: Resolvable[Preprocessor]
+    preprocessor: Resolvable[Preprocessor]   # Pydantic accepts Resolvable here
     batch_size: int = 32
 ```
 
 ```yaml
 !Pipeline
-preprocessor: !Preprocessor
+preprocessor: !Resolvable[Preprocessor]
   tokenizer: "${tokenizer}"
 batch_size: 64
 ```
 
-The `batch_size` resolves immediately. The `preprocessor` stays as a `Resolvable` until you call:
+The `batch_size` resolves immediately. The `preprocessor` stays as a `Resolvable` until you call `.resolve()`:
 
 ```python
-config = dracon.load('pipeline.yaml')
+config = dracon.load('pipeline.yaml', context={'Pipeline': Pipeline, 'Preprocessor': Preprocessor})
 
-# later:
-prep = config.preprocessor.resolve(context={'tokenizer': my_tokenizer})
+# later, when the tokenizer is available:
+lazy = config.preprocessor.resolve(context={'tokenizer': my_tokenizer})
+prep = lazy.resolve()  # force any remaining lazy interpolations
 ```
 
-`Resolvable` stores the raw YAML node and the constructor state. It is essentially a snapshot of the construction process that you can resume later with extra context.
+`Resolvable` stores the raw YAML node and the constructor state. It is a snapshot of the construction process that you can resume later with extra context.
 
 A `Resolvable` can be empty-checked with `bool(resolvable)` and copied with `.copy()`.
+
+For most cases, `!deferred` is simpler and more intuitive. Use `Resolvable` when you want the parent model fully constructed and validated, with only specific fields deferred.
 
 ## LazyDraconModel
 
