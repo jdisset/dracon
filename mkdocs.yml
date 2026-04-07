@@ -57,44 +57,49 @@ plugins:
   - print-site
 
 nav:
-  - "Introduction": "index.md"
-  - "Getting Started":
-      - "Tutorial: Building a CLI App": "tutorials/cli_app.md"
+  - "Home": "index.md"
+  - "Start Here":
+      - "Quickstart": "quickstart.md"
+      - "Your First Config": "tutorials/01-first-config.md"
+      - "Build a CLI": "tutorials/02-build-a-cli.md"
+      - "Compose Configs": "tutorials/03-compose-configs.md"
+      - "Dynamic Configs": "tutorials/04-dynamic-configs.md"
+      - "Late Binding": "tutorials/05-late-binding.md"
   - "How-To Guides":
-      - guides/index.md # Section index page
-      - "Basic Features": "guides/basic-features.md"
-      - "Advanced Features": "guides/advanced-features.md"
-      - "Load Configuration Files": "guides/load-config.md"
-      - "Use Interpolation": "guides/use-interpolation.md"
-      - "Merge Configurations": "guides/merge-configs.md"
-      - "Include Files and Variables": "guides/use-includes.md"
-      - "Use Pydantic Models": "guides/use-pydantic.md"
-      - "Customize CLI Arguments": "guides/customize-cli.md"
-      - "Handle Secrets": "guides/handle-secrets.md"
-      - "Reusable Templates": "guides/use-templates.md"
-      - "YAML Functions (\\!fn)": "guides/use-fn.md"
-      - "Use Deferred Execution": "guides/use-deferred.md"
-      - "Inspect & Debug Configs": "guides/inspect-configs.md"
-  - "Conceptual Guides":
-      - concepts/index.md # Section index page
-      # - "Core Principles": "concepts/principles.md" # Maybe combine into others
-      - "Loading and Context": "concepts/loading.md"
-      - "Composition: Includes & Merges": "concepts/composition.md"
-      - "Interpolation Engine": "concepts/interpolation.md"
-      - "Composition Instructions": "concepts/instructions.md"
-      - "Pydantic Integration": "concepts/pydantic.md"
-      - "Deferred vs Resolvable": "concepts/deferred-resolvable.md"
-      - "CLI Generation": "concepts/cli.md"
+      - guides/index.md
+      - "Config Layering": "guides/config-layering.md"
+      - "CLI Patterns": "guides/cli-patterns.md"
+      - "YAML Functions": "guides/yaml-functions.md"
+      - "Deferred Execution": "guides/deferred-execution.md"
+      - "Secrets and Environment": "guides/secrets-and-env.md"
+      - "Debugging": "guides/debugging.md"
+      - "Serialization": "guides/serialization.md"
+      - "Extending Dracon": "guides/extending-dracon.md"
+      - "Migration from Hydra": "guides/migration-from-hydra.md"
+      - "Dracon and Broodmon": "guides/dracon-and-broodmon.md"
+  - "Concepts":
+      - concepts/index.md
+      - "The Three Phases": "concepts/lifecycle.md"
+      - "The Primitives": "concepts/primitives.md"
+      - "The Merge Operator": "concepts/merge-algebra.md"
+      - "Context and Scope": "concepts/context-and-scope.md"
+  - "Patterns":
+      - patterns/index.md
+      - "Dynamic Skeleton": "patterns/dynamic-skeleton.md"
+      - "Config Templates": "patterns/config-templates.md"
+      - "Sweep Generation": "patterns/sweep-generation.md"
+      - "Composition Stack": "patterns/composition-stack.md"
+      - "Anti-Patterns": "patterns/anti-patterns.md"
   - "Reference":
-      - reference/index.md # Section index page
-      - "DraconLoader API": "reference/loader_api.md"
-      - "Include Syntax": "reference/include_syntax.md"
-      - "Merge Key Syntax": "reference/merge_syntax.md"
-      - "Interpolation Syntax": "reference/interpolation_syntax.md"
-      - "Instruction Tags": "reference/instruction_tags.md"
-      - "CLI (`Arg`) Parameters": "reference/cli_arg.md"
+      - reference/index.md
+      - "Loader API": "reference/loader-api.md"
+      - "CLI API": "reference/cli-api.md"
+      - "Instruction Tags": "reference/instruction-tags.md"
+      - "Merge Syntax": "reference/merge-syntax.md"
+      - "Interpolation": "reference/interpolation.md"
       - "KeyPaths": "reference/keypaths.md"
-      - "dracon CLI": "reference/dracon_print.md"
+      - "Include Schemes": "reference/include-schemes.md"
+      - "dracon CLI": "reference/dracon-cli.md"
 # Add static assets if needed (e.g., logo)
 # extra:
 #   generator: false # Disable MkDocs generator tag in footer

@@ -23,7 +23,7 @@ parsing. Dracon gives you simple tools to catch all of these moving pieces and
 turn them into a structured, type safe, highly configurable system.
 Minimal ceremony, maximum efficiency.
 
-### Seamless Python Integration
+### Python Integration
 
 A single decorator turns any Pydantic model into a complete CLI application:
 
@@ -82,7 +82,7 @@ Embed Python expressions (`${...}`), reference other keys (`@path`), or compute 
 
 #### Define Configuration Once
 
-Use Pydantic models for type-safe configs (`!MyModel`). Dracon handles YAML <-> Pydantic conversion seamlessly.
+Use Pydantic models for type-safe configs (`!MyModel`). Dracon handles YAML to Pydantic conversion automatically.
 
 ## Quick Start: CLI with `@dracon_program`
 
@@ -197,63 +197,12 @@ model1 = create_model(learning_rate=0.01)
 model2 = create_model(learning_rate=0.001)
 ```
 
-## Quick Start: YAML Loader + Dump
-
-```python
-import dracon as dr
-from pydantic import BaseModel
-
-# --- Define a Pydantic Model ---
-class MyPydanticModel(BaseModel):
-    some_key: str
-    some_attr: dict
-    log_level: str = "INFO"
-
-# --- Loading ---
-# Load a config file (requires models in context if using tags like !MyPydanticModel)
-conf_obj = dr.load('examples/config/base.yaml', context={'AppConfig': AppConfig, 'DatabaseConfig': DatabaseConfig})
-
-# Load a config file and provide runtime context for interpolation
-conf_obj_ctx = dr.load('examples/config/prod.yaml', context={'AppConfig': AppConfig, 'DatabaseConfig': DatabaseConfig, 'base_path': '/runtime/data'})
-
-# Load a config from a string
-yaml_string = """
-!MyPydanticModel
-some_key: !include file:some_file.txt # Include another file
-some_attr:
-  key1: val1
-log_level: ${getenv('LOG_LEVEL', 'INFO')} # Interpolate from environment
-"""
-conf_from_str = dr.loads(yaml_string, context={'MyPydanticModel': MyPydanticModel})
-assert isinstance(conf_from_str, MyPydanticModel)
-
-# Load and merge multiple YAML files sequentially (later files override earlier ones by default)
-stacked_conf_obj = dr.load(
-    ['examples/config/base.yaml', 'examples/config/prod.yaml'],
-    context={'AppConfig': AppConfig, 'DatabaseConfig': DatabaseConfig, 'base_path': '/runtime/data'}
-)
-
-# --- Dumping ---
-# Dump a Pydantic object back to YAML
-obj = MyPydanticModel(some_key="key_val", some_attr={'nested': True}, log_level="DEBUG")
-yaml_str = dr.dump(obj)
-print(yaml_str)
-# Output (example):
-# !MyPydanticModel
-# some_key: key_val
-# some_attr:
-#   nested: true
-# log_level: DEBUG
-
-# Note: Dracon uses ruamel.yaml internally and supports custom serialization
-# via a `dracon_dump_to_node` method on your classes.
-```
-
 ## Where to Go Next?
 
-- **[Tutorial: Building a CLI App](https://jdisset.github.io/dracon/tutorials/cli_app/)**: Step-by-step guide to build the example above
-- **[How-To Guides](https://jdisset.github.io/dracon/guides/)**: Recipes for common tasks
-- **[Conceptual Guides](https://jdisset.github.io/dracon/concepts/)**: Understand Dracon's design
+- **[Quickstart](https://jdisset.github.io/dracon/quickstart/)**: Zero to working in 90 seconds
+- **[Tutorials](https://jdisset.github.io/dracon/tutorials/01-first-config/)**: Five progressive tutorials, from first config to late binding
+- **[How-To Guides](https://jdisset.github.io/dracon/guides/)**: Task-focused guides for layering, CLI patterns, YAML functions, debugging
+- **[Patterns](https://jdisset.github.io/dracon/patterns/)**: Real-world composition patterns (dynamic skeletons, config templates, sweep generation)
 - **[Reference](https://jdisset.github.io/dracon/reference/)**: Syntax and API details
 
 ## Acknowledgements

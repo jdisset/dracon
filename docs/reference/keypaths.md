@@ -1,58 +1,97 @@
-# Reference: KeyPaths
+# KeyPaths
 
-Dracon uses KeyPaths internally to reference specific locations within a nested configuration structure during composition and interpolation. Understanding KeyPaths is essential for using features like value references (`@`), merge targets (`@`), include sub-key targeting (`@`), and deferred paths.
+Dot-separated paths for addressing nodes in a YAML tree.
+
+```python
+from dracon import KeyPath
+```
+
+---
 
 ## Syntax
 
-KeyPaths use **dot (`.`) notation** as the primary separator, with special characters for root, parent navigation, and pattern matching:
+| Element | Syntax | Meaning |
+|---------|--------|---------|
+| Separator | `.` | Descend one level |
+| Root | `/` | Absolute path from the document root |
+| Parent | `..` | Go up one level (two dots) |
+| Current | `.` | Relative (single dot at start of a segment) |
+| Escape dot | `\.` | Literal dot in a key name |
+| Escape slash | `\/` | Literal slash in a key name |
+| Single wildcard | `*` | Match any one segment |
+| Multi wildcard | `**` | Match any number of segments (zero or more) |
 
-- **Segment Separator (`.`):** Separates keys in mappings or indices in sequences.
-  - _Example:_ `database.host`, `users.0.name`
-- **Absolute Root (`/`):** When used _only_ at the **beginning** of a path, it indicates the path starts from the absolute root of the configuration document being processed. It is **not** used as a separator between segments.
-  - _Example:_ `/app/name` (Incorrect! Or rather, probably not what you meant: it's strictly equivalent to `/name`), `/app.name` (Correct), `/services.0.port` (Correct)
-- **Parent (`..`):** Navigates one level up in the hierarchy. Can be chained (`...` for two levels up, etc.). These are often resolved during path simplification (e.g., `a.b..c` becomes `a.c`).
-  - _Example:_ `config.database..timeout` (accesses `timeout` sibling of `database`)
-- **Current (`.`):** Represents the current level. Often used implicitly for relative paths in interpolation, e.g., `${@.sibling}` refers to a sibling key. A leading `.` like `.!include .sibling_file` would typically be resolved relative to the current node's location context (often the parent directory).
-- **Escaping (`\.`, `\/`):** Use a backslash (`\`) to escape literal dots (`.`) or slashes (`/`) _if they appear within a key name itself_. This is necessary to distinguish them from separators or the root indicator.
-  - _Example:_ `section\.with\.dots.value`, `a.path\/segment.key` (References keys named "section.with.dots" and "path/segment" respectively).
-- **Wildcards (for Matching Only):** Used primarily in patterns like `deferred_paths` in `DraconLoader` or potentially custom logic. Not used for direct value retrieval via `@`.
-  - `*`: Matches any _single_ segment name/index (e.g., `a.*.c` matches `a.b.c`).
-  - `**`: Matches _zero or more_ consecutive segments (e.g., `a.**.d` matches `a.d`, `a.b.d`, and `a.b.c.d`).
-  - Partial segment matching with `*` is also supported within patterns (e.g., `a.b*.c` matches `a.b.c` and `a.bcd.c`).
+---
 
-!!! warning "Separator is `.` not `/`"
-Remember that `/` denotes the absolute root. All subsequent levels in the path _must_ be separated by dots (`.`). `a/b/c` will actually simplify to `/c` ; when what you probably meant was `a.b.c`.
+## Examples
 
-## Usage in Dracon
+| Path | Meaning |
+|------|---------|
+| `/` | Document root |
+| `/db.host` | Absolute path to `db` -> `host` |
+| `db.host` | Relative path: `db` -> `host` |
+| `..sibling` | Go up one level, then into `sibling` |
+| `/servers.*.port` | `port` inside every item under `servers` |
+| `/**.name` | All `name` keys at any depth |
+| `my\.dotted\.key` | Single key named `my.dotted.key` |
 
-KeyPaths are the standard way to target nodes in various Dracon features:
+---
 
-1.  **Value References (`@` in `${...}`) and Node Copies (`&`):**
+## Path Simplification
 
-    - `${@/path.from.root}`: Absolute KeyPath, starting from the root of the **ENTIRE** constructed configuration document.
-    - `${@.sibling_key}`: Relative KeyPath (sibling).
-    - `${@..parent.key}`: Relative KeyPath (navigating up).
-    - `${&/key.subkey}`: Absolute KeyPath, starting from the root of the **CURRENT** configuration graph being processed.
-    - _Example:_ `${@/database.host}`, `${@.name}`, `${@..config.timeout}`, `${&/defaults.timeout * 2}` (copies the current value of `defaults.timeout` and multiplies it by 2).
-    - See [Interpolation Syntax](./interpolation_syntax.md).
+Paths are simplified automatically. `a.b..c` becomes `a.c` (go into `b`, then back up, then into `c`). `/a/b` becomes `/b` (root resets).
 
-2.  **Merge Targets (`<<...@target_path:`):**
+---
 
-    - `target_path` is a relative KeyPath from the mapping containing the merge key.
-    - _Example:_ `<<{+<}@database: *db_defaults` (merges into the `database` key).
-    - See [Merge Key Syntax](./merge_syntax.md).
+## Usage Across Dracon
 
-3.  **Deferred Paths (`DraconLoader(deferred_paths=...)`):**
+KeyPaths appear in several places:
 
-    - List of absolute KeyPath _patterns_ (supporting `*`, `**`) identifying nodes to defer automatically.
-    - _Example:_ `['/services.*.connection', '/external_apis/**']`
-    - See [Deferred Execution Guide](../guides/use-deferred.md).
+| Context | Example |
+|---------|---------|
+| `@` value references | `${@db.port}` |
+| Merge `@target` | `<<@database.settings: ...` |
+| `deferred_paths` | `DraconLoader(deferred_paths=["/model", "data.*"])` |
+| Include selectors | `!include file:config.yaml@database.host` |
+| `CompositionStack` | Layer scope, context targeting |
+| `-s` / `--select` flag | `dracon show config.yaml -s db.host` |
+| `--trace` flag | `dracon show config.yaml --trace db.port` |
 
-4.  **Include Sub-key Targeting (`!include source@target_path`):**
-    - `target_path` is a KeyPath within the `source` document.
-    - _Example:_ `!include file:settings.yaml@database.host` (loads only the host value).
-    - See [Include Syntax](./include_syntax.md).
+---
 
-## Internal Representation & Simplification
+## API
 
-While you typically interact with KeyPaths as strings, Dracon internally parses them into a list of segments and special tokens (like `ROOT`, `UP`). It performs simplification _before_ using them for lookups or matching, resolving `.` and `..` segments where possible (e.g., `a.b..c` simplifies to `a.c`, `/a/b` simplifies to `/b`). You generally don't need to worry about this unless debugging complex path issues.
+### Construction
+
+```python
+kp = KeyPath("/db.host")       # from string
+kp = KeyPath(["db", "host"])   # from parts list
+```
+
+### Navigation
+
+| Method | Description |
+|--------|-------------|
+| `kp.parent` | New KeyPath one level up |
+| `kp.down("child")` | Descend into child (mutates) |
+| `kp + "child"` | Descend into child (new copy) |
+| `kp.up()` | Go up one level (mutates) |
+| `kp.copy()` | Independent copy |
+| `kp.simplified()` | New simplified copy |
+| `kp.rootless()` | Remove leading `/` |
+
+### Resolution
+
+```python
+value = kp.get_obj(root_node)  # traverse and return the target value
+```
+
+Raises `AttributeError` or `KeyError` if the path does not exist. Wildcards are not supported in `get_obj` -- they are for pattern matching only.
+
+### Matching
+
+```python
+pattern = KeyPath("/servers.*.port")
+target = KeyPath("/servers.web.port")
+pattern.match(target)  # True
+```
