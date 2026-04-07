@@ -5,209 +5,191 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Documentation](https://img.shields.io/badge/docs-available-brightgreen.svg)](https://jdisset.github.io/dracon/)
 
-Dracon is a configuration system and CLI generator for Python, built on YAML. It's for projects that need flexible, explicit, and composable configs, without magic or friction.
+Dracon turns YAML configs into composable, type-safe Python objects. Define your schema as a Pydantic model, write config in YAML with includes and expressions, and get a validated CLI from the same model.
 
-### Why Dracon?
+## Why Dracon?
 
 Most config systems I've had the pleasure to deal with were either:
 
-- **Too simple** ("just a dict, argparse, and pain")
-- **Too magical** (opaque, sometimes bespoke frameworks that obscure what's actually in use), or
-- **Too rigid** (I have a lot of respect for Hydra, but often found myself fighting the "Proper Way" instead of getting work done).
+- **Too simple**: "just a dict, `argparse`, and pain"
+- **Too magical**: opaque frameworks that make it weirdly hard to tell what config you are actually running
+- **Too rigid**: powerful, but with a pretty strong idea of the Proper Way, and somehow you end up fighting the config system instead of getting work done
 
-I built Dracon to hit the "powerful but transparent" sweet spot, especially for
-modern ML and research codebases, where you need to juggle random YAML files
-coming from your packages, your local machine, and your users. Adding to that
-are environment variables, N layers of overrides, and boilerplate CLI argument
-parsing. Dracon gives you simple tools to catch all of these moving pieces and
-turn them into a structured, type safe, highly configurable system.
-Minimal ceremony, maximum efficiency.
+I built Dracon to hit the "powerful but transparent" middle ground. Especially in ML and research codebases, config tends to come from everywhere at once: package defaults, local files, environment variables, layered overrides, CLI flags, runtime values, and random YAML fragments living in places they probably shouldn't. Dracon gives you a small set of tools to catch all of that and turn it into something explicit, typed, declarative, highly composable and easy to work with.
 
-### Python Integration
-
-A single decorator turns any Pydantic model into a complete CLI application:
-
-```python
-@dracon_program(name="my-app")
-class Config(BaseModel):
-    learning_rate: float = 0.001
-    epochs: int = 100
-
-    def run(self):
-        train(self.learning_rate, self.epochs)
-
-# That's it. Now you have:
-Config.cli()                    # Full CLI with --help, config files, overrides
-Config.invoke("+config.yaml")   # Load config and run
-Config.from_config("cfg.yaml")  # Load config as validated instance
-```
-
-Turn YAML configs into reusable factory functions:
-
-```python
-create_model = make_callable("model.yaml", context_types=[ModelConfig])
-model1 = create_model(layers=3)
-model2 = create_model(layers=5)
-```
-
-### Key Features
-
-- **`@dracon_program` decorator**: Turn any Pydantic model into a CLI app with one line
-- **`make_callable`**: Transform YAML configs into reusable factory functions
-- **Layered config**: YAML with environment/CLI overrides, includes, variables, and Python expressions
-- **Auto-discovered config files**: Declare `ConfigFile('~/.tool/config.yaml')` or `ConfigFile('.tool.yaml', search_parents=True)` — auto-loaded as base layer, like `.gitconfig`
-- **Pydantic integration**: Type safety and validation out of the box
-- **Auto CLI generation**: Every field becomes a CLI flag, including nested ones
-- **Deferred execution**: Runtime injection of values not available at load time
-- **Composability**: Mix and match configs for experiments, environments, model variants
-
-#### Compose Your Configurations
-
-Merge configs from files, packages, or environment variables using `!include` and `<<{...}@path`. Manipulate configs with `!each` and `!if`.
-
-#### Generate CLIs Automatically
-
-Generate type-safe CLIs directly from Pydantic models. Override any field — even nested ones — via command line (`--nested.arg 42` or `--nested.arg=42`), files (`+config.yaml`, `+config.yaml@sub.key`), or context variables (`++var=value`). Arguments can be freely mixed in any order. Help is auto-generated:
-
-<img
-  src="https://raw.githubusercontent.com/jdisset/dracon/main/docs/assets/cli_help.png"
-  alt="CLI help screenshot"
-    width="650"
-    height="auto"
-    />
-
-#### Add Expressions
-
-Embed Python expressions (`${...}`), reference other keys (`@path`), or compute values at runtime (`$(...)`). Define variables with `!define` and `!set_default`, enforce contracts with `!require` and `!assert`.
-
-#### Define Configuration Once
-
-Use Pydantic models for type-safe configs (`!MyModel`). Dracon handles YAML to Pydantic conversion automatically.
-
-## Quick Start: CLI with `@dracon_program`
-
-The `@dracon_program` decorator is the easiest way to turn a Pydantic model into a full CLI application:
-
-```python
-from pydantic import BaseModel
-from typing import Annotated, Literal
-from dracon import dracon_program, Arg, DeferredNode
-
-class DatabaseConfig(BaseModel):
-    host: str = 'localhost'
-    port: int = 5432
-    username: str = "admin"
-    password: str = ""
-
-@dracon_program(
-    name="my-app",
-    description="My application with database support",
-    context_types=[DatabaseConfig],  # Make DatabaseConfig available for !Tags
-)
-class AppConfig(BaseModel):
-    database: DatabaseConfig
-    environment: Annotated[Literal['dev', 'prod'], Arg(short='e', help="Deployment env")]
-    workers: Annotated[int, Arg(help="Number of workers")] = 4
-    output_path: DeferredNode[str] = "/tmp/output"  # Resolved at runtime
-
-    def run(self):
-        """Called by .invoke() after config is loaded."""
-        print(f"Running in {self.environment} with {self.workers} workers")
-        # Construct deferred value with runtime context
-        final_output = self.output_path.construct(
-            context={'run_id': f"{self.environment}_{self.workers}"}
-        )
-        print(f"Output: {final_output}")
-        return self.workers
-
-# Multiple ways to use:
-if __name__ == "__main__":
-    AppConfig.cli()  # Run as CLI (parses sys.argv)
-```
-
-**Config file (`config.yaml`):**
+## What It Looks Like
 
 ```yaml
+# config.yaml
+log_level: ${getenv('LOG_LEVEL', 'INFO')}
+workers: 2
 database:
-  host: "db.${@/environment}.local"
+  host: db.${@/environment}.local
   port: 5432
-  username: !include env:DB_USER
   password: !include env:DB_PASS
-
-environment: prod
-workers: 8
-output_path: "/data/${run_id}/output"
 ```
 
-**Running:**
+```python
+from typing import Annotated
+
+from pydantic import BaseModel
+
+from dracon import Arg, dracon_program
+
+
+class DatabaseConfig(BaseModel):
+    host: str
+    port: int
+    password: str
+
+
+@dracon_program(name="myapp")
+class App(BaseModel):
+    environment: Annotated[str, Arg(short="e")]
+    log_level: str = "INFO"
+    workers: int = 1
+    database: DatabaseConfig
+
+
+if __name__ == "__main__":
+    App.cli()
+```
 
 ```bash
-# Run with config file
-$ python main.py +config.yaml
-
-# Override specific values (space or equals syntax)
-$ python main.py +config.yaml -e dev --workers 2
-$ python main.py +config.yaml -e dev --workers=2
-
-# Layer multiple config files (later overrides earlier)
-$ python main.py +base.yaml +prod.yaml
-
-# Pass context variables for ${...} interpolation
-$ python main.py +config.yaml ++run_id my_experiment
-$ python main.py +config.yaml ++run_id=my_experiment
-
-# Override any nested config path
-$ python main.py +config.yaml --database.host=localhost --database.port=9999
-
-# All argument types can be freely mixed in any order
-$ python main.py action +base.yaml --workers 4 +overrides.yaml ++run_id test -e prod
-
-# Load config programmatically
-result = AppConfig.invoke("+config.yaml")           # Load, validate, run()
-instance = AppConfig.from_config("config.yaml")     # Load and validate only
+python app.py +config.yaml -e prod --workers 8
 ```
 
-## Alternative: `make_program`
+## How It Works
 
-For more control over the CLI program, use `make_program` directly:
+Dracon processes configuration in three phases:
 
-```python
-from dracon import make_program
+- **Compose**: parse YAML, resolve includes, apply merges, run instructions like `!define`, `!if`, and `!each`
+- **Construct**: turn the resulting node tree into Python objects and validate typed models with Pydantic
+- **Resolve**: evaluate lazy `${...}` expressions when needed, and construct deferred subtrees later if they depend on runtime context
 
-program = make_program(AppConfig, name="my-app")
-config, raw_args = program.parse_args()
-config.run()
+That separation is a big part of the point. You can inspect the composed config before construction with `dracon show`, instead of treating config loading as one opaque step.
+
+## Quick Start
+
+Install:
+
+```bash
+pip install dracon
 ```
 
-## Reusable Config Functions: `make_callable`
+Write two config files:
 
-Turn a YAML config into a reusable callable:
+```yaml
+# base.yaml
+environment: dev
+workers: 1
+database:
+  host: localhost
+  port: 5432
+  <<: !include file:$DIR/db.yaml
+```
+
+```yaml
+# prod.yaml
+environment: prod
+workers: 4
+database:
+  host: db.prod.internal
+```
+
+Inspect the merged result before writing any Python:
+
+```bash
+dracon show base.yaml prod.yaml
+```
+
+Then wire it to a Pydantic model with `@dracon_program` and run:
+
+```bash
+python app.py +base.yaml +prod.yaml --workers 8
+```
+
+## What You Get
+
+- Layered configs with `!include`, merge keys, selectors, and optional overlays
+- Standard CLIs generated from Pydantic models, with nested overrides and config-file layering
+- YAML callables with `!fn`, `!fn:path`, and `!pipe`
+- Runtime deferral with `!deferred` and `Resolvable[T]`
+- `make_callable()` for turning YAML into reusable Python factories
+- `dracon show` and provenance tracing for debugging composition
+
+## Patterns Worth Knowing
+
+### Dynamic Skeletons
+
+One entry config can pick datasets and presets dynamically, instead of duplicating the same experiment config over and over:
+
+```yaml
+!set_default dataset_file: "datasets/genomics.yaml"
+!set_default preset: "regression"
+
+dataset: !include file:$DIR/${dataset_file}
+<<{+>}: !include file:$DIR/presets/${preset}.yaml
+```
+
+That is the basic trick behind turning `M x N` near-duplicate configs into `1 + M + N`.
+
+### Vocabulary Files
+
+You can define reusable YAML tags in one file and import them into another:
+
+```yaml
+# mylib/vocabulary.yaml
+!define Service: !fn
+  !require name: "service name"
+  !set_default port: 8080
+  url: "https://${name}.internal:${port}"
+```
+
+```yaml
+# config.yaml
+<<(<): !include pkg:mylib:vocabulary.yaml
+
+api: !Service { name: api, port: 443 }
+worker: !Service { name: worker }
+```
+
+So you can build a shared config vocabulary without needing a bunch of Python-side glue.
+
+### Late-Bound Runtime Pieces
+
+Some parts of config only make sense once the program is already running. `!deferred` lets those parts wait:
+
+```yaml
+reporting: !deferred
+  output_dir: "/runs/${run_id}"
+  files:
+    !each(name) ${logger_names}:
+      - name: ${name}
+        path: "/runs/${run_id}/${name}.json"
+```
 
 ```python
-from dracon import make_callable
-
-# Create a callable from a config file
-create_model = make_callable(
-    "model_config.yaml",
-    context_types=[ModelConfig],
+reporting = config["reporting"].construct(
+    context={"run_id": run_id, "logger_names": ["metrics", "artifacts"]},
 )
-
-# Call with different parameters
-model1 = create_model(learning_rate=0.01)
-model2 = create_model(learning_rate=0.001)
 ```
 
-## Where to Go Next?
+So runtime-only values can still live in config instead of being reimplemented by hand in Python.
 
-- **[Quickstart](https://jdisset.github.io/dracon/quickstart/)**: Zero to working in 90 seconds
-- **[Tutorials](https://jdisset.github.io/dracon/tutorials/01-first-config/)**: Five progressive tutorials, from first config to late binding
-- **[How-To Guides](https://jdisset.github.io/dracon/guides/)**: Task-focused guides for layering, CLI patterns, YAML functions, debugging
-- **[Patterns](https://jdisset.github.io/dracon/patterns/)**: Real-world composition patterns (dynamic skeletons, config templates, sweep generation)
-- **[Reference](https://jdisset.github.io/dracon/reference/)**: Syntax and API details
+The docs go deeper on these in the [Patterns](https://jdisset.github.io/dracon/patterns/) section.
+
+## Documentation
+
+- [Quickstart](https://jdisset.github.io/dracon/quickstart/)
+- [Tutorials](https://jdisset.github.io/dracon/tutorials/01-first-config/)
+- [Guides](https://jdisset.github.io/dracon/guides/)
+- [Patterns](https://jdisset.github.io/dracon/patterns/)
+- [Reference](https://jdisset.github.io/dracon/reference/)
 
 ## Acknowledgements
 
-- [Pydantic](https://docs.pydantic.dev/) for data validation and settings management
-- [ruamel.yaml](https://yaml.dev/doc/ruamel.yaml/) for YAML parsing and serialization
-- [asteval](https://lmfit.github.io/asteval/) for safe expression evaluation
-- [Diataxis Framework](https://diataxis.fr/) for documentation structure inspiration
+- [Pydantic](https://docs.pydantic.dev/)
+- [ruamel.yaml](https://yaml.dev/doc/ruamel.yaml/)
+- [asteval](https://lmfit.github.io/asteval/)
+- [Diataxis Framework](https://diataxis.fr/)
