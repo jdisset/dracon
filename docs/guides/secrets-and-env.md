@@ -78,9 +78,10 @@ endpoints:
 
 If `api_key` is not in the context when the config is composed, Dracon raises a `CompositionError` with the hint message. The caller can provide it via:
 
-- Environment: `++api_key` on the CLI reads from context
-- CLI: `++api_key=sk-abc123`
+- CLI context variable: `++api_key=sk-abc123` (injects into `${...}` expressions)
+- Shell environment via CLI: `++api_key="$API_KEY"` (the shell expands `$API_KEY` before dracon sees it)
 - Python: `dracon.load('config.yaml', context={'api_key': 'sk-abc123'})`
+- Or use `!include env:API_KEY` / `${getenv('API_KEY')}` in the YAML itself instead of `!require`
 
 ## .gitignore patterns
 

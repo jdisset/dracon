@@ -155,7 +155,7 @@ configs:
 
 - **Automatic output directories**: Hydra creates timestamped output dirs. In Dracon, set `output_dir: "${now()}/"` or handle it in your application code.
 - **`~key` deletion**: Hydra lets you delete keys with the tilde prefix. Dracon uses `!unset` or merge strategies instead.
-- **Bayesian sweepers / Ax integration**: Hydra has plugins for Bayesian optimization. For Dracon, use [Broodmon](https://github.com/weiss/broodmon) for experiment management and sweeps.
+- **Bayesian sweepers / Ax integration**: Hydra has plugins for Bayesian optimization. For Dracon, use [Broodmon](https://github.com/jdisset/broodmon) for experiment management and sweeps.
 - **Tab completion for config groups**: Hydra auto-completes config group names. Dracon's CLI completions are model-aware but don't know about arbitrary config files.
 
 ## Further reading

@@ -213,4 +213,4 @@ Dracon generates configs. It doesn't run them. You can inspect the generated swe
 dracon show sweep.yaml -r
 ```
 
-For running the generated jobs in parallel, you can pipe the output to whatever executor you prefer, or use [Broodmon](https://github.com/weiss-gal/broodmon) if you want a Dracon-native solution.
+For running the generated jobs in parallel, you can pipe the output to whatever executor you prefer, or use [Broodmon](https://github.com/jdisset/broodmon) if you want a Dracon-native solution.

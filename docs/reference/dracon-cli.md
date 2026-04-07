@@ -17,7 +17,7 @@ Load one or more Dracon config files, apply composition (merging, includes, inst
 The first positional argument determines the mode:
 
 - **Raw YAML mode** (default): when the first argument ends in `.yaml`/`.yml` or starts with `+`
-- **Program-aware mode**: when the first argument is recognized as a `@dracon_program` name (reserved for future use)
+- **Program-aware mode**: when the first argument is recognized as a `@dracon_program` name. Shows model defaults, auto-discovered config files, and supports `--full` and `--schema`.
 
 ### Options
 
@@ -30,8 +30,8 @@ The first positional argument determines the mode:
 | `-j`, `--json` | Output as JSON. Implies `-c`. |
 | `--str-output` | Output raw `str()` instead of YAML. |
 | `-f PATH`, `--file PATH` | Config file (legacy form; prefer positional args). |
-| `--full` | Reserved. |
-| `--schema` | Reserved. |
+| `--full` | Exhaustive config template with all nested defaults expanded. Program-aware mode only. |
+| `--schema` | Emit JSON Schema for a program's model. Program-aware mode only. |
 | `--show-vars` | Print table of all defined variables to stderr. |
 | `--trace PATH` | Show composition provenance chain for a dotted keypath. |
 | `--trace-all` | Show provenance for all values. |
@@ -144,6 +144,6 @@ output = printer.run()
 | Variable | Description |
 |----------|-------------|
 | `DRACON_TRACE` | Set to `1`, `true`, or `yes` to enable composition tracing globally (same as `trace=True`). |
-| `DRACON_SHOW_VARS` | Reserved for future use. |
+| `DRACON_SHOW_VARS` | Set to `1` to print a table of all defined variables and their sources to stderr. |
 | `ENABLE_FTRACE` | Enable internal function tracing for debugging Dracon itself. |
 | `ENABLE_SER_DEBUG` | Enable serialization debugging (deepcopy diagnostics). |

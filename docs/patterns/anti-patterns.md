@@ -216,6 +216,6 @@ server:
   host: localhost
 ```
 
-The user overrides directly: `++server.port=9090`. Dracon's CLI path syntax handles nested keys natively. No indirection needed.
+The user overrides directly: `--server.port=9090`. Dracon's CLI path syntax handles nested keys natively. No indirection needed.
 
 Use `!set_default` when the variable is referenced in multiple places (so changing it once changes all of them), or when it appears in dynamic expressions like `!include` paths or `!if` conditions. Don't use it just to give a config leaf a shorter name.

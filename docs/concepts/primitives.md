@@ -43,15 +43,16 @@ Generate a list of experiments, but only include ones that meet a condition:
 
 ```yaml
 !define num_layers: 4
+!define configs: [[64, 128], [128, 256], [256, 512]]
 
 experiments:
-  !each layer_sizes: [[64, 128], [128, 256], [256, 512]]
-  !if ${len(layer_sizes) <= num_layers}:
-    name: exp_${layer_sizes[0]}
-    layers: ${layer_sizes}
+  !each(layer_sizes) ${configs}:
+    !if ${len(layer_sizes) <= num_layers}:
+      name: exp_${layer_sizes[0]}
+      layers: ${layer_sizes}
 ```
 
-`!define` sets a variable. `!each` iterates over a list, producing one child node per item. `!if` filters based on an expression that can reference both the `!each` variable and the `!define` variable.
+`!define` sets a variable. `!each(var) ${iterable}:` iterates over a list, binding each item to `var`. `!if` filters based on an expression that can reference both the `!each` variable and the `!define` variable.
 
 ### 2. `!fn` + `!include` + `<<:` -- parameterized templates
 
@@ -119,7 +120,7 @@ A config that adapts at runtime:
 
   cache:
     backend: redis
-    host: $@database.host  # reference the database host
+    host: ${@database.host}  # reference the database host
 ```
 
 The `!deferred` tag pauses composition until `.construct(context={"runtime_env": "production"})` is called. At that point, `${...}` expressions evaluate with the runtime context, and `@path` references resolve against the constructed tree.

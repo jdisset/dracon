@@ -26,7 +26,7 @@ class Config(BaseModel):
 | `short` | `str` | `None` | Short flag (e.g. `"n"` for `-n`). |
 | `long` | `str` | `None` | Long flag (e.g. `"name"` for `--name`). Auto-generated from field name if not set. |
 | `positional` | `bool` | `False` | Treat as a positional argument instead of `--flag`. |
-| `is_file` | `bool` | `False` | Hint that the value is a file path (affects help formatting). |
+| `is_file` | `bool` | `False` | Treat the value as a config file path: the file is loaded and composed as YAML, then merged into the field. Supports selectors (`model.yaml@encoder`). |
 | `is_flag` | `bool` | `None` | Force flag behavior (no value). `None` = auto-detect from `bool` type. |
 | `action` | `Callable` | `None` | Callback `(program, value) -> Any` triggered when the flag is parsed. |
 | `default_str` | `str` | `None` | Override the default value display in help text. |

@@ -118,7 +118,7 @@ Lazy resolution also means that circular references between fields are fine, as 
 
 The three-phase design is not accidental. Each boundary gives you something:
 
-**Composition is pure data transformation.** No Python imports happen, no side effects, no code execution (beyond `${...}` evaluation for `!define` values). This means you can compose configs from untrusted sources and inspect the result before constructing anything.
+**Composition is data transformation with controlled I/O.** No Python imports happen, no arbitrary code execution (beyond `${...}` evaluation for `!define` values). The only I/O is include resolution: `!include file:`, `env:`, `pkg:`, and `cascade:` read from the filesystem or environment. But the output is still a deterministic node tree that you can inspect before constructing anything.
 
 **You can inspect between phases.** The `CompositionResult` is a snapshot of the fully-merged, instruction-processed config tree. The `dracon show` CLI command uses this to display configs without constructing them. You can also use the composition trace to see exactly where each value came from.
 

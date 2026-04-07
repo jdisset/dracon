@@ -134,7 +134,7 @@ import dracon
 config = dracon.load("start.yaml")
 
 run_id = str(uuid.uuid4())[:8]
-experiment_tracker = init_wandb(project=config["loggers"])  # your init code
+experiment_tracker = init_wandb(project=config["runname"])  # your init code
 
 # construct the deferred loggers with runtime objects
 loggers = config["loggers"].construct(context={
