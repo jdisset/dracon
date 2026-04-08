@@ -868,3 +868,94 @@ class TestFnFileDollarDir:
         config = loader.load(str(tmp_path / "main.yaml"))
         config.resolve_all_lazy()
         assert config['svc']['addr'] == 'web:8080'
+
+
+# --- Bug: type-valued !define alias not usable as YAML tag ---
+
+
+class TestDefineTypeAlias:
+    """!define that resolves to a type should be usable as a YAML tag."""
+
+    def test_define_type_alias_as_tag(self):
+        """!define Model: ${ResNet} then !Model { ... } should construct ResNet."""
+
+        class ResNet(BaseModel):
+            layers: int
+
+        yaml = """
+        !define Model: ${ResNet}
+        model: !Model { layers: 12 }
+        """
+        config = _loads(yaml, ResNet=ResNet)
+        assert isinstance(config['model'], ResNet)
+        assert config['model'].layers == 12
+
+    def test_define_type_alias_via_context(self):
+        """Type alias from loader context should also work."""
+
+        class MLP(BaseModel):
+            hidden: int
+
+        yaml = """
+        !define Net: ${MLP}
+        result: !Net { hidden: 256 }
+        """
+        config = _loads(yaml, MLP=MLP)
+        assert isinstance(config['result'], MLP)
+        assert config['result'].hidden == 256
+
+
+# --- Bug: propagated callable not visible inside imported template body ---
+
+
+class TestPropagatedCallableInTemplate:
+    """Callables propagated via <<(<): should be visible inside imported template bodies."""
+
+    def test_propagated_callable_tag_in_fn_body(self, tmp_path):
+        """Callable from <<(<): include visible as tag inside another callable's body."""
+        (tmp_path / "infra.yaml").write_text(
+            "!define Service: !fn\n"
+            "  !require name: 'service name'\n"
+            "  !set_default port: 8080\n"
+            "  !fn :\n"
+            "    url: https://${name}.internal:${port}\n"
+        )
+        (tmp_path / "ml.yaml").write_text(
+            "<<(<): !include file:" + str(tmp_path / "infra.yaml") + "\n"
+            "!define Experiment: !fn\n"
+            "  !require name: 'experiment'\n"
+            "  !fn :\n"
+            "    api: !Service { name: '${name}-api', port: 443 }\n"
+        )
+        (tmp_path / "config.yaml").write_text(
+            "<<(<): !include file:" + str(tmp_path / "ml.yaml") + "\n"
+            "run: !Experiment { name: genomics-v2 }\n"
+        )
+        loader = DraconLoader(enable_interpolation=True)
+        config = loader.load(str(tmp_path / "config.yaml"))
+        config.resolve_all_lazy()
+        assert config['run']['api']['url'] == 'https://genomics-v2-api.internal:443'
+
+    def test_propagated_callable_two_levels(self, tmp_path):
+        """Two-level propagation: A -> B -> C, C uses A inside B's body."""
+        (tmp_path / "base.yaml").write_text(
+            "!define Tag: !fn\n"
+            "  !require val: 'value'\n"
+            "  !fn :\n"
+            "    tagged: ${val}\n"
+        )
+        (tmp_path / "mid.yaml").write_text(
+            "<<(<): !include file:" + str(tmp_path / "base.yaml") + "\n"
+            "!define Wrap: !fn\n"
+            "  !require x: 'wrapped'\n"
+            "  !fn :\n"
+            "    inner: !Tag { val: '${x}' }\n"
+        )
+        (tmp_path / "top.yaml").write_text(
+            "<<(<): !include file:" + str(tmp_path / "mid.yaml") + "\n"
+            "result: !Wrap { x: hello }\n"
+        )
+        loader = DraconLoader(enable_interpolation=True)
+        config = loader.load(str(tmp_path / "top.yaml"))
+        config.resolve_all_lazy()
+        assert config['result']['inner']['tagged'] == 'hello'

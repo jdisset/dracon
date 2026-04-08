@@ -280,6 +280,10 @@ class Draconstructor(Constructor):
 
         self.localns.update(DEFAULT_TYPES)
         self.localns.update(get_all_types(current_loader_context))
+        # surface type-valued !define aliases from node.context so resolve_type() can find them
+        node_ctx = getattr(node, 'context', None)
+        if node_ctx:
+            self.localns.update(get_all_types(node_ctx))
 
         is_root = False
         if self._depth == 0:
@@ -326,17 +330,17 @@ class Draconstructor(Constructor):
                         kwargs = resolve_all_lazy(kwargs)
                         if not isinstance(kwargs, dict):
                             kwargs = dict(kwargs)
-                        return callable_obj(**kwargs)
+                        return self._invoke_callable(callable_obj, kwargs, current_loader_context, node)
                     elif isinstance(node, DraconScalarNode):
                         reset_tag(node)
                         arg = self.base_construct_object(node, deep=True)
                         if isinstance(arg, LazyInterpolable):
                             arg = resolve_all_lazy(arg)
                         if arg is None or arg == '':
-                            return callable_obj()
+                            return self._invoke_callable(callable_obj, {}, current_loader_context, node)
                         return callable_obj(arg)
                     else:
-                        return callable_obj()
+                        return self._invoke_callable(callable_obj, {}, current_loader_context, node)
 
             if target_type is None:
                 tag_type = resolve_type(tag, localns=self.localns)
@@ -392,6 +396,16 @@ class Draconstructor(Constructor):
 
         finally:
             self._depth -= 1
+
+    def _invoke_callable(self, callable_obj, kwargs, loader_context, node):
+        """Invoke a callable, passing invocation context for DraconCallable."""
+        if isinstance(callable_obj, DraconCallable):
+            inv_ctx = dict(loader_context)
+            node_ctx = getattr(node, 'context', None)
+            if node_ctx:
+                inv_ctx.update(node_ctx)
+            return callable_obj.invoke(kwargs, invocation_context=inv_ctx)
+        return callable_obj(**kwargs)
 
     def _resolve_fn_target(self, func_path, loader_context, node):
         """Resolve a function for !fn:path -- context first, then import."""

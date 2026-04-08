@@ -30,7 +30,19 @@ class DraconCallable:
         self._cached_params = None
         self._has_return = has_return
 
+    def invoke(self, kwargs, invocation_context=None):
+        """Invoke with explicit invocation context from the calling scope.
+
+        invocation_context, when provided, is merged into the loader copy
+        before file_context and kwargs, so that propagated callables/types
+        from the invocation site are visible during nested tag resolution.
+        """
+        return self._run(kwargs, invocation_context=invocation_context)
+
     def __call__(self, **kwargs):
+        return self._run(kwargs)
+
+    def _run(self, kwargs, invocation_context=None):
         from dracon.composer import CompositionResult
         from dracon.diagnostics import CompositionError
         from dracon.lazy import LazyInterpolable, resolve_all_lazy
@@ -46,7 +58,10 @@ class DraconCallable:
         try:
             node = deepcopy(self._template_node)
             loader_copy = self._loader.copy()
-            # file_context first (DIR, FILE_PATH, etc.), then kwargs override
+            # invocation context first (propagated callables from the calling scope)
+            if invocation_context:
+                loader_copy.update_context(invocation_context)
+            # file_context next (DIR, FILE_PATH, etc.), then kwargs override
             ctx = {**self._file_context, **kwargs} if self._file_context else kwargs
             loader_copy.update_context(ctx)
             result = loader_copy.load_composition_result(CompositionResult(root=node))
