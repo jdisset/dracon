@@ -874,6 +874,10 @@ class If(Instruction):
             eval_context = merged(
                 key_node.context or {}, loader.context or {}, cached_merge_key('{<+}')
             )
+            # update __scope__ to reflect the fully merged context
+            from dracon.symbol_table import SymbolTable
+            if isinstance(eval_context, SymbolTable):
+                eval_context['__scope__'] = eval_context
             result = evaluate_expression(
                 key_node.value,
                 path,
@@ -994,6 +998,10 @@ class Assert(Instruction):
             eval_context = merged(
                 key_node.context or {}, loader.context or {}, cached_merge_key('{<+}')
             )
+            # update __scope__ to reflect the fully merged context
+            from dracon.symbol_table import SymbolTable
+            if isinstance(eval_context, SymbolTable):
+                eval_context['__scope__'] = eval_context
             result = evaluate_expression(
                 key_node.value,
                 current_path=path,

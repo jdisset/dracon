@@ -64,5 +64,5 @@ from dracon.symbols import (
     CallableSymbol,
     auto_symbol,
 )
-from dracon.symbol_table import SymbolEntry, SymbolTable, ScopeProxy, render_symbols_text, render_symbols_json
+from dracon.symbol_table import SymbolEntry, SymbolTable
 from dracon.resolution import resolve_symbol, resolve_tag_target, is_type_symbol, is_callable_symbol

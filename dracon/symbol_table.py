@@ -40,6 +40,7 @@ class SymbolTable(MutableMapping):
     """
 
     __slots__ = ('_entries', '_soft_keys', '_parent', '_accessed_keys', '_defined_var_keys', '_suspend_tracking')
+    __dracon_no_merge__ = True
 
     def __init__(self, parent: SymbolTable | None = None):
         self._entries: dict[str, SymbolEntry] = {}
@@ -237,59 +238,22 @@ class SymbolTable(MutableMapping):
     def __deepcopy__(self, memo: Any) -> SymbolTable:
         return self.copy()
 
+    # ── rendering API ────────────────────────────────────────────────────
+
+    def describe(self, name: str | None = None) -> str:
+        """Human-readable description. Single symbol or full table."""
+        if name is not None:
+            return _describe_one(self, name)
+        return _describe_all(self)
+
+    def to_json(self, kind: SymbolKind | None = None) -> dict:
+        """Structured dict for JSON serialization. Optionally filter by kind."""
+        return _to_json_dict(self, kind)
+
     def __repr__(self) -> str:
         n = len(self._entries)
         parent = f", parent={len(self._parent._entries)}entries" if self._parent else ""
         return f"SymbolTable({n} entries{parent})"
-
-
-# ── scope proxy (for __scope__ in interpolation) ─────────────────────────────
-
-
-class ScopeProxy:
-    """Lightweight proxy exposing the SymbolTable query API for interpolation.
-
-    NOT a Mapping, so merge code won't try to deep-merge it. Works with
-    SymbolTable or plain dict contexts. Delegates names/has/interface/kinds
-    to the underlying context.
-    """
-    __slots__ = ('_table', '_cached_tbl')
-
-    def __init__(self, table: SymbolTable | dict):
-        self._table = table
-        self._cached_tbl: SymbolTable | None = None
-
-    def _as_symbol_table(self) -> SymbolTable:
-        if isinstance(self._table, SymbolTable):
-            return self._table
-        # cache the wrapped SymbolTable for repeated calls
-        if self._cached_tbl is None:
-            tbl = SymbolTable()
-            tbl.update(self._table)
-            self._cached_tbl = tbl
-        return self._cached_tbl
-
-    def names(self, kind: SymbolKind | None = None) -> list[str]:
-        tbl = self._as_symbol_table()
-        return tbl.names(kind=kind)
-
-    def has(self, name: str) -> bool:
-        return name in self._table
-
-    def interface(self, name: str) -> InterfaceSpec | None:
-        tbl = self._as_symbol_table()
-        return tbl.interface(name)
-
-    def kinds(self) -> dict[str, SymbolKind]:
-        tbl = self._as_symbol_table()
-        return tbl.kinds()
-
-    def exported(self) -> SymbolTable:
-        tbl = self._as_symbol_table()
-        return tbl.exported()
-
-    def __repr__(self) -> str:
-        return f"ScopeProxy({self._table!r})"
 
 
 # ── rendering helpers ────────────────────────────────────────────────────────
@@ -333,63 +297,32 @@ def _source_str(iface: InterfaceSpec) -> str:
     return ""
 
 
-def render_symbols_text(table: SymbolTable) -> str:
-    """Human-readable text listing of symbols in the table."""
+def _describe_one(table: SymbolTable, name: str) -> str:
+    """Describe a single symbol."""
+    sym = table.lookup_symbol(name)
+    if sym is None:
+        return ""
+    iface = sym.interface()
+    kind = iface.kind.value
+    sig = _param_sig(iface)
+    source = _source_str(iface)
+    if sig:
+        label = f"!{name}({sig})" if kind in ("template", "type") else f"{name}({sig})"
+    else:
+        label = f"!{name}" if kind in ("template", "type") else name
+    return f"{label:<40} {kind:<12} {source}".rstrip()
+
+
+def _describe_all(table: SymbolTable) -> str:
+    """Human-readable text listing of all user symbols."""
     lines = []
     for name in sorted(table):
         if not _is_user_symbol(name):
             continue
-        sym = table.lookup_symbol(name)
-        if sym is None:
-            continue
-        iface = sym.interface()
-        kind = iface.kind.value
-        sig = _param_sig(iface)
-        source = _source_str(iface)
-        if sig:
-            label = f"!{name}({sig})" if kind in ("template", "type") else f"{name}({sig})"
-        else:
-            label = f"!{name}" if kind in ("template", "type") else name
-        lines.append(f"{label:<40} {kind:<12} {source}")
+        line = _describe_one(table, name)
+        if line:
+            lines.append(line)
     return "\n".join(lines)
-
-
-def render_symbols_json(table: SymbolTable) -> str:
-    """Stable JSON output of symbols for tooling."""
-    data = {}
-    for name in sorted(table):
-        if not _is_user_symbol(name):
-            continue
-        sym = table.lookup_symbol(name)
-        if sym is None:
-            continue
-        iface = sym.interface()
-        entry_data: dict[str, Any] = {"kind": iface.kind.value}
-        if iface.params:
-            entry_data["params"] = [
-                {
-                    "name": p.name,
-                    "required": p.required,
-                    **({"default": _json_safe(p.default)} if p.default is not MISSING else {}),
-                }
-                for p in iface.params
-            ]
-        else:
-            entry_data["params"] = []
-        if iface.contracts:
-            entry_data["contracts"] = [
-                {"kind": c.kind, "name": c.name, **({"message": c.message} if c.message else {})}
-                for c in iface.contracts
-            ]
-        if iface.source and iface.source.file_path:
-            src: dict[str, Any] = {"file": iface.source.file_path}
-            if iface.source.line:
-                src["line"] = iface.source.line
-            entry_data["source"] = src
-        if iface.docs:
-            entry_data["docs"] = iface.docs
-        data[name] = entry_data
-    return json.dumps(data, indent=2, sort_keys=True, default=str)
 
 
 def _json_safe(val: Any) -> Any:
@@ -399,3 +332,48 @@ def _json_safe(val: Any) -> Any:
     if isinstance(val, (str, int, float, bool, type(None))):
         return val
     return str(val)
+
+
+def _symbol_to_json_entry(sym, iface) -> dict[str, Any]:
+    """Build a JSON-safe dict for a single symbol's interface."""
+    entry_data: dict[str, Any] = {"kind": iface.kind.value}
+    if iface.params:
+        entry_data["params"] = [
+            {
+                "name": p.name,
+                "required": p.required,
+                **({"default": _json_safe(p.default)} if p.default is not MISSING else {}),
+            }
+            for p in iface.params
+        ]
+    else:
+        entry_data["params"] = []
+    if iface.contracts:
+        entry_data["contracts"] = [
+            {"kind": c.kind, "name": c.name, **({"message": c.message} if c.message else {})}
+            for c in iface.contracts
+        ]
+    if iface.source and iface.source.file_path:
+        src: dict[str, Any] = {"file": iface.source.file_path}
+        if iface.source.line:
+            src["line"] = iface.source.line
+        entry_data["source"] = src
+    if iface.docs:
+        entry_data["docs"] = iface.docs
+    return entry_data
+
+
+def _to_json_dict(table: SymbolTable, kind: SymbolKind | None = None) -> dict:
+    """Structured dict of symbols for JSON serialization."""
+    data = {}
+    for name in sorted(table):
+        if not _is_user_symbol(name):
+            continue
+        sym = table.lookup_symbol(name)
+        if sym is None:
+            continue
+        iface = sym.interface()
+        if kind is not None and iface.kind != kind:
+            continue
+        data[name] = _symbol_to_json_entry(sym, iface)
+    return data

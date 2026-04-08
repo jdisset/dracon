@@ -157,10 +157,9 @@ has_beta: ${{__scope__.has('beta')}}
 
 
 class TestSymbolsRendering:
-    """render_symbols_text() and render_symbols_json() from symbol_table."""
+    """SymbolTable.describe() and .to_json() methods."""
 
     def test_render_text_basic(self):
-        from dracon.symbol_table import render_symbols_text
         t = SymbolTable()
 
         def svc(name, port=8080):
@@ -168,42 +167,36 @@ class TestSymbolsRendering:
 
         t.define(SymbolEntry(name="Service", symbol=CallableSymbol(svc, name="Service")))
         t.define(SymbolEntry(name="count", symbol=ValueSymbol(42, name="count")))
-        text = render_symbols_text(t)
+        text = t.describe()
         assert "Service" in text
         assert "count" in text
 
     def test_render_json_basic(self):
-        from dracon.symbol_table import render_symbols_json
         t = SymbolTable()
 
         def svc(name, port=8080):
             pass
 
         t.define(SymbolEntry(name="Service", symbol=CallableSymbol(svc, name="Service")))
-        data = render_symbols_json(t)
-        parsed = json.loads(data)
-        assert "Service" in parsed
-        assert parsed["Service"]["kind"] == "callable"
-        assert any(p["name"] == "name" for p in parsed["Service"]["params"])
+        data = t.to_json()
+        assert "Service" in data
+        assert data["Service"]["kind"] == "callable"
+        assert any(p["name"] == "name" for p in data["Service"]["params"])
 
     def test_render_json_stability(self):
         """JSON output is deterministic (sorted keys)."""
-        from dracon.symbol_table import render_symbols_json
         t = SymbolTable()
         t.define(SymbolEntry(name="b", symbol=ValueSymbol(2, name="b")))
         t.define(SymbolEntry(name="a", symbol=ValueSymbol(1, name="a")))
-        j1 = render_symbols_json(t)
-        j2 = render_symbols_json(t)
+        j1 = t.to_json()
+        j2 = t.to_json()
         assert j1 == j2
-        # keys should be sorted
-        parsed = json.loads(j1)
-        assert list(parsed.keys()) == sorted(parsed.keys())
+        assert list(j1.keys()) == sorted(j1.keys())
 
     def test_render_excludes_internals(self):
         """Internal names like getenv, Path, etc are not shown."""
-        from dracon.symbol_table import render_symbols_text
         loader = DraconLoader()
-        text = render_symbols_text(loader.context)
+        text = loader.context.describe()
         # internals from DEFAULT_CONTEXT should be hidden
         assert "getenv" not in text
         assert "getcwd" not in text

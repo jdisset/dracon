@@ -37,7 +37,7 @@ from dracon.utils import (
     ser_debug,
     DEFAULT_EVAL_ENGINE,
 )
-from dracon.symbol_table import SymbolTable, ScopeProxy
+from dracon.symbol_table import SymbolTable
 
 from dracon.interpolation import InterpolableNode, preprocess_references
 from dracon.merge import process_merges, add_to_context, merged, MergeKey, cached_merge_key
@@ -253,10 +253,7 @@ class DraconLoader:
         Returns a dict of {name: {kind, params, ...}} for user-defined symbols,
         derived directly from the runtime model.
         """
-        import json
-        from dracon.symbol_table import render_symbols_json
-        raw = render_symbols_json(self.context)
-        return json.loads(raw)
+        return self.context.to_json()
 
     def _init_yaml(self):
         self.yaml = PicklableYAML()
@@ -281,7 +278,7 @@ class DraconLoader:
                     enable_interpolation=self._enable_interpolation,
                     context=self.context,
                 ),
-                '__scope__': ScopeProxy(self.context),
+                '__scope__': self.context,
             }
         )
 

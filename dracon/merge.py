@@ -315,6 +315,9 @@ def merged(existing: Any, new: Any, k: MergeKey = DEFAULT_ADD_TO_CONTEXT_MERGE_K
         if type(v2) is DeferredNode:
             return merge_value(v1, v2.value, depth)
 
+        # skip deep-merging nested objects that opt out (e.g. SymbolTable used as __scope__)
+        if depth > 0 and (getattr(v1, '__dracon_no_merge__', False) or getattr(v2, '__dracon_no_merge__', False)):
+            return v1 if _existing_wins else v2
         if type(v1) is type(v2) and hasattr(v1, 'merged_with') and hasattr(v2, 'merged_with'):
             return v1.merged_with(v2, depth + 1)
         elif dict_like(v1) and dict_like(v2):

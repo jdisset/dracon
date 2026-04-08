@@ -564,9 +564,19 @@ class Draconstructor(Constructor):
             validator = partial(validator_f)
 
         context = ShallowDict(merged(current_loader_context, node.context, cached_merge_key('{<+}')))
-        # inject __scope__ wrapping the fully merged context (not just the loader's base)
-        from dracon.symbol_table import ScopeProxy
-        context['__scope__'] = ScopeProxy(context)
+        # inject __scope__: overlay node context onto the loader's SymbolTable
+        from dracon.symbol_table import SymbolTable
+        if isinstance(current_loader_context, SymbolTable):
+            scope = current_loader_context
+            node_ctx = node.context
+            if node_ctx:
+                scope = scope.copy()
+                scope.update(node_ctx)
+            context['__scope__'] = scope
+        else:
+            scope = SymbolTable()
+            scope.update(context)
+            context['__scope__'] = scope
         context['__DRACON_NODES'] = {
             i: Resolvable(node=n, ctor=self.copy()) for i, n in self.referenced_nodes.items()
         }

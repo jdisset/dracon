@@ -714,7 +714,6 @@ class ShowCmd(BaseModel):
 
         # handle --symbols / --symbols-json: compose, then render from symbol table
         if self.symbols or self.symbols_json:
-            from dracon.symbol_table import render_symbols_text, render_symbols_json, SymbolTable
             loader = DraconLoader(context=context.copy())
             cr = loader.compose(config_files)
             # merge composition-time !define vars into the symbol table for rendering
@@ -722,9 +721,9 @@ class ShowCmd(BaseModel):
             if hasattr(cr, 'defined_vars') and cr.defined_vars:
                 scope.update(cr.defined_vars)
             if self.symbols_json:
-                output = render_symbols_json(scope)
+                output = json.dumps(scope.to_json(), indent=2, sort_keys=True, default=str)
             else:
-                output = render_symbols_text(scope)
+                output = scope.describe()
             print(output)
             return output
 
