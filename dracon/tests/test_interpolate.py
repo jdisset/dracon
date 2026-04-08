@@ -1539,6 +1539,49 @@ class TestTagInterpolation:
             assert isinstance(obj, ClassA)
             assert obj.index == i
 
+    # -- with !fn callables --
+
+    def test_fn_callable_via_interpolated_tag(self):
+        """!define an !fn, then invoke it via !$(fn_name) tag on a mapping."""
+        config = DraconLoader(enable_interpolation=True).loads("""
+        !define make_ep: !fn
+            !require name: "svc"
+            !set_default port: 8080
+            url: https://${name}:${port}
+        !define factory: make_ep
+        result: !$(factory)
+            name: api
+            port: 443
+        """)
+        assert config.result.url == 'https://api:443'
+
+    def test_fn_callable_via_interpolated_tag_direct(self):
+        """Invoke !fn directly with a literal string expression in the tag."""
+        config = DraconLoader(enable_interpolation=True).loads("""
+        !define make_ep: !fn
+            !require name: "svc"
+            url: https://${name}.internal
+        result: !$('make_ep')
+            name: svc1
+        """)
+        assert config.result.url == 'https://svc1.internal'
+
+    def test_fn_callable_interpolated_tag_with_each(self):
+        """!each + interpolated !fn tag -- build multiple objects dynamically."""
+        config = DraconLoader(enable_interpolation=True).loads("""
+        !define make_ep: !fn
+            !require name: "svc"
+            !set_default port: 80
+            url: https://${name}:${port}
+        !define factory: make_ep
+        !each(svc) ${[('alpha', 1), ('beta', 2)]}:
+            $(svc[0]): !$(factory)
+                name: $(svc[0])
+                port: $(svc[1])
+        """)
+        assert config.alpha.url == 'https://alpha:1'
+        assert config.beta.url == 'https://beta:2'
+
     # -- edge cases --
 
     def test_non_interpolated_tag_unchanged(self):
