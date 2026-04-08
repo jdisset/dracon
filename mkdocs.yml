@@ -92,6 +92,7 @@ nav:
       - "Hybrid Pipelines": "patterns/hybrid-pipelines.md"
       - "Higher-Order Config": "patterns/higher-order-config.md"
       - "Dynamic Skeleton": "patterns/dynamic-skeleton.md"
+      - "Weighted Registries": "patterns/weighted-registries.md"
       - "Config Templates": "patterns/config-templates.md"
       - "Sweep Generation": "patterns/sweep-generation.md"
       - "Composition Stack": "patterns/composition-stack.md"

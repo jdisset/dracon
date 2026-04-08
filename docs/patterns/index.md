@@ -13,6 +13,7 @@ Patterns show how Dracon's primitives compose into real-world solutions. They as
 ## More Patterns
 
 - [**Dynamic Skeleton**](dynamic-skeleton.md) - You have M datasets and N configs. Without composition, that's M*N files. With the skeleton pattern, it's M+N.
+- [**Weighted Registries**](weighted-registries.md) - Define the full list once, then make variants by turning a few items up, down, or off.
 - [**Config Templates**](config-templates.md) - Repeated config blocks that differ by a few parameters. Parameterize them once, stamp them out.
 - [**Sweep Generation**](sweep-generation.md) - Generate experiment grids with `!each` and expressions instead of writing them by hand.
 - [**Composition Stack**](composition-stack.md) - Push, pop, and fork config layers at runtime for multi-phase pipelines.
