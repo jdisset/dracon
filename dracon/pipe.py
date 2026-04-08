@@ -98,7 +98,9 @@ class DraconPipe:
                     call_kwargs.update(value)
                 else:
                     unfilled = _get_unfilled_require(stage, call_kwargs)
-                    call_kwargs[unfilled] = value
+                    if unfilled is not None:
+                        call_kwargs[unfilled] = value
+                    # else: stage has all params, value passes through
             value = stage(**call_kwargs)
         return value
 
@@ -122,17 +124,15 @@ def _get_unfilled_require(stage, filled_kwargs):
     """Find the single unfilled required param in stage given already-filled kwargs.
 
     Uses the unified symbol interface instead of bespoke scanning.
-    Raises CompositionError if zero or 2+ unfilled requires.
+    Returns None if zero unfilled (stage runs independently, no threading).
+    Raises CompositionError if 2+ unfilled requires (ambiguous).
     """
     from dracon.diagnostics import CompositionError
     iface = _stage_interface(stage)
     required = [p.name for p in iface.params if p.required]
     unfilled = [r for r in required if r not in filled_kwargs]
     if len(unfilled) == 0:
-        raise CompositionError(
-            f"pipe: stage has no unfilled !require parameters to receive piped value. "
-            f"Required params: {required}, filled: {list(filled_kwargs.keys())}"
-        )
+        return None  # no threading needed, stage runs independently
     if len(unfilled) > 1:
         raise CompositionError(
             f"pipe: stage has {len(unfilled)} unfilled !require parameters ({unfilled}), "

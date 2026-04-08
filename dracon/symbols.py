@@ -125,6 +125,10 @@ class BoundSymbol:
     """A symbol with pre-filled kwargs. Binding a bound symbol merges kwargs."""
     __slots__ = ('_inner', '_kwargs')
 
+    def __repr__(self) -> str:
+        name = self._inner.interface().name or '?'
+        return f"BoundSymbol({name!r}, kwargs={list(self._kwargs)})"
+
     def __init__(self, inner: Symbol[Any], **kwargs: Any):
         if isinstance(inner, BoundSymbol):
             self._inner = inner._inner
@@ -150,7 +154,14 @@ class BoundSymbol:
         merged = {**self._kwargs, **kwargs}
         return self._inner.invoke(**merged)
 
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        merged = {**self._kwargs, **kwargs}
+        inner = self._inner.materialize()
+        return inner(*args, **merged)
+
     def materialize(self) -> Any:
+        if self._kwargs:
+            return self  # bound symbol with kwargs is the materialized form
         return self._inner.materialize()
 
 

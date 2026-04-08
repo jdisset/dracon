@@ -43,6 +43,7 @@ logger = logging.getLogger("dracon")
 # !noconstruct: strip raw template entries from constructed output
 # !unset: mark a key for deletion (survives composition & merging, removed at construction)
 _SKIP_TAGS = frozenset({'!noconstruct', '!unset'})
+_SYMBOL_MISS = object()  # sentinel: tag is not a symbol invocation
 
 ## {{{                        --     type utils     --
 
@@ -311,44 +312,15 @@ class Draconstructor(Constructor):
             if str(tag) in _SKIP_TAGS:
                 return None
 
-            # !fn:path partial application
+            # !fn:path universal binding
             if tag and isinstance(tag, str) and tag.startswith('!fn:') and target_type is None:
-                func_path = tag[4:]
-                func = self._resolve_fn_target(func_path, current_loader_context, node)
-                if isinstance(node, MappingNode):
-                    reset_tag(node)
-                    kwargs = self.base_construct_object(node, deep=True)
-                    kwargs = resolve_all_lazy(kwargs)
-                    if not isinstance(kwargs, dict):
-                        kwargs = dict(kwargs)
-                else:
-                    kwargs = {}
-                return DraconPartial(func_path, func, kwargs)
+                return self._construct_fn_target(tag[4:], node, current_loader_context)
 
-            # callable template tag invocation: !callable_name { kwargs }
+            # symbol tag invocation: !name { kwargs } for callables, pipes, templates
             if tag and isinstance(tag, str) and tag.startswith('!') and target_type is None:
-                callable_name = tag[1:]
-                callable_obj = current_loader_context.get(callable_name)
-                if callable_obj is None and hasattr(node, 'context'):
-                    callable_obj = (node.context or {}).get(callable_name)
-                if callable(callable_obj) and not isinstance(callable_obj, type):
-                    if isinstance(node, MappingNode):
-                        reset_tag(node)
-                        kwargs = self.base_construct_object(node, deep=True)
-                        kwargs = resolve_all_lazy(kwargs)
-                        if not isinstance(kwargs, dict):
-                            kwargs = dict(kwargs)
-                        return self._invoke_callable(callable_obj, kwargs, current_loader_context, node)
-                    elif isinstance(node, DraconScalarNode):
-                        reset_tag(node)
-                        arg = self.base_construct_object(node, deep=True)
-                        if isinstance(arg, LazyInterpolable):
-                            arg = resolve_all_lazy(arg)
-                        if arg is None or arg == '':
-                            return self._invoke_callable(callable_obj, {}, current_loader_context, node)
-                        return callable_obj(arg)
-                    else:
-                        return self._invoke_callable(callable_obj, {}, current_loader_context, node)
+                result = self._try_symbol_invocation(tag[1:], node, current_loader_context)
+                if result is not _SYMBOL_MISS:
+                    return result
 
             if target_type is None:
                 tag_type = resolve_type(tag, localns=self.localns)
@@ -434,77 +406,98 @@ class Draconstructor(Constructor):
                 getattr(node, 'start_mark', None),
             ) from e
 
-    def _resolve_fn_target(self, func_path, loader_context, node):
-        """Resolve a function for !fn:path -- symbol table / context first, then import."""
-        from dracon.resolution import resolve_tag_target
-        from dracon.symbol_table import SymbolTable
-        # symbol table lookup
-        if isinstance(loader_context, SymbolTable):
-            val = resolve_tag_target(loader_context, func_path)
-            if val is not None:
-                if not callable(val):
-                    raise ConstructorError(
-                        None, None,
-                        f"!fn:{func_path} resolved to non-callable {type(val).__name__}",
-                        node.start_mark,
-                    )
-                return val
-        else:
-            func = loader_context.get(func_path)
-            if func is not None:
-                if not callable(func):
-                    raise ConstructorError(
-                        None, None,
-                        f"!fn:{func_path} resolved to non-callable {type(func).__name__}",
-                        node.start_mark,
-                    )
-                return func
+    def _resolve_any_target(self, name, loader_context, node):
+        """Resolve a name to its value -- context/symbol table first, then import.
+
+        Unlike the old _resolve_fn_target, accepts any symbol kind (types, pipes, etc).
+        Returns the resolved value or raises ConstructorError.
+        """
+        # context/symbol table lookup
+        val = loader_context.get(name)
+        if val is not None:
+            return val
         # node context fallback
         if hasattr(node, 'context'):
-            func = (node.context or {}).get(func_path)
-            if func is not None:
-                if not callable(func):
-                    raise ConstructorError(
-                        None, None,
-                        f"!fn:{func_path} resolved to non-callable {type(func).__name__}",
-                        node.start_mark,
-                    )
-                return func
+            val = (node.context or {}).get(name)
+            if val is not None:
+                return val
         # import fallback
         try:
-            resolved = resolve_type(f'!{func_path}', localns=self.localns)
+            resolved = resolve_type(f'!{name}', localns=self.localns)
             if resolved is not Any:
-                if not callable(resolved):
-                    raise ConstructorError(
-                        None, None,
-                        f"!fn:{func_path} resolved to non-callable {type(resolved).__name__}",
-                        node.start_mark,
-                    )
                 return resolved
         except (ValueError, ImportError):
             pass
-        # build hint with available callable names from scope
-        from dracon.symbol_table import SymbolTable
-        available = []
-        ctx = loader_context
-        if isinstance(ctx, SymbolTable):
-            available = sorted(
-                name for name in ctx
-                if callable(ctx.get(name)) and not name.startswith('_')
-            )[:10]
-        elif isinstance(ctx, dict):
-            available = sorted(
-                name for name, val in ctx.items()
-                if callable(val) and not name.startswith('_')
-            )[:10]
-        hint = ""
-        if available:
-            hint = f"\n  available callables in scope: {', '.join(available)}"
+        # not found -- build hint
+        available = sorted(
+            n for n in loader_context
+            if (callable(loader_context.get(n)) or isinstance(loader_context.get(n), type))
+            and not n.startswith('_')
+        )[:10]
+        hint = f"\n  available in scope: {', '.join(available)}" if available else ""
         raise ConstructorError(
             None, None,
-            f"!fn:{func_path} -- cannot resolve '{func_path}' as context name or import path{hint}",
+            f"!fn:{name} -- cannot resolve '{name}' as context name or import path{hint}",
             node.start_mark,
         )
+
+    def _construct_kwargs(self, node):
+        """Extract kwargs dict from a mapping node, or empty dict."""
+        if isinstance(node, MappingNode):
+            reset_tag(node)
+            kwargs = self.base_construct_object(node, deep=True)
+            kwargs = resolve_all_lazy(kwargs)
+            return dict(kwargs) if not isinstance(kwargs, dict) else kwargs
+        return {}
+
+    def _construct_fn_target(self, target_name, node, loader_context):
+        """Handle !fn:target universal binding. Works on any symbol kind."""
+        from dracon.symbols import SymbolKind, auto_symbol
+        target = self._resolve_any_target(target_name, loader_context, node)
+        kwargs = self._construct_kwargs(node)
+
+        sym = auto_symbol(target, name=target_name)
+        kind = sym.interface().kind
+        if kind == SymbolKind.VALUE:
+            raise ConstructorError(
+                None, None,
+                f"!fn:{target_name} resolved to non-callable {type(target).__name__}",
+                node.start_mark,
+            )
+        # callables/types: DraconPartial for serialization compat
+        if kind in (SymbolKind.CALLABLE, SymbolKind.TYPE):
+            return DraconPartial(target_name, target, kwargs)
+        # pipes, templates, deferred: bound symbol
+        return sym.bind(**kwargs) if kwargs else target
+
+    def _try_symbol_invocation(self, tag_name, node, loader_context):
+        """Try to invoke a symbol from context via tag syntax.
+
+        Returns _SYMBOL_MISS if tag_name is not a callable/pipe/template in context.
+        """
+        from dracon.symbols import SymbolKind, auto_symbol
+        obj = loader_context.get(tag_name)
+        if obj is None and hasattr(node, 'context'):
+            obj = (node.context or {}).get(tag_name)
+        if obj is None:
+            return _SYMBOL_MISS
+
+        sym = auto_symbol(obj, name=tag_name)
+        kind = sym.interface().kind
+        if kind not in (SymbolKind.CALLABLE, SymbolKind.TEMPLATE, SymbolKind.PIPE):
+            return _SYMBOL_MISS
+
+        if isinstance(node, MappingNode):
+            return self._invoke_callable(obj, self._construct_kwargs(node), loader_context, node)
+        if isinstance(node, DraconScalarNode):
+            reset_tag(node)
+            arg = self.base_construct_object(node, deep=True)
+            if isinstance(arg, LazyInterpolable):
+                arg = resolve_all_lazy(arg)
+            if arg is None or arg == '':
+                return self._invoke_callable(obj, {}, loader_context, node)
+            return obj(arg)
+        return self._invoke_callable(obj, {}, loader_context, node)
 
     def construct_resolvable(self, node, tag_type):
         newnode = deepcopy(node)

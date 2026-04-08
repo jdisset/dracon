@@ -259,10 +259,9 @@ class TestPipeSignatureIntrospection:
         # b is filled, a is unfilled
         assert _get_unfilled_require(f, {'b': 2}) == 'a'
 
-    def test_get_unfilled_require_zero_raises(self):
-        """Error when all !requires are already filled."""
+    def test_get_unfilled_require_zero_returns_none(self):
+        """Zero unfilled requires returns None (stage runs independently)."""
         from dracon.pipe import _get_unfilled_require
-        from dracon.diagnostics import CompositionError
         yaml = """
         !define f: !fn
           !require a: "val"
@@ -272,8 +271,7 @@ class TestPipeSignatureIntrospection:
         loader = DraconLoader()
         config = loader.loads(yaml)
         f = config['check']
-        with pytest.raises(CompositionError, match="no unfilled"):
-            _get_unfilled_require(f, {'a': 1})
+        assert _get_unfilled_require(f, {'a': 1}) is None
 
     def test_get_unfilled_require_multiple_raises(self):
         """Error when 2+ !requires are unfilled."""
