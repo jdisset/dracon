@@ -1398,4 +1398,159 @@ def test_set_default_alone_still_works():
     assert 'db' not in config
 
 
+# ── tag interpolation ─────────────────────────────────────────────────────────
+
+
+class TestTagInterpolation:
+    """Tag interpolation: !$(expr) resolves the tag dynamically."""
+
+    # -- scalar tags (existing mechanism via InterpolableNode) --
+
+    def test_scalar_builtin_type(self):
+        """!$(expr) on a scalar -- resolve to a builtin type."""
+        config = DraconLoader(enable_interpolation=True).loads("""
+        !define mytype: float
+        val: !$(mytype) 42
+        """)
+        config.resolve_all_lazy()
+        assert isinstance(config.val, float)
+        assert config.val == 42.0
+
+    def test_scalar_inline_expr(self):
+        """Tag computed from an inline expression, no !define needed."""
+        config = DraconLoader(enable_interpolation=True).loads("""
+        val: !$(str('int')) 42
+        """)
+        config.resolve_all_lazy()
+        assert config.val == 42
+        assert isinstance(config.val, int)
+
+    # -- mapping tags --
+
+    def test_mapping_pydantic_model(self):
+        """!$(type) on a mapping -- construct a pydantic model."""
+        config = DraconLoader(
+            enable_interpolation=True, context={'ClassA': ClassA}
+        ).loads("""
+        !define mytype: ClassA
+        obj: !$(mytype)
+            index: 42
+            name: hello
+        """)
+        config.resolve_all_lazy()
+        assert isinstance(config.obj, ClassA)
+        assert config.obj.index == 42
+        assert config.obj.name == 'hello'
+
+    def test_mapping_inline_expr(self):
+        """Mapping tag from inline expression (no !define)."""
+        config = DraconLoader(
+            enable_interpolation=True, context={'ClassA': ClassA}
+        ).loads("""
+        obj: !$('ClassA')
+            index: 7
+            name: world
+        """)
+        assert isinstance(config.obj, ClassA)
+        assert config.obj.index == 7
+
+    def test_mapping_type_from_context(self):
+        """Tag resolved from a context variable passed at load time."""
+        config = DraconLoader(
+            enable_interpolation=True,
+            context={'ClassA': ClassA, 'T': 'ClassA'},
+        ).loads("""
+        obj: !$(T)
+            index: 1
+        """)
+        assert isinstance(config.obj, ClassA)
+
+    def test_mapping_multiple_interpolated_tags(self):
+        """Multiple mappings in the same doc with different interpolated tags."""
+        class Other(BaseModel):
+            value: str = ''
+
+        config = DraconLoader(
+            enable_interpolation=True,
+            context={'ClassA': ClassA, 'Other': Other},
+        ).loads("""
+        !define ta: ClassA
+        !define tb: Other
+        a: !$(ta)
+            index: 10
+        b: !$(tb)
+            value: hi
+        """)
+        assert isinstance(config.a, ClassA)
+        assert config.a.index == 10
+        assert isinstance(config.b, Other)
+        assert config.b.value == 'hi'
+
+    # -- sequence tags --
+
+    def test_sequence_interpolated_tag(self):
+        """!$(type) on a sequence node resolves the tag."""
+        config = DraconLoader(enable_interpolation=True).loads("""
+        !define mytype: list
+        nums: !$(mytype)
+            - 1
+            - 2
+            - 3
+        """)
+        assert list(config.nums) == [1, 2, 3]
+
+    # -- combined with other features --
+
+    def test_tag_interp_with_value_interp(self):
+        """Both the tag and the value contain interpolation."""
+        config = DraconLoader(enable_interpolation=True).loads("""
+        !define n: 10
+        val: !$(str('float')) $(n + 0.5)
+        """)
+        config.resolve_all_lazy()
+        assert isinstance(config.val, float)
+        assert config.val == 10.5
+
+    def test_tag_interp_with_include(self, tmp_path):
+        """Interpolated tag in a file loaded via !include."""
+        f = tmp_path / 'sub.yaml'
+        f.write_text("obj: !$(T)\n  index: 99\n  name: inc\n")
+        config = DraconLoader(
+            enable_interpolation=True,
+            context={'ClassA': ClassA, 'T': 'ClassA'},
+        ).loads(f"""
+        <<: !include file:{f}
+        """)
+        assert isinstance(config.obj, ClassA)
+        assert config.obj.index == 99
+
+    def test_tag_interp_with_each(self):
+        """Interpolated mapping tags inside an !each expansion."""
+        config = DraconLoader(
+            enable_interpolation=True, context={'ClassA': ClassA}
+        ).loads("""
+        !define T: ClassA
+        !each(i) ${list(range(3))}:
+            obj_$(i): !$(T)
+                index: $(i)
+        """)
+        for i in range(3):
+            obj = getattr(config, f'obj_{i}')
+            assert isinstance(obj, ClassA)
+            assert obj.index == i
+
+    # -- edge cases --
+
+    def test_non_interpolated_tag_unchanged(self):
+        """A plain !ClassA tag (no interpolation) still works normally."""
+        config = DraconLoader(
+            enable_interpolation=True, context={'ClassA': ClassA}
+        ).loads("""
+        obj: !ClassA
+            index: 5
+        """)
+        assert isinstance(config.obj, ClassA)
+        assert config.obj.index == 5
+
+
 # }}}

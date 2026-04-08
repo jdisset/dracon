@@ -289,6 +289,12 @@ class Draconstructor(Constructor):
         self._depth += 1
         tag = node.tag
 
+        # resolve interpolated tags on mapping/sequence nodes eagerly.
+        # scalar nodes handle tag interpolation lazily via InterpolableNode,
+        # so we skip them here to avoid double-resolving.
+        if isinstance(node, (MappingNode, SequenceNode)):
+            tag = self._resolve_interpolated_tag(node, current_loader_context)
+
         try:
             if str(tag) in _SKIP_TAGS:
                 return None
@@ -433,6 +439,36 @@ class Draconstructor(Constructor):
                 newnode.tag = f"!{inner_type.__name__}"
         res = Resolvable(node=newnode, ctor=self, inner_type=inner_type)
         return res
+
+    def _resolve_interpolated_tag(self, node, loader_context) -> str:
+        """Resolve interpolation expressions inside a YAML tag.
+
+        Handles both $() and ${} syntax.  Returns the (possibly rewritten)
+        tag string and mutates node.tag when resolution occurs.
+        """
+        tag = node.tag
+        if not (tag and isinstance(tag, str) and tag.startswith('!')):
+            return tag
+        from dracon.interpolation_utils import transform_dollar_vars
+        tag_scan = transform_dollar_vars(str(tag))
+        if not outermost_interpolation_exprs(tag_scan):
+            return tag
+        from dracon.interpolation import evaluate_expression
+        ctx = merged(
+            loader_context,
+            getattr(node, 'context', None) or {},
+            cached_merge_key('{<+}'),
+        )
+        resolved = evaluate_expression(
+            tag_scan[1:],  # strip leading '!'
+            current_path=self._current_path,
+            root_obj=self._root_node,
+            engine=self.interpolation_engine,
+            context=ctx,
+        )
+        tag = f"!{resolved}"
+        node.tag = tag
+        return tag
 
     def construct_interpolable(self, node):
         current_loader_context = self.dracon_loader.context if self.dracon_loader else {}
