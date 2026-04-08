@@ -114,7 +114,15 @@ def resolve_type(
 
         return _eval_type(ForwardRef(type_str), globals(), localns)
     except NameError as e:
-        raise ValueError(f"failed to resolve type {type_str}. {e}") from None
+        # build a hint showing available type/callable names in scope
+        available = sorted(
+            k for k, v in (localns or {}).items()
+            if isinstance(v, type) or callable(v)
+        )[:10]
+        hint = ""
+        if available:
+            hint = f" Available in scope: {', '.join(available)}"
+        raise ValueError(f"failed to resolve type '{type_str}'.{hint} {e}") from None
     except Exception:
         return Resolvable if type_str.startswith('Resolvable[') else Any
 
@@ -399,16 +407,32 @@ class Draconstructor(Constructor):
 
     def _invoke_callable(self, callable_obj, kwargs, loader_context, node):
         """Invoke a callable via the Symbol protocol when available, else direct call."""
-        if isinstance(callable_obj, DraconCallable):
-            inv_ctx = dict(loader_context)
-            node_ctx = getattr(node, 'context', None)
-            if node_ctx:
-                inv_ctx.update(node_ctx)
-            return callable_obj.invoke(kwargs, invocation_context=inv_ctx)
-        # symbol protocol: bind + invoke
-        if hasattr(callable_obj, 'invoke') and hasattr(callable_obj, 'bind'):
-            return callable_obj.bind(**kwargs).invoke()
-        return callable_obj(**kwargs)
+        try:
+            if isinstance(callable_obj, DraconCallable):
+                inv_ctx = dict(loader_context)
+                node_ctx = getattr(node, 'context', None)
+                if node_ctx:
+                    inv_ctx.update(node_ctx)
+                return callable_obj.invoke(kwargs, invocation_context=inv_ctx)
+            # symbol protocol: bind + invoke
+            if hasattr(callable_obj, 'invoke') and hasattr(callable_obj, 'bind'):
+                return callable_obj.bind(**kwargs).invoke()
+            return callable_obj(**kwargs)
+        except TypeError as e:
+            # enrich error with interface information
+            from dracon.symbols import auto_symbol
+            sym = auto_symbol(callable_obj)
+            iface = sym.interface()
+            expected = [
+                f"{'*' if p.required else ''}{p.name}" for p in iface.params
+            ]
+            name = getattr(callable_obj, '__name__', None) or getattr(callable_obj, '_name', str(callable_obj))
+            raise ConstructorError(
+                None, None,
+                f"calling {name}({', '.join(kwargs.keys())}): {e}\n"
+                f"  expected interface: ({', '.join(expected)})",
+                getattr(node, 'start_mark', None),
+            ) from e
 
     def _resolve_fn_target(self, func_path, loader_context, node):
         """Resolve a function for !fn:path -- symbol table / context first, then import."""
@@ -459,9 +483,26 @@ class Draconstructor(Constructor):
                 return resolved
         except (ValueError, ImportError):
             pass
+        # build hint with available callable names from scope
+        from dracon.symbol_table import SymbolTable
+        available = []
+        ctx = loader_context
+        if isinstance(ctx, SymbolTable):
+            available = sorted(
+                name for name in ctx
+                if callable(ctx.get(name)) and not name.startswith('_')
+            )[:10]
+        elif isinstance(ctx, dict):
+            available = sorted(
+                name for name, val in ctx.items()
+                if callable(val) and not name.startswith('_')
+            )[:10]
+        hint = ""
+        if available:
+            hint = f"\n  available callables in scope: {', '.join(available)}"
         raise ConstructorError(
             None, None,
-            f"!fn:{func_path} -- cannot resolve '{func_path}' as context name or import path",
+            f"!fn:{func_path} -- cannot resolve '{func_path}' as context name or import path{hint}",
             node.start_mark,
         )
 
@@ -530,6 +571,9 @@ class Draconstructor(Constructor):
             validator = partial(validator_f)
 
         context = ShallowDict(merged(current_loader_context, node.context, cached_merge_key('{<+}')))
+        # inject __scope__ wrapping the fully merged context (not just the loader's base)
+        from dracon.symbol_table import ScopeProxy
+        context['__scope__'] = ScopeProxy(context)
         context['__DRACON_NODES'] = {
             i: Resolvable(node=n, ctor=self.copy()) for i, n in self.referenced_nodes.items()
         }

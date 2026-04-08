@@ -123,6 +123,48 @@ myapp +config.yaml --trace db.port
 
 On a color terminal, the trace output gets syntax-highlighted with `rich`.
 
+## Symbol introspection
+
+When you need to see what's in scope (types, templates, callables, values), use `--symbols`:
+
+```bash
+dracon show config.yaml --symbols
+```
+
+Example output:
+
+```text
+!Service(name, port=8080)         template     infra.yaml:12
+!Experiment(name, model)          template     ml.yaml:8
+ResNet                            type         models.py
+train_vit(data, epochs=50)        callable     train.py
+```
+
+For stable JSON output (for tooling and editor integration):
+
+```bash
+dracon show config.yaml --symbols-json
+```
+
+This outputs directly from the symbol table -- no separate catalog. The same runtime model that drives invocation also drives the output.
+
+### Self-documenting configs
+
+Your config can introspect its own scope using `__scope__`:
+
+```yaml
+# check that a vocabulary was loaded
+!assert ${__scope__.has('Service')}: "infra vocabulary not loaded"
+
+# list all templates in scope
+_templates: ${__scope__.names(kind='template')}
+
+# inspect a specific symbol's interface
+_service_iface: ${__scope__.interface('Service')}
+```
+
+The `__scope__` proxy exposes `names()`, `has()`, `interface()`, `kinds()`, and `exported()`.
+
 ## Variable inspection
 
 To see all defined variables (`!define`, `!set_default`, context vars) and their sources:
@@ -141,7 +183,9 @@ This prints a table to stderr showing each variable name, its value, and where i
 
 ## Error messages
 
-Dracon errors include source context whenever possible.
+Dracon errors include source context and interface information whenever possible.
+
+When a tag can't be resolved, the error shows what symbols are available in scope. When a callable gets wrong arguments, the error shows the expected interface (parameters and their defaults). When a deferred node is constructed with missing runtime inputs, the error shows which `!require` variables were not provided.
 
 ### Source location
 

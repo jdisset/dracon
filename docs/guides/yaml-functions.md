@@ -42,7 +42,9 @@ The file at `templates/endpoint.yaml` becomes the function body. It can use `!re
   health: "https://${name}.example.com:${port}/health"
 ```
 
-The body is a mapping with parameter declarations and the template content mixed together. `!require` and `!set_default` lines are stripped from the output; they only define the interface.
+The body is a mapping with parameter declarations and the template content mixed together. `!require` and `!set_default` lines are stripped from the output; they define the template's interface.
+
+Each `!fn` template is a symbol in the open vocabulary. Its `interface()` surfaces the declared parameters as structured `InterfaceSpec` data, which drives tag invocation, error messages, and the `--symbols` CLI output.
 
 ### Expression lambda
 

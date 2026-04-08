@@ -113,6 +113,25 @@ decision: !deferred
 
 This is usually clearer than trying to inline the whole choice into a dynamic tag. It also avoids awkward YAML tag syntax once the expression gets long.
 
+### Runtime contracts as interface data
+
+A `DeferredNode` implements the Symbol protocol. Its `interface()` method surfaces the contracts (`!require`, `!assert`) declared inside the deferred branch as structured `InterfaceSpec` data:
+
+```python
+node = config['reporting']  # a DeferredNode
+
+iface = node.interface()
+# iface.kind == SymbolKind.DEFERRED
+# iface.params -- the !require parameters
+# iface.contracts -- the !assert contracts
+```
+
+This means you can inspect what a deferred section expects before calling `.construct()`. The same data drives:
+
+- error messages when required runtime inputs are missing
+- the `--symbols` CLI output
+- the `__scope__` introspection API
+
 ## Resolvable[T] for Pydantic fields
 
 When you just need one field to stay unresolved, use `Resolvable[T]`. It works through the YAML tag, not the type annotation alone. Tag the YAML value with `!Resolvable[T]` to pause construction on that field:

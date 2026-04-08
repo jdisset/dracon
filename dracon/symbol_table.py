@@ -5,15 +5,19 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import MutableMapping, Iterator, Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from dracon.symbols import (
     Symbol,
+    SymbolKind,
     SymbolSourceInfo,
+    InterfaceSpec,
     ValueSymbol,
     auto_symbol,
+    MISSING,
 )
 
 
@@ -164,6 +168,46 @@ class SymbolTable(MutableMapping):
             if entry.exported:
                 yield entry
 
+    # ── query API (used by __scope__ in interpolation) ───────────────────
+
+    def names(self, kind: SymbolKind | None = None) -> list[str]:
+        """Symbol names, optionally filtered by kind."""
+        result = []
+        for name in self:
+            if kind is None:
+                result.append(name)
+            else:
+                sym = self.lookup_symbol(name)
+                if sym is not None and sym.interface().kind == kind:
+                    result.append(name)
+        return result
+
+    def has(self, name: str) -> bool:
+        return name in self
+
+    def interface(self, name: str) -> InterfaceSpec | None:
+        """Full interface for a symbol, or None if not found."""
+        sym = self.lookup_symbol(name)
+        if sym is None:
+            return None
+        return sym.interface()
+
+    def kinds(self) -> dict[str, SymbolKind]:
+        """Name-to-kind mapping for all symbols."""
+        result = {}
+        for name in self:
+            sym = self.lookup_symbol(name)
+            if sym is not None:
+                result[name] = sym.interface().kind
+        return result
+
+    def exported(self) -> SymbolTable:
+        """Sub-table containing only exported entries."""
+        tbl = SymbolTable()
+        for entry in self.exported_entries():
+            tbl._entries[entry.name] = entry
+        return tbl
+
     def overlay(self, parent: SymbolTable) -> SymbolTable:
         """Return a new SymbolTable with self as local and parent as fallback."""
         return self._clone(parent=parent)
@@ -197,3 +241,161 @@ class SymbolTable(MutableMapping):
         n = len(self._entries)
         parent = f", parent={len(self._parent._entries)}entries" if self._parent else ""
         return f"SymbolTable({n} entries{parent})"
+
+
+# ── scope proxy (for __scope__ in interpolation) ─────────────────────────────
+
+
+class ScopeProxy:
+    """Lightweight proxy exposing the SymbolTable query API for interpolation.
+
+    NOT a Mapping, so merge code won't try to deep-merge it. Works with
+    SymbolTable or plain dict contexts. Delegates names/has/interface/kinds
+    to the underlying context.
+    """
+    __slots__ = ('_table', '_cached_tbl')
+
+    def __init__(self, table: SymbolTable | dict):
+        self._table = table
+        self._cached_tbl: SymbolTable | None = None
+
+    def _as_symbol_table(self) -> SymbolTable:
+        if isinstance(self._table, SymbolTable):
+            return self._table
+        # cache the wrapped SymbolTable for repeated calls
+        if self._cached_tbl is None:
+            tbl = SymbolTable()
+            tbl.update(self._table)
+            self._cached_tbl = tbl
+        return self._cached_tbl
+
+    def names(self, kind: SymbolKind | None = None) -> list[str]:
+        tbl = self._as_symbol_table()
+        return tbl.names(kind=kind)
+
+    def has(self, name: str) -> bool:
+        return name in self._table
+
+    def interface(self, name: str) -> InterfaceSpec | None:
+        tbl = self._as_symbol_table()
+        return tbl.interface(name)
+
+    def kinds(self) -> dict[str, SymbolKind]:
+        tbl = self._as_symbol_table()
+        return tbl.kinds()
+
+    def exported(self) -> SymbolTable:
+        tbl = self._as_symbol_table()
+        return tbl.exported()
+
+    def __repr__(self) -> str:
+        return f"ScopeProxy({self._table!r})"
+
+
+# ── rendering helpers ────────────────────────────────────────────────────────
+
+# internal names to hide from catalog/symbols output
+_INTERNAL_NAMES = frozenset({
+    '__DRACON', '__scope__', 'construct',
+    'getenv', 'getcwd', 'listdir', 'join', 'basename', 'dirname',
+    'expanduser', 'isfile', 'isdir', 'Path', 'now',
+    'DIR', 'FILE', 'FILE_PATH', 'FILE_STEM', 'FILE_EXT',
+    'FILE_LOAD_TIME', 'FILE_LOAD_TIME_UNIX', 'FILE_LOAD_TIME_UNIX_MS', 'FILE_SIZE',
+})
+
+
+def _is_user_symbol(name: str) -> bool:
+    """True if name is not an internal/builtin symbol."""
+    return name not in _INTERNAL_NAMES and not name.startswith('__')
+
+
+def _param_sig(iface: InterfaceSpec) -> str:
+    """Build a short parameter signature string."""
+    parts = []
+    for p in iface.params:
+        if p.required:
+            parts.append(p.name)
+        elif p.default is not MISSING:
+            parts.append(f"{p.name}={p.default!r}")
+        else:
+            parts.append(f"{p.name}=...")
+    return ", ".join(parts)
+
+
+def _source_str(iface: InterfaceSpec) -> str:
+    """Format source location as file:line or empty string."""
+    if iface.source and iface.source.file_path:
+        import os
+        base = os.path.basename(iface.source.file_path)
+        if iface.source.line:
+            return f"{base}:{iface.source.line}"
+        return base
+    return ""
+
+
+def render_symbols_text(table: SymbolTable) -> str:
+    """Human-readable text listing of symbols in the table."""
+    lines = []
+    for name in sorted(table):
+        if not _is_user_symbol(name):
+            continue
+        sym = table.lookup_symbol(name)
+        if sym is None:
+            continue
+        iface = sym.interface()
+        kind = iface.kind.value
+        sig = _param_sig(iface)
+        source = _source_str(iface)
+        if sig:
+            label = f"!{name}({sig})" if kind in ("template", "type") else f"{name}({sig})"
+        else:
+            label = f"!{name}" if kind in ("template", "type") else name
+        lines.append(f"{label:<40} {kind:<12} {source}")
+    return "\n".join(lines)
+
+
+def render_symbols_json(table: SymbolTable) -> str:
+    """Stable JSON output of symbols for tooling."""
+    data = {}
+    for name in sorted(table):
+        if not _is_user_symbol(name):
+            continue
+        sym = table.lookup_symbol(name)
+        if sym is None:
+            continue
+        iface = sym.interface()
+        entry_data: dict[str, Any] = {"kind": iface.kind.value}
+        if iface.params:
+            entry_data["params"] = [
+                {
+                    "name": p.name,
+                    "required": p.required,
+                    **({"default": _json_safe(p.default)} if p.default is not MISSING else {}),
+                }
+                for p in iface.params
+            ]
+        else:
+            entry_data["params"] = []
+        if iface.contracts:
+            entry_data["contracts"] = [
+                {"kind": c.kind, "name": c.name, **({"message": c.message} if c.message else {})}
+                for c in iface.contracts
+            ]
+        if iface.source and iface.source.file_path:
+            src: dict[str, Any] = {"file": iface.source.file_path}
+            if iface.source.line:
+                src["line"] = iface.source.line
+            entry_data["source"] = src
+        if iface.docs:
+            entry_data["docs"] = iface.docs
+        data[name] = entry_data
+    return json.dumps(data, indent=2, sort_keys=True, default=str)
+
+
+def _json_safe(val: Any) -> Any:
+    """Make a value JSON-serializable."""
+    if val is MISSING:
+        return None
+    if isinstance(val, (str, int, float, bool, type(None))):
+        return val
+    return str(val)

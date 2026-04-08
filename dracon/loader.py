@@ -37,7 +37,7 @@ from dracon.utils import (
     ser_debug,
     DEFAULT_EVAL_ENGINE,
 )
-from dracon.symbol_table import SymbolTable
+from dracon.symbol_table import SymbolTable, ScopeProxy
 
 from dracon.interpolation import InterpolableNode, preprocess_references
 from dracon.merge import process_merges, add_to_context, merged, MergeKey, cached_merge_key
@@ -247,6 +247,17 @@ class DraconLoader:
         """SSOT access to the symbol table (same object as self.context)."""
         return self.context
 
+    def catalog(self) -> dict:
+        """Catalog projection of the symbol table for tooling.
+
+        Returns a dict of {name: {kind, params, ...}} for user-defined symbols,
+        derived directly from the runtime model.
+        """
+        import json
+        from dracon.symbol_table import render_symbols_json
+        raw = render_symbols_json(self.context)
+        return json.loads(raw)
+
     def _init_yaml(self):
         self.yaml = PicklableYAML()
         self.yaml.Composer = DraconComposer
@@ -269,7 +280,8 @@ class DraconLoader:
                     capture_globals=self._capture_globals,
                     enable_interpolation=self._enable_interpolation,
                     context=self.context,
-                )
+                ),
+                '__scope__': ScopeProxy(self.context),
             }
         )
 

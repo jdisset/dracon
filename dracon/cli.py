@@ -333,6 +333,8 @@ Options:
   -j, --json            Output as JSON (implies -c)
       --str-output      Output raw str() instead of YAML
       --show-vars       Print table of all defined variables (to stderr)
+      --symbols         List symbols in scope (human-readable)
+      --symbols-json    List symbols in scope (JSON for tooling)
   -v, --verbose         Enable debug logging
   -f, --file PATH       Config file (legacy, prefer positional args)
   -h, --help            Show this help
@@ -661,6 +663,8 @@ class ShowCmd(BaseModel):
     diff: Annotated[bool, Arg(help="show delta from bare defaults")] = False
     depth: Annotated[Optional[int], Arg(help="limit recursion depth")] = None
     show_vars: Annotated[bool, Arg(help="print defined variables table")] = False
+    symbols: Annotated[bool, Arg(help="list symbols in scope (human-readable)")] = False
+    symbols_json: Annotated[bool, Arg(help="list symbols in scope (JSON for tooling)")] = False
     trace: Annotated[Optional[str], Arg(help="provenance chain for a config path")] = None
     trace_all: Annotated[bool, Arg(help="provenance for all values")] = False
     verbose: Annotated[bool, Arg(short="v", help="debug logging")] = False
@@ -707,6 +711,22 @@ class ShowCmd(BaseModel):
                 config_files.append(t[1:])
             else:
                 config_files.append(t)
+
+        # handle --symbols / --symbols-json: compose, then render from symbol table
+        if self.symbols or self.symbols_json:
+            from dracon.symbol_table import render_symbols_text, render_symbols_json, SymbolTable
+            loader = DraconLoader(context=context.copy())
+            cr = loader.compose(config_files)
+            # merge composition-time !define vars into the symbol table for rendering
+            scope = loader.context.copy()
+            if hasattr(cr, 'defined_vars') and cr.defined_vars:
+                scope.update(cr.defined_vars)
+            if self.symbols_json:
+                output = render_symbols_json(scope)
+            else:
+                output = render_symbols_text(scope)
+            print(output)
+            return output
 
         printer = DraconPrint(
             config_files=config_files,

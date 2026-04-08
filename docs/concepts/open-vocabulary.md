@@ -2,7 +2,7 @@
 
 One of the easier ways to misunderstand Dracon is to think of context as just a bag of variables.
 
-It is more useful to think of it as an open vocabulary.
+It is more useful to think of it as an open vocabulary -- a typed symbol table where values, constructors, and callables all live in one namespace.
 
 ## One namespace, several kinds of things
 
@@ -24,6 +24,25 @@ From the caller's point of view, these often feel close enough that you can:
 - invoke them with tag syntax
 
 That is a big part of where Dracon's composability comes from.
+
+## The runtime model
+
+Under the hood, every name in scope is backed by a **symbol** with a consistent interface:
+
+- `interface()` -- what kind of symbol it is, what parameters it expects, what contracts it has
+- `bind(**kwargs)` -- partially apply arguments
+- `invoke(**kwargs)` -- call it
+- `materialize()` -- get the raw value
+
+This means the system doesn't need separate codepaths for "is it a type? a callable? a template?". One model handles all of them.
+
+The `InterfaceSpec` that each symbol exposes is the single source of truth for:
+
+- tag invocation and parameter validation
+- pipe threading (which params to fill automatically)
+- error messages (showing what was expected vs what was provided)
+- the `--symbols` CLI output
+- the `__scope__` introspection API
 
 ## The same name can be used in different ways
 
@@ -71,6 +90,38 @@ item: !Builder
 ```
 
 That sounds small, but it matters a lot in practice. The tag stays short, and the selection logic gets a name.
+
+## Self-documenting configs with `__scope__`
+
+Since the symbol table is a first-class runtime object, configs can describe their own vocabulary:
+
+```yaml
+!include infra_vocab.yaml
+!include ml_vocab.yaml
+
+_vocabulary:
+  types: ${__scope__.names(kind='type')}
+  templates: ${__scope__.names(kind='template')}
+```
+
+You can also use it for guards and introspection:
+
+```yaml
+!assert ${__scope__.has('Service')}: "infra vocabulary not loaded"
+model_interface: ${__scope__.interface('Experiment')}
+```
+
+The `__scope__` object exposes:
+
+| Method | Returns | Purpose |
+|--------|---------|---------|
+| `names(kind=None)` | `list[str]` | symbol names, optionally filtered by kind |
+| `interface(name)` | `InterfaceSpec` | full interface for a symbol |
+| `has(name)` | `bool` | check if a symbol exists in scope |
+| `kinds()` | `dict[str, SymbolKind]` | name-to-kind mapping |
+| `exported()` | `SymbolTable` | sub-table of exported entries only |
+
+This is pure SSOT -- the documentation comes from the same runtime model that drives execution.
 
 ## Why the caller often does not care what a name "really is"
 
@@ -172,9 +223,9 @@ Without this model, the system can look like a bag of separate features:
 - `!pipe`
 - propagated vocabularies
 
-With this model, they line up:
+With the symbol model, they line up:
 
-Dracon gives you a namespace where values, constructors, and callables can all be named, selected, and composed.
+Dracon gives you a namespace where values, constructors, and callables are all typed symbols that can be named, selected, introspected, and composed.
 
 ## Related pages
 
@@ -183,3 +234,4 @@ Dracon gives you a namespace where values, constructors, and callables can all b
 - [Constructor Slots](../patterns/constructor-slots.md)
 - [Layered Vocabularies](../patterns/layered-vocabularies.md)
 - [Hybrid Pipelines](../patterns/hybrid-pipelines.md)
+- [Debugging](../guides/debugging.md)
