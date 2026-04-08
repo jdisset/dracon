@@ -114,6 +114,36 @@ endpoints:
 
 This works for any callable in context, not just `!fn` templates. Python functions passed via `context` work too.
 
+### Alias complex callable choices before tagging
+
+If the callable choice is simple, dynamic tags are fine:
+
+```yaml
+endpoint: !$(factories[transport])
+  name: api
+  port: 443
+```
+
+But once the expression gets longer, the nicer pattern is to alias it first and then use a normal tag:
+
+```yaml
+!define Builder: ${factories[transport]}
+
+endpoint: !Builder
+  name: api
+  port: 443
+```
+
+This gets even more useful when the callable comes from a runtime or computed selection:
+
+```yaml
+!define Action: ${llm_decide(prompt='triage', metrics=jobs.meta(group='trials'))}
+
+do: !Action {}
+```
+
+This is easier to read, easier to reuse, and more YAML-friendly than trying to cram a long call directly into a tag.
+
 ## Calling from expressions
 
 Inside `${...}`, call functions with Python syntax:
@@ -133,6 +163,17 @@ This is useful for list comprehensions, conditionals, and chaining:
 all_urls: ${[make_endpoint(name=n)['url'] for n in names]}
 primary: ${make_endpoint(name='api') if production else make_endpoint(name='dev-api')}
 ```
+
+If the result of an expression call is meant to become a tag, prefer aliasing it first:
+
+```yaml
+!define Selected: ${pick_constructor(kind=kind, mode=mode)}
+
+value: !Selected
+  name: thing
+```
+
+That keeps the selection logic in expression land and the constructed value in plain YAML.
 
 ## Parameters: !require and !set_default
 

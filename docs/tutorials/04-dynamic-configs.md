@@ -263,6 +263,17 @@ fast_check: ${make_check(site_name='api.example.com', interval=5)}
 
 This is handy when you need the result as part of a larger expression.
 
+If the result of an expression call is going to become a tag, the cleaner move is usually to alias it first:
+
+```yaml
+!define CheckBuilder: ${pick_check_builder(kind=kind)}
+
+check: !CheckBuilder
+  site_name: api.example.com
+```
+
+That keeps the selection logic in the expression and the constructed object in ordinary YAML.
+
 ## Combining everything
 
 Here's a real-world-ish example that uses `!define`, `!each`, `!if`, and `!fn` together. The goal: generate monitoring configs for multiple sites, with SSL checks only in prod.

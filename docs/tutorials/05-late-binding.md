@@ -141,6 +141,16 @@ print(monitoring["sites"][0]["report"])
 
 All the composition directives inside the `!deferred` block are evaluated during `.construct()`, not during the initial load. The `!each` loop, the interpolations, the string formatting: all of it waits.
 
+If a deferred branch needs runtime logic to choose what to construct, give that choice a local name first:
+
+```yaml
+decision: !deferred
+  !define Action: ${llm_decide(prompt='triage', metrics=jobs.meta(group='trials'))}
+  !Action {}
+```
+
+That is usually nicer than trying to squeeze the whole selection directly into a dynamic tag.
+
 ### Copying before constructing
 
 A `DeferredNode` can be constructed multiple times with different contexts. Use `.copy()` first to avoid mutating the original:

@@ -95,6 +95,24 @@ thing: !deferred::clear_ctx=True:MyModule.MyClass
 
 The format is `!deferred::[options]:[TypeName]`.
 
+### If runtime chooses the constructor, alias it first
+
+Sometimes the deferred branch does not just need runtime values. It needs runtime logic to choose what to build.
+
+The cleanest idiom is usually:
+
+1. compute the constructor with `!define`
+2. give it a short local name
+3. use that name as a normal tag
+
+```yaml
+decision: !deferred
+  !define Action: ${llm_decide(prompt='triage', metrics=jobs.meta(group='trials'))}
+  !Action {}
+```
+
+This is usually clearer than trying to inline the whole choice into a dynamic tag. It also avoids awkward YAML tag syntax once the expression gets long.
+
 ## Resolvable[T] for Pydantic fields
 
 When you just need one field to stay unresolved, use `Resolvable[T]`. It works through the YAML tag, not the type annotation alone. Tag the YAML value with `!Resolvable[T]` to pause construction on that field:

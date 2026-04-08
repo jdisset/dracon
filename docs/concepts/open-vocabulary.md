@@ -61,6 +61,17 @@ item: !$(constructors[kind])
 
 That last move is especially important. It means the config can choose not just values, but constructors and builders.
 
+And if the expression is more complex, you can alias it into a normal tag first:
+
+```yaml
+!define Builder: ${constructors[kind]}
+
+item: !Builder
+  name: thing
+```
+
+That sounds small, but it matters a lot in practice. The tag stays short, and the selection logic gets a name.
+
 ## Why the caller often does not care what a name "really is"
 
 From the outside, these can all behave like reusable named operations:
@@ -95,11 +106,41 @@ model: !$(model_types[model_kind])
 
 The body stays normal YAML. The vocabulary slot is what changes.
 
+For short cases, the slot does not need to come from a mapping at all:
+
+```yaml
+!set_default tag_value: ResNet
+
+model: !$(tag_value)
+  layers: 12
+```
+
+That works when the slot resolves to a symbolic tag name directly.
+
 This works for:
 
 - Python types
 - `!fn` templates
 - plain Python callables
+
+When the expression inside `!$(...)` stops being simple, alias it first:
+
+```yaml
+!define Action: ${llm_decide(prompt='triage', metrics=jobs.meta(group='trials'))}
+
+do: !Action {}
+```
+
+This is usually clearer than trying to cram a long expression directly into a tag, and it avoids awkward YAML-tag syntax when the expression contains spaces.
+
+The alias form is also the right one when your selection resolves to an actual Python type or callable object instead of a plain tag-name string:
+
+```yaml
+!define Tag: ${ResNet}
+
+model: !Tag
+  layers: 12
+```
 
 ## A note on CLI values
 
