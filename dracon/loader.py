@@ -37,6 +37,7 @@ from dracon.utils import (
     ser_debug,
     DEFAULT_EVAL_ENGINE,
 )
+from dracon.symbol_table import SymbolTable
 
 from dracon.interpolation import InterpolableNode, preprocess_references
 from dracon.merge import process_merges, add_to_context, merged, MergeKey, cached_merge_key
@@ -236,12 +237,15 @@ class DraconLoader:
 
         self._init_yaml()
 
-        self.context = (
-            ShallowDict[str, Any](self._context_arg)
-            if self._context_arg
-            else ShallowDict[str, Any]()
-        )
+        self.context = SymbolTable()
+        if self._context_arg:
+            self.context.update(self._context_arg)
         self.reset_context()
+
+    @property
+    def symbols(self) -> SymbolTable:
+        """SSOT access to the symbol table (same object as self.context)."""
+        return self.context
 
     def _init_yaml(self):
         self.yaml = PicklableYAML()

@@ -52,3 +52,16 @@ from dracon.callable import DraconCallable
 from dracon.pipe import DraconPipe
 from dracon.partial import DraconPartial
 from dracon.stack import CompositionStack, LayerSpec, LayerScope
+from dracon.symbols import (
+    SymbolKind,
+    ParamSpec,
+    ContractSpec,
+    InterfaceSpec,
+    Symbol,
+    BoundSymbol,
+    ValueSymbol,
+    CallableSymbol,
+    auto_symbol,
+)
+from dracon.symbol_table import SymbolEntry, SymbolTable
+from dracon.resolution import resolve_symbol, resolve_tag_target
