@@ -290,7 +290,10 @@ _BUILTIN_TAGS = frozenset({
 
 
 def _is_constructable_type_tag(node, loader) -> bool:
-    """True iff the node is a mapping/sequence whose tag resolves to a Python type."""
+    """True iff the node is a mapping/sequence whose tag resolves to a Python type.
+
+    Uses symbol table lookup when available, falls back to resolve_type.
+    """
     if not isinstance(node, (DraconMappingNode, DraconSequenceNode)):
         return False
     tag = getattr(node, 'tag', None)
@@ -298,19 +301,29 @@ def _is_constructable_type_tag(node, loader) -> bool:
         return False
     if tag in _BUILTIN_TAGS:
         return False
-    # exclude instruction tags (registered and pattern-based)
     if match_instruct(tag) is not None:
         return False
-    # exclude deferred tags
     if tag.startswith('!deferred'):
         return False
-    # try to resolve to a real Python type
+    tag_name = tag[1:]
+    # symbol table lookup: check if name resolves to a type
+    if loader and hasattr(loader, 'context'):
+        from dracon.symbol_table import SymbolTable
+        from dracon.symbols import SymbolKind
+        ctx = loader.context
+        if isinstance(ctx, SymbolTable):
+            sym = ctx.lookup_symbol(tag_name)
+            if sym is not None:
+                iface = sym.interface()
+                return iface.kind == SymbolKind.TYPE
+        # fallback for non-SymbolTable contexts
+        val = ctx.get(tag_name)
+        if val is not None:
+            return isinstance(val, type)
+    # import fallback
     try:
-        from dracon.draconstructor import resolve_type, get_all_types
-        localns = {}
-        if loader and hasattr(loader, 'context'):
-            localns.update(get_all_types(loader.context))
-        resolved = resolve_type(tag, localns=localns)
+        from dracon.draconstructor import resolve_type
+        resolved = resolve_type(tag, localns={})
         return resolved is not Any
     except (ValueError, ImportError):
         return False

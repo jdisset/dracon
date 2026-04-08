@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from dracon.symbols import Symbol
+from dracon.symbols import Symbol, SymbolKind
 from dracon.symbol_table import SymbolTable
 
 
@@ -27,3 +27,20 @@ def resolve_tag_target(table: SymbolTable, tag_name: str) -> Any | None:
     it references in the symbol table.
     """
     return table.get(tag_name)
+
+
+def is_type_symbol(table: SymbolTable, name: str) -> bool:
+    """Check if a name resolves to a type in the table."""
+    sym = table.lookup_symbol(name)
+    if sym is None:
+        return False
+    return sym.interface().kind == SymbolKind.TYPE
+
+
+def is_callable_symbol(table: SymbolTable, name: str) -> bool:
+    """Check if a name resolves to a callable (non-type) in the table."""
+    sym = table.lookup_symbol(name)
+    if sym is None:
+        return False
+    kind = sym.interface().kind
+    return kind in (SymbolKind.CALLABLE, SymbolKind.TEMPLATE, SymbolKind.PIPE)

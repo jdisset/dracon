@@ -1381,6 +1381,13 @@ class Program(BaseModel, Generic[T]):
             trace=trace_enabled, **kwargs
         )
         loader.update_context(tracked_context)
+        # enable tracking on the SymbolTable so accesses propagate to tracked_context
+        from dracon.symbol_table import SymbolTable
+        if isinstance(loader.context, SymbolTable):
+            loader.context.enable_tracking(
+                defined_var_keys=set(parsed_defined_vars.keys()),
+                shared_accessed=tracked_context._accessed_keys,
+            )
         loader.yaml.representer.exclude_defaults = False
 
         # ensure conf_type is available in context with full tag name for nested classes

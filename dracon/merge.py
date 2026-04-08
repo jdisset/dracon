@@ -375,6 +375,17 @@ def _ensure_soft_dict(ctx):
     """Ensure context dict supports soft key tracking."""
     if ctx is None:
         return SoftPriorityDict()
+    # SymbolTable: don't return as-is (would share the reference).
+    # downgrade to SoftPriorityDict to keep node contexts independent.
+    from dracon.symbol_table import SymbolTable
+    if isinstance(ctx, SymbolTable):
+        ctx._suspend_tracking = True
+        try:
+            spd = SoftPriorityDict(ctx)
+        finally:
+            ctx._suspend_tracking = False
+        spd._soft_keys = set(ctx._soft_keys)
+        return spd
     if hasattr(ctx, '_soft_keys'):
         return ctx
     # plain dict -> upgrade to SoftPriorityDict; other dict subclasses -> add _soft_keys attr
@@ -406,13 +417,23 @@ def add_to_context(new_context, existing_item, merge_key=DEFAULT_ADD_TO_CONTEXT_
                 if k not in ctx:
                     ctx[k] = v
         else:
-            existing_item.context = _ensure_soft_dict(ctx)
-            if merge_key.context_propagation:
-                mode_char = '+' if merge_key.dict_mode == MergeMode.APPEND else '~'
-                effective_key = cached_merge_key(f"{{{mode_char}<}}")
+            # SymbolTable: merge in-place to preserve type
+            from dracon.symbol_table import SymbolTable
+            if isinstance(ctx, SymbolTable):
+                if merge_key.context_propagation:
+                    mode_char = '+' if merge_key.dict_mode == MergeMode.APPEND else '~'
+                    effective_key = cached_merge_key(f"{{{mode_char}<}}")
+                else:
+                    effective_key = merge_key
+                _merge_into_symbol_table(ctx, new_context, effective_key)
             else:
-                effective_key = merge_key
-            existing_item.context = merged(existing_item.context, new_context, effective_key)
+                existing_item.context = _ensure_soft_dict(ctx)
+                if merge_key.context_propagation:
+                    mode_char = '+' if merge_key.dict_mode == MergeMode.APPEND else '~'
+                    effective_key = cached_merge_key(f"{{{mode_char}<}}")
+                else:
+                    effective_key = merge_key
+                existing_item.context = merged(existing_item.context, new_context, effective_key)
     else:
         existing_item.context = _ensure_soft_dict(new_context)
 
@@ -420,6 +441,48 @@ def add_to_context(new_context, existing_item, merge_key=DEFAULT_ADD_TO_CONTEXT_
         for k in existing_item._clear_ctx:
             if k in existing_item.context:
                 del existing_item.context[k]
+
+
+def _merge_into_symbol_table(table, new_context, merge_key):
+    """Merge new_context into a SymbolTable in-place, respecting merge key semantics.
+
+    Mirrors the soft key logic from merged()/merge_dicts():
+    pdict is the priority dict (winner), other is the loser.
+    If pdict has a soft key and other has a hard key, other's value wins.
+    """
+    existing_wins = merge_key.dict_priority == MergePriority.EXISTING
+    new_soft = getattr(new_context, '_soft_keys', None)
+
+    if existing_wins:
+        # existing (table) is pdict, new_context is other
+        for k, v in new_context.items():
+            if k not in table:
+                table[k] = v
+                if new_soft and k in new_soft:
+                    table._soft_keys.add(k)
+            elif table.is_soft(k) and not (new_soft and k in new_soft):
+                # pdict (table) has soft key, other (new) has hard key -> other wins
+                table[k] = v
+                table._soft_keys.discard(k)
+    else:
+        # new_context is pdict, table (existing) is other
+        for k, v in new_context.items():
+            if k not in table:
+                table[k] = v
+                if new_soft and k in new_soft:
+                    table._soft_keys.add(k)
+            else:
+                # key exists in both
+                is_new_soft = new_soft and k in new_soft
+                is_existing_soft = table.is_soft(k)
+                if is_new_soft and not is_existing_soft:
+                    # pdict (new) has soft key, other (existing) has hard key -> other wins, skip
+                    continue
+                table[k] = v
+                if is_new_soft:
+                    table._soft_keys.add(k)
+                else:
+                    table._soft_keys.discard(k)
 
 
 @ftrace(inputs=False, output=False, watch=[])

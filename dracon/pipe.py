@@ -20,14 +20,45 @@ class DraconPipe:
     Each stage's output feeds into the next:
     - Mapping output: kwarg-unpacked into next stage (wins over all other kwargs)
     - Typed output: passed as single value to the next stage's unfilled !require
+
+    Implements the Symbol protocol.
     """
 
-    __slots__ = ('_stages', '_stage_kwargs', '_name')
+    __slots__ = ('_stages', '_stage_kwargs', '_name', '_cached_interface')
 
     def __init__(self, stages, stage_kwargs, name=None):
         self._stages = tuple(stages)            # immutable sequence of callables
         self._stage_kwargs = tuple(stage_kwargs)  # immutable per-stage pre-filled kwargs
         self._name = name
+        self._cached_interface = None
+
+    # ── Symbol protocol ──────────────────────────────────────────────────
+
+    def interface(self):
+        if self._cached_interface is not None:
+            return self._cached_interface
+        from dracon.symbols import InterfaceSpec, SymbolKind, ParamSpec
+        req, opt = _scan_pipe_params(self)
+        params = tuple(
+            [ParamSpec(name=n, required=True) for n in req]
+            + [ParamSpec(name=n, required=False) for n in opt]
+        )
+        self._cached_interface = InterfaceSpec(
+            kind=SymbolKind.PIPE, name=self._name, params=params,
+        )
+        return self._cached_interface
+
+    def bind(self, **kwargs):
+        from dracon.symbols import BoundSymbol
+        return BoundSymbol(self, **kwargs)
+
+    def invoke(self, **kwargs):
+        return self(**kwargs)
+
+    def materialize(self):
+        return self
+
+    # ── existing API ─────────────────────────────────────────────────────
 
     def __call__(self, **kwargs):
         value = _SENTINEL
@@ -48,6 +79,7 @@ class DraconPipe:
         clone._stages = self._stages
         clone._stage_kwargs = self._stage_kwargs
         clone._name = self._name
+        clone._cached_interface = None
         return clone
 
     def __repr__(self):
@@ -61,64 +93,31 @@ def _scan_template_params(callable_obj):
     """Extract (required, optional) param names from a callable.
 
     Returns (list[str], list[str]) -- required param names, optional param names.
-    For DraconCallable: walks _template_node for !require/!set_default tags.
-    For DraconPipe: union of stages' params minus pipe-threaded ones.
-    For plain callables: inspect.signature.
+    Delegates to the Symbol protocol's interface() when available,
+    falls back to inspect.signature for plain callables.
     """
-    from dracon.callable import DraconCallable
-    from dracon.partial import DraconPartial
-
-    if isinstance(callable_obj, DraconCallable):
-        return _scan_dracon_callable_params(callable_obj)
-    elif isinstance(callable_obj, DraconPipe):
-        return _scan_pipe_params(callable_obj)
-    elif isinstance(callable_obj, DraconPartial):
-        req, opt = _scan_python_callable_params(callable_obj._func)
-        req = [r for r in req if r not in callable_obj._kwargs]
-        opt = [o for o in opt if o not in callable_obj._kwargs]
-        return req, opt
-    elif callable(callable_obj):
+    # Symbol protocol: DraconCallable, DraconPartial, DraconPipe all have interface()
+    if hasattr(callable_obj, 'interface') and not isinstance(callable_obj, type):
+        iface = callable_obj.interface()
+        required = [p.name for p in iface.params if p.required]
+        optional = [p.name for p in iface.params if not p.required]
+        return required, optional
+    if callable(callable_obj):
         return _scan_python_callable_params(callable_obj)
     return [], []
 
 
 def _scan_dracon_callable_params(fn):
-    """Walk a DraconCallable's template node for !require and !set_default.
-
-    Results are cached on fn._cached_params since template nodes are immutable.
-    """
+    """Backward compat wrapper. Delegates to fn._do_scan_params()."""
     if fn._cached_params is not None:
         return fn._cached_params
-
-    from dracon.composer import DraconMappingNode
-    from dracon.instructions import match_instruct, Require, SetDefault
-
-    node = fn._template_node
-    if not isinstance(node, DraconMappingNode):
-        fn._cached_params = ([], [])
-        return fn._cached_params
-
-    required = []
-    optional = []
-    for k_node, v_node in node.value:
-        tag = getattr(k_node, 'tag', None)
-        if not tag:
-            continue
-        inst = match_instruct(tag)
-        if inst is None:
-            continue
-        name = getattr(k_node, 'value', None)
-        if isinstance(inst, Require):
-            required.append(name)
-        elif isinstance(inst, SetDefault):
-            optional.append(name)
-    fn._cached_params = (required, optional)
-    return fn._cached_params
+    result = fn._do_scan_params()
+    fn._cached_params = result
+    return result
 
 
 def _scan_pipe_params(pipe):
     """Compute params for a DraconPipe from its stages."""
-    # for now, collect all required/optional from all stages
     all_required = []
     all_optional = []
     for stage, pre_kwargs in zip(pipe._stages, pipe._stage_kwargs):

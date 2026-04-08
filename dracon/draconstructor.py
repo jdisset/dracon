@@ -398,28 +398,55 @@ class Draconstructor(Constructor):
             self._depth -= 1
 
     def _invoke_callable(self, callable_obj, kwargs, loader_context, node):
-        """Invoke a callable, passing invocation context for DraconCallable."""
+        """Invoke a callable via the Symbol protocol when available, else direct call."""
         if isinstance(callable_obj, DraconCallable):
             inv_ctx = dict(loader_context)
             node_ctx = getattr(node, 'context', None)
             if node_ctx:
                 inv_ctx.update(node_ctx)
             return callable_obj.invoke(kwargs, invocation_context=inv_ctx)
+        # symbol protocol: bind + invoke
+        if hasattr(callable_obj, 'invoke') and hasattr(callable_obj, 'bind'):
+            return callable_obj.bind(**kwargs).invoke()
         return callable_obj(**kwargs)
 
     def _resolve_fn_target(self, func_path, loader_context, node):
-        """Resolve a function for !fn:path -- context first, then import."""
-        func = loader_context.get(func_path)
-        if func is None and hasattr(node, 'context'):
+        """Resolve a function for !fn:path -- symbol table / context first, then import."""
+        from dracon.resolution import resolve_tag_target
+        from dracon.symbol_table import SymbolTable
+        # symbol table lookup
+        if isinstance(loader_context, SymbolTable):
+            val = resolve_tag_target(loader_context, func_path)
+            if val is not None:
+                if not callable(val):
+                    raise ConstructorError(
+                        None, None,
+                        f"!fn:{func_path} resolved to non-callable {type(val).__name__}",
+                        node.start_mark,
+                    )
+                return val
+        else:
+            func = loader_context.get(func_path)
+            if func is not None:
+                if not callable(func):
+                    raise ConstructorError(
+                        None, None,
+                        f"!fn:{func_path} resolved to non-callable {type(func).__name__}",
+                        node.start_mark,
+                    )
+                return func
+        # node context fallback
+        if hasattr(node, 'context'):
             func = (node.context or {}).get(func_path)
-        if func is not None:
-            if not callable(func):
-                raise ConstructorError(
-                    None, None,
-                    f"!fn:{func_path} resolved to non-callable {type(func).__name__}",
-                    node.start_mark,
-                )
-            return func
+            if func is not None:
+                if not callable(func):
+                    raise ConstructorError(
+                        None, None,
+                        f"!fn:{func_path} resolved to non-callable {type(func).__name__}",
+                        node.start_mark,
+                    )
+                return func
+        # import fallback
         try:
             resolved = resolve_type(f'!{func_path}', localns=self.localns)
             if resolved is not Any:
