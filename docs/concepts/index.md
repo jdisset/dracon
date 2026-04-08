@@ -7,3 +7,4 @@ design tradeoffs, and mechanics that make the tutorials and guides make sense.
 - **[The Primitives](primitives.md)** -- All the building blocks and how they combine.
 - **[The Merge Operator](merge-algebra.md)** -- Deep dive into `<<:` syntax and merge behavior.
 - **[Context and Scope](context-and-scope.md)** -- How variables flow through the system and where they're visible.
+- **[The Open Vocabulary](open-vocabulary.md)** -- Why values, types, templates, partials, and pipes all live in one shared namespace.

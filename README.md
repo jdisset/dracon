@@ -120,62 +120,69 @@ python app.py +base.yaml +prod.yaml --workers 8
 
 ## Patterns Worth Knowing
 
-### Dynamic Skeletons
+### Layered Vocabularies
 
-One entry config can pick datasets and presets dynamically, instead of duplicating the same experiment config over and over:
-
-```yaml
-!set_default dataset_file: "datasets/genomics.yaml"
-!set_default preset: "regression"
-
-dataset: !include file:$DIR/${dataset_file}
-<<{+>}: !include file:$DIR/presets/${preset}.yaml
-```
-
-That is the basic trick behind turning `M x N` near-duplicate configs into `1 + M + N`.
-
-### Vocabulary Files
-
-You can define reusable YAML tags in one file and import them into another:
+Vocabulary files can build on other vocabulary files, so users only see the higher-level tags:
 
 ```yaml
-# mylib/vocabulary.yaml
+# infra.yaml
 !define Service: !fn
   !require name: "service name"
   !set_default port: 8080
-  url: "https://${name}.internal:${port}"
+  !fn :
+    url: "https://${name}.internal:${port}"
+
+# ml.yaml
+<<(<): !include pkg:mylib:infra.yaml
+
+!define Experiment: !fn
+  !require name: "experiment"
+  !fn :
+    api: !Service { name: "${name}-api", port: 443 }
+
+# config.yaml
+<<(<): !include pkg:mylib:ml.yaml
+run: !Experiment { name: genomics-v2 }
 ```
+
+So a config vocabulary can layer cleanly instead of flattening back into Python every time it grows.
+
+### Hybrid Pipelines
+
+Pipelines can stay in YAML even when the stages are ordinary Python functions:
 
 ```yaml
-# config.yaml
-<<(<): !include pkg:mylib:vocabulary.yaml
+!define vit_pipeline: !pipe
+  - load_data
+  - validate: { minimum: 2 }
+  - train_vit
 
-api: !Service { name: api, port: 443 }
-worker: !Service { name: worker }
+report: ${vit_pipeline(source='s3://raw')}
 ```
 
-So you can build a shared config vocabulary without needing a bunch of Python-side glue.
+That gives you config-defined workflow shape without needing to move the actual stage logic out of Python.
 
-### Late-Bound Runtime Pieces
+### Runtime Contracts
 
-Some parts of config only make sense once the program is already running. `!deferred` lets those parts wait:
+Runtime-only config does not need to turn into hand-written glue:
 
 ```yaml
 reporting: !deferred
+  !require run_id: "runtime run identifier"
+  !assert ${len(run_id) > 0}: "run_id must not be empty"
+
   output_dir: "/runs/${run_id}"
-  files:
-    !each(name) ${logger_names}:
-      - name: ${name}
-        path: "/runs/${run_id}/${name}.json"
+  summary:
+    path: "/runs/${run_id}/summary.json"
 ```
 
 ```python
 reporting = config["reporting"].construct(
-    context={"run_id": run_id, "logger_names": ["metrics", "artifacts"]},
+    context={"run_id": run_id},
 )
 ```
 
-So runtime-only values can still live in config instead of being reimplemented by hand in Python.
+So the config itself declares what it needs at runtime and what should happen once those values exist.
 
 The docs go deeper on these in the [Patterns](https://jdisset.github.io/dracon/patterns/) section.
 

@@ -2,6 +2,8 @@
 
 You have repeated config patterns. You want to parameterize them without copy-pasting, and compose them into pipelines.
 
+If you are here for the bigger design patterns built on top of these primitives, see [Hybrid Pipelines](../patterns/hybrid-pipelines.md), [Higher-Order Config](../patterns/higher-order-config.md), and [The Open Vocabulary](../concepts/open-vocabulary.md).
+
 ## When to use what
 
 Before reaching for `!fn`, check if a simpler tool fits:

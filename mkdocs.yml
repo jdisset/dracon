@@ -83,8 +83,14 @@ nav:
       - "The Primitives": "concepts/primitives.md"
       - "The Merge Operator": "concepts/merge-algebra.md"
       - "Context and Scope": "concepts/context-and-scope.md"
+      - "The Open Vocabulary": "concepts/open-vocabulary.md"
   - "Patterns":
       - patterns/index.md
+      - "Runtime Contracts": "patterns/runtime-contracts.md"
+      - "Constructor Slots": "patterns/constructor-slots.md"
+      - "Layered Vocabularies": "patterns/layered-vocabularies.md"
+      - "Hybrid Pipelines": "patterns/hybrid-pipelines.md"
+      - "Higher-Order Config": "patterns/higher-order-config.md"
       - "Dynamic Skeleton": "patterns/dynamic-skeleton.md"
       - "Config Templates": "patterns/config-templates.md"
       - "Sweep Generation": "patterns/sweep-generation.md"

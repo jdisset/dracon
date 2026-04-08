@@ -2,6 +2,8 @@
 
 Some values aren't available when the config loads. A runtime ID, a trained model, a database connection pool. Dracon gives you several ways to defer evaluation until the information exists.
 
+If what you want is a clean declarative runtime boundary, start with [Runtime Contracts](../patterns/runtime-contracts.md). This guide covers the underlying mechanisms.
+
 ## When to use what
 
 | Situation | Tool | Why |

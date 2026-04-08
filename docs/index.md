@@ -51,7 +51,8 @@ Dracon processes configuration in three phases:
 - [Auto-generated CLIs](guides/cli-patterns.md) -- turn any Pydantic model into a CLI with `Arg` annotations
 - [YAML functions (`!fn`, `!pipe`)](guides/yaml-functions.md) -- reusable templates and pipelines inside YAML
 - [Type-safe with Pydantic](concepts/lifecycle.md) -- Pydantic validation, nested models, discriminated unions
+- [The open vocabulary](concepts/open-vocabulary.md) -- values, constructors, and callables all become composable named building blocks
 - [Deferred execution](guides/deferred-execution.md) -- values that depend on runtime context
 - [Interpolation engine](reference/interpolation.md) -- embed Python expressions with `${...}`, reference other keys with `@/path`
 - [Config introspection](guides/debugging.md) -- `dracon show` to inspect composition before writing Python
-- [Real-world patterns](patterns/index.md) -- dynamic skeletons, config templates, sweep generation
+- [Real-world patterns](patterns/index.md) -- runtime contracts, layered vocabularies, hybrid pipelines, dynamic skeletons

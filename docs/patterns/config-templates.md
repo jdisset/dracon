@@ -159,60 +159,21 @@ Advantages over the anchor approach:
 - Composes with `!each` for generating many instances from a list.
 - Each call gets a fresh, isolated scope. No variable leaking between calls.
 
-## 4. The vocabulary pattern
+## 4. Vocabulary files
 
-When you have a package that defines multiple reusable templates, you can bundle them into a "vocabulary" file. The key ingredient is the `(<)` merge option, which propagates the included file's `!define` variables up to the parent scope.
+When templates stop being one-off helpers and start becoming a real public surface, you are in vocabulary territory.
 
-The vocabulary file:
-
-```yaml
-# mypackage/vocabulary.yaml
-
-!define Service: !fn
-  !require name: "service name"
-  !require port: "port number"
-  !set_default replicas: 1
-  image: myapp/${name}:latest
-  port: ${port}
-  replicas: ${replicas}
-
-!define Database: !fn
-  !require host: "database hostname"
-  !set_default port: 5432
-  !set_default pool_size: 10
-  host: ${host}
-  port: ${port}
-  pool:
-    size: ${pool_size}
-    timeout: 30
-
-!define default_region: us-east-1
-```
-
-The config that imports it:
+The basic version is still:
 
 ```yaml
-# config.yaml
-
 <<(<): !include pkg:mypackage:vocabulary.yaml
-
-services:
-  auth: !Service { name: auth, port: 8001 }
-  api: !Service { name: api, port: 8002 }
-
-database: !Database { host: db.prod.internal }
-
-region: ${default_region}
 ```
 
-The `(<)` in the merge key does two things:
+That propagates `!define` and `!set_default` values from the included file into the parent scope, so exported callables can be used as tags in the importing file.
 
-1. **Variable propagation**: all `!define` and `!set_default` from the included file become available in the parent scope. That's how `!Service`, `!Database`, and `${default_region}` are accessible in `config.yaml`.
-2. **Tag resolution**: the defined callables (`Service`, `Database`) can be used as YAML tags (`!Service`, `!Database`) in the parent file.
+The more interesting version is when vocabularies build on earlier vocabularies, and imported templates use other imported templates internally. That is now a separate pattern because it deserves its own treatment:
 
-Without `(<)`, the included file's defines stay local to the include scope. The merge would still merge any concrete keys, but the tags and variables would not be usable in the parent.
-
-This is the right pattern when you're building a shared library of config building blocks. Put the vocabulary in a Python package, and any project that depends on it can `!include pkg:mypackage:vocabulary.yaml` to get the full set of templates.
+- [Layered Vocabularies](layered-vocabularies.md)
 
 ## When to use what
 
@@ -221,7 +182,7 @@ This is the right pattern when you're building a shared library of config buildi
 | Anchors + `__dracon__` | Same-file templates, simple cases, few instantiations |
 | `!include` + merge | Cross-file, one-shot includes, large templates |
 | `!fn` | Reusable, parameterized, multiple calls, expression-friendly |
-| Vocabulary + `(<)` | Package-level shared templates, team-wide building blocks |
+| Vocabulary + `(<)` | Package-level shared templates and layered config DSLs |
 
 They're not mutually exclusive. A vocabulary file might define `!fn` templates internally. An `!fn` template might use `!include` in its body. Pick the one that fits the scale and reuse pattern of your situation.
 
