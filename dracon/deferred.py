@@ -43,6 +43,8 @@ class DeferredNode(ContextNode, Generic[T]):
     Allows to "pause" the composition of the contained node until construct is called
     All of dracons tree walking functions see this node as a leaf, i.e. it will not
     be traversed further.
+
+    Implements the Symbol protocol: interface() / bind() / invoke() / materialize().
     """
 
     def __init__(
@@ -106,6 +108,7 @@ class DeferredNode(ContextNode, Generic[T]):
 
         self.path = path
         self._full_composition: Optional[CompositionResult] = comp
+        self._cached_interface = None
 
     def __getstate__(self):
         state = DraconScalarNode.__getstate__(self)
@@ -129,6 +132,37 @@ class DeferredNode(ContextNode, Generic[T]):
         self._full_composition = state['_full_composition']
         self._original_clear_ctx = state.get('_original_clear_ctx')
         self._creation_context = state.get('_creation_context')
+        self._cached_interface = None
+
+    # ── Symbol protocol ──────────────────────────────────────────────────
+
+    def interface(self):
+        if self._cached_interface is not None:
+            return self._cached_interface
+        from dracon.symbols import InterfaceSpec, SymbolKind, ParamSpec, ContractSpec, SymbolSourceInfo
+        params, contracts = _scan_deferred_interface(self.value)
+        source = None
+        if self._creation_context:
+            source = SymbolSourceInfo(
+                file_path=getattr(self._creation_context, 'file_path', None),
+                line=getattr(self._creation_context, 'line', None),
+            )
+        self._cached_interface = InterfaceSpec(
+            kind=SymbolKind.DEFERRED, name=None, params=params,
+            contracts=contracts, source=source,
+        )
+        return self._cached_interface
+
+    def bind(self, **kwargs):
+        from dracon.symbols import BoundSymbol
+        return BoundSymbol(self, **kwargs)
+
+    def invoke(self, **kwargs):
+        cp = self.copy()
+        return cp.construct(context=kwargs)
+
+    def materialize(self):
+        return self
 
     @ftrace(watch=[])
     def update_context(self, context):
@@ -291,6 +325,42 @@ class DeferredNode(ContextNode, Generic[T]):
             del json_schema["type"]
 
         return json_schema
+
+
+def _scan_deferred_interface(node):
+    """Extract params and contracts from a deferred node's value tree.
+
+    Walks the top-level mapping keys looking for !require, !set_default, !assert tags.
+    Returns (tuple[ParamSpec, ...], tuple[ContractSpec, ...]).
+    """
+    from dracon.symbols import ParamSpec, ContractSpec
+    from dracon.composer import DraconMappingNode
+    from dracon.interpolation import InterpolableNode
+
+    params = []
+    contracts = []
+
+    if not isinstance(node, DraconMappingNode):
+        return (), ()
+
+    for k_node, v_node in node.value:
+        tag = getattr(k_node, 'tag', None)
+        if not tag or not isinstance(tag, str):
+            continue
+        name = getattr(k_node, 'value', None)
+        hint = getattr(v_node, 'value', None) if hasattr(v_node, 'value') else str(v_node)
+        if tag == '!require':
+            params.append(ParamSpec(name=name, required=True, docs=hint))
+        elif tag in ('!set_default', '!define?'):
+            params.append(ParamSpec(name=name, required=False, docs=hint))
+        elif tag == '!assert':
+            # key is the expression (may be interpolable), value is the message
+            expr = name
+            if isinstance(k_node, InterpolableNode):
+                expr = k_node.value
+            contracts.append(ContractSpec(kind='assert', name=expr or '', message=hint))
+
+    return tuple(params), tuple(contracts)
 
 
 def make_deferred(

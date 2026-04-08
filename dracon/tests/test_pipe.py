@@ -201,11 +201,10 @@ class TestPipeDictVsTyped:
 
 
 class TestPipeSignatureIntrospection:
-    """_scan_template_params and _get_unfilled_require unit tests."""
+    """Symbol interface-based param introspection for pipe stages."""
 
     def test_scan_template_requires(self):
-        """Finds !require param names in a DraconCallable template."""
-        from dracon.pipe import _scan_template_params
+        """Finds !require param names via symbol interface()."""
         from dracon.callable import DraconCallable
         yaml = """
         !define f: !fn
@@ -218,13 +217,14 @@ class TestPipeSignatureIntrospection:
         config = loader.loads(yaml)
         f = config['check']
         assert isinstance(f, DraconCallable)
-        req, opt = _scan_template_params(f)
-        assert sorted(req) == ['alpha', 'beta']
+        iface = f.interface()
+        req = sorted(p.name for p in iface.params if p.required)
+        opt = [p.name for p in iface.params if not p.required]
+        assert req == ['alpha', 'beta']
         assert opt == []
 
     def test_scan_template_defaults(self):
-        """Finds !set_default param names in a DraconCallable template."""
-        from dracon.pipe import _scan_template_params
+        """Finds !set_default param names via symbol interface()."""
         yaml = """
         !define f: !fn
           !require x: "val"
@@ -235,13 +235,15 @@ class TestPipeSignatureIntrospection:
         loader = DraconLoader()
         config = loader.loads(yaml)
         f = config['check']
-        req, opt = _scan_template_params(f)
+        iface = f.interface()
+        req = [p.name for p in iface.params if p.required]
+        opt = [p.name for p in iface.params if not p.required]
         assert req == ['x']
         assert opt == ['y']
 
     def test_get_unfilled_require_single(self):
         """Correctly identifies the one unfilled !require."""
-        from dracon.pipe import _get_unfilled_require, _scan_template_params
+        from dracon.pipe import _get_unfilled_require
         yaml = """
         !define f: !fn
           !require a: "val"

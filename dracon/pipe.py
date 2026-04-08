@@ -7,11 +7,29 @@ import collections.abc
 
 _SENTINEL = object()
 
+# tags that are dracon builtins, never constructable types (local copy to decouple from instructions.py)
+_PIPE_BUILTIN_TAGS = frozenset({
+    '!include', '!include?', '!noconstruct', '!unset', '!fn', '!pipe',
+    '!define', '!define?', '!set_default', '!require', '!assert',
+    'tag:yaml.org,2002:map', 'tag:yaml.org,2002:seq',
+    'tag:yaml.org,2002:str', 'tag:yaml.org,2002:int',
+    'tag:yaml.org,2002:float', 'tag:yaml.org,2002:bool',
+    'tag:yaml.org,2002:null', 'tag:yaml.org,2002:binary',
+    'tag:yaml.org,2002:timestamp',
+})
+
+
 def _has_custom_tag(node):
     """True if node has a custom YAML tag (not a builtin or default type tag)."""
-    from dracon.instructions import _BUILTIN_TAGS
     tag = getattr(node, 'tag', None)
-    return tag and isinstance(tag, str) and tag.startswith('!') and tag not in _BUILTIN_TAGS
+    return tag and isinstance(tag, str) and tag.startswith('!') and tag not in _PIPE_BUILTIN_TAGS
+
+
+def _stage_interface(stage):
+    """Get InterfaceSpec for a stage, wrapping plain callables via auto_symbol."""
+    from dracon.symbols import auto_symbol
+    sym = auto_symbol(stage)
+    return sym.interface()
 
 
 class DraconPipe:
@@ -38,10 +56,21 @@ class DraconPipe:
         if self._cached_interface is not None:
             return self._cached_interface
         from dracon.symbols import InterfaceSpec, SymbolKind, ParamSpec
-        req, opt = _scan_pipe_params(self)
+        all_required, all_optional = [], []
+        for stage, pre_kwargs in zip(self._stages, self._stage_kwargs):
+            iface = _stage_interface(stage)
+            for p in iface.params:
+                if p.name in pre_kwargs:
+                    continue
+                if p.required:
+                    if p.name not in all_required:
+                        all_required.append(p.name)
+                else:
+                    if p.name not in all_optional:
+                        all_optional.append(p.name)
         params = tuple(
-            [ParamSpec(name=n, required=True) for n in req]
-            + [ParamSpec(name=n, required=False) for n in opt]
+            [ParamSpec(name=n, required=True) for n in all_required]
+            + [ParamSpec(name=n, required=False) for n in all_optional]
         )
         self._cached_interface = InterfaceSpec(
             kind=SymbolKind.PIPE, name=self._name, params=params,
@@ -86,77 +115,18 @@ class DraconPipe:
         return f"DraconPipe(name={self._name!r}, stages={len(self._stages)})"
 
 
-# ── signature introspection ──────────────────────────────────────────────────
-
-
-def _scan_template_params(callable_obj):
-    """Extract (required, optional) param names from a callable.
-
-    Returns (list[str], list[str]) -- required param names, optional param names.
-    Delegates to the Symbol protocol's interface() when available,
-    falls back to inspect.signature for plain callables.
-    """
-    # Symbol protocol: DraconCallable, DraconPartial, DraconPipe all have interface()
-    if hasattr(callable_obj, 'interface') and not isinstance(callable_obj, type):
-        iface = callable_obj.interface()
-        required = [p.name for p in iface.params if p.required]
-        optional = [p.name for p in iface.params if not p.required]
-        return required, optional
-    if callable(callable_obj):
-        return _scan_python_callable_params(callable_obj)
-    return [], []
-
-
-def _scan_dracon_callable_params(fn):
-    """Backward compat wrapper. Delegates to fn._do_scan_params()."""
-    if fn._cached_params is not None:
-        return fn._cached_params
-    result = fn._do_scan_params()
-    fn._cached_params = result
-    return result
-
-
-def _scan_pipe_params(pipe):
-    """Compute params for a DraconPipe from its stages."""
-    all_required = []
-    all_optional = []
-    for stage, pre_kwargs in zip(pipe._stages, pipe._stage_kwargs):
-        req, opt = _scan_template_params(stage)
-        for r in req:
-            if r not in pre_kwargs and r not in all_required:
-                all_required.append(r)
-        for o in opt:
-            if o not in pre_kwargs and o not in all_optional:
-                all_optional.append(o)
-    return all_required, all_optional
-
-
-def _scan_python_callable_params(fn):
-    """Use inspect.signature for plain Python callables."""
-    import inspect
-    try:
-        sig = inspect.signature(fn)
-    except (ValueError, TypeError):
-        return [], []
-    required = []
-    optional = []
-    for name, param in sig.parameters.items():
-        if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
-            continue
-        if param.default is param.empty:
-            required.append(name)
-        else:
-            optional.append(name)
-    return required, optional
+# ── interface-based threading helpers ────────────────────────────────────────
 
 
 def _get_unfilled_require(stage, filled_kwargs):
-    """Find the single unfilled !require in stage given already-filled kwargs.
+    """Find the single unfilled required param in stage given already-filled kwargs.
 
+    Uses the unified symbol interface instead of bespoke scanning.
     Raises CompositionError if zero or 2+ unfilled requires.
     """
     from dracon.diagnostics import CompositionError
-    required, _ = _scan_template_params(stage)
+    iface = _stage_interface(stage)
+    required = [p.name for p in iface.params if p.required]
     unfilled = [r for r in required if r not in filled_kwargs]
     if len(unfilled) == 0:
         raise CompositionError(

@@ -176,10 +176,10 @@ def _params_from_callable(obj: Any) -> tuple[ParamSpec, ...]:
 def auto_symbol(value: Any, *, name: str | None = None, source: SymbolSourceInfo | None = None) -> Symbol[Any]:
     """Create the appropriate Symbol subclass for a value.
 
-    DraconCallable, DraconPartial, DraconPipe instances implement Symbol
-    and are returned as-is. Types/classes are wrapped in CallableSymbol
-    (even if they have protocol methods, since calling .materialize() on
-    the class itself rather than an instance would fail).
+    DraconCallable, DraconPartial, DraconPipe, DeferredNode instances
+    implement Symbol and are returned as-is. Types/classes are wrapped
+    in CallableSymbol (even if they have protocol methods, since calling
+    .materialize() on the class itself rather than an instance would fail).
     Plain callables get wrapped in CallableSymbol.
     Everything else becomes ValueSymbol.
     """
@@ -187,7 +187,7 @@ def auto_symbol(value: Any, *, name: str | None = None, source: SymbolSourceInfo
     # structurally matches the Symbol protocol (its methods are unbound)
     if isinstance(value, type):
         return CallableSymbol(value, name=name, source=source)
-    # instances that already satisfy the protocol (DraconCallable, DraconPartial, DraconPipe, etc.)
+    # instances that already satisfy the protocol (DraconCallable, DraconPartial, DraconPipe, DeferredNode, etc.)
     if isinstance(value, (ValueSymbol, CallableSymbol, BoundSymbol)):
         return value
     if hasattr(value, 'interface') and hasattr(value, 'bind') and hasattr(value, 'invoke') and hasattr(value, 'materialize'):
