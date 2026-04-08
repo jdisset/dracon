@@ -1,7 +1,7 @@
 # Copyright (c) 2025 Jean Disset
 # MIT License - see LICENSE file for details.
 
-"""Tests for Phase 4: catalog, symbols CLI, __scope__, and error improvements."""
+"""Tests for catalog, symbols CLI, __scope__, and error improvements."""
 
 import json
 import os
@@ -291,7 +291,7 @@ report: !deferred
 
 
 class TestRegressions:
-    """Existing patterns still work after Phase 4 changes."""
+    """Existing patterns still work after catalog changes."""
 
     def test_constructor_slots(self):
         """Dynamic tag selection from a mapping."""

@@ -1,7 +1,7 @@
 # Copyright (c) 2025 Jean Disset
 # MIT License - see LICENSE file for details.
 
-"""Phase 5 tests: symbol algebra -- universal binding and composition.
+"""Symbol algebra tests: universal binding and composition.
 
 Covers:
 - !fn:TypeName produces a bound type symbol
@@ -59,7 +59,7 @@ class TestFnTargetTypeBinding:
     def test_fn_type_produces_callable_result(self):
         """!fn:TypeName { kwargs } produces something callable that constructs."""
         cfg = _loads("""
-val: !fn:dracon.tests.test_phase5_symbol_algebra.SimpleModel
+val: !fn:dracon.tests.test_symbol_algebra.SimpleModel
   x: 10
 """)
         result = cfg['val']
@@ -72,7 +72,7 @@ val: !fn:dracon.tests.test_phase5_symbol_algebra.SimpleModel
 
     def test_fn_type_zero_kwargs(self):
         """!fn:TypeName with no kwargs produces a partial that uses defaults."""
-        cfg = _loads("val: !fn:dracon.tests.test_phase5_symbol_algebra.SimpleModel")
+        cfg = _loads("val: !fn:dracon.tests.test_symbol_algebra.SimpleModel")
         result = cfg['val']
         assert callable(result)
         obj = result()
@@ -95,7 +95,7 @@ val: !fn:SimpleModel
     def test_fn_type_invoke_as_tag(self):
         """A bound type from !fn:Type can be invoked as a tag later."""
         cfg = _loads("""
-!define MyModel: !fn:dracon.tests.test_phase5_symbol_algebra.SimpleModel
+!define MyModel: !fn:dracon.tests.test_symbol_algebra.SimpleModel
   x: 100
 result: !MyModel
   y: 200
@@ -250,7 +250,7 @@ class TestHigherOrderSymbolReturns:
         cfg = _loads("""
 !define make_greeter: !fn
   !require greeting: "the greeting"
-  !fn : !fn:dracon.tests.test_phase5_symbol_algebra._greet
+  !fn : !fn:dracon.tests.test_symbol_algebra._greet
     greeting: ${greeting}
 !define greeter: !make_greeter { greeting: yo }
 result: ${greeter(name='world')}
@@ -262,7 +262,7 @@ result: ${greeter(name='world')}
         cfg = _loads("""
 !define make_model: !fn
   !require default_x: "default x value"
-  !fn : !fn:dracon.tests.test_phase5_symbol_algebra.SimpleModel
+  !fn : !fn:dracon.tests.test_symbol_algebra.SimpleModel
     x: ${default_x}
 !define factory: !make_model { default_x: 99 }
 factory_ref: ${factory}
@@ -279,7 +279,7 @@ factory_ref: ${factory}
         cfg = _loads("""
 !define make_greeter: !fn
   !require greeting: "the greeting"
-  !fn : !fn:dracon.tests.test_phase5_symbol_algebra._greet
+  !fn : !fn:dracon.tests.test_symbol_algebra._greet
     greeting: ${greeting}
 !define hey_greeter: !make_greeter { greeting: hey }
 result: ${hey_greeter(name='there')}
@@ -295,18 +295,18 @@ class TestBoundSymbolSerialization:
         """!fn:path with kwargs survives dump -> reload -> call."""
         from dracon import dump
         cfg = _loads("""
-val: !fn:dracon.tests.test_phase5_symbol_algebra._add
+val: !fn:dracon.tests.test_symbol_algebra._add
   a: 10
 """)
         dumped = dump(cfg)
-        assert '!fn:dracon.tests.test_phase5_symbol_algebra._add' in dumped
+        assert '!fn:dracon.tests.test_symbol_algebra._add' in dumped
         cfg2 = _loads(dumped)
         assert cfg2['val'](b=5) == 15
 
     def test_fn_path_pickle_roundtrip(self):
         """!fn:path partials survive pickle round-trip."""
         cfg = _loads("""
-val: !fn:dracon.tests.test_phase5_symbol_algebra._add
+val: !fn:dracon.tests.test_symbol_algebra._add
   a: 10
 """)
         data = pickle.dumps(cfg['val'])
@@ -326,7 +326,7 @@ class TestRegression:
 
     def test_fn_path_with_kwargs(self):
         cfg = _loads("""
-val: !fn:dracon.tests.test_phase5_symbol_algebra._greet
+val: !fn:dracon.tests.test_symbol_algebra._greet
   greeting: howdy
 """)
         assert cfg['val'](name="world") == "howdy world"

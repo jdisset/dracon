@@ -1,7 +1,7 @@
 # Copyright (c) 2025 Jean Disset
 # MIT License - see LICENSE file for details.
 
-"""Phase 3 tests: pipes and deferred on InterfaceSpec.
+"""Tests: pipes and deferred on InterfaceSpec.
 
 Covers:
 - pipe param inference via symbol.interface() instead of bespoke scanners

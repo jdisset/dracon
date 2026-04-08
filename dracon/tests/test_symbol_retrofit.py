@@ -1,9 +1,9 @@
 # Copyright (c) 2025 Jean Disset
 # MIT License - see LICENSE file for details.
 
-"""Phase 2 characterization tests: type/callable tags, interpolated tags,
+"""Characterization tests: type/callable tags, interpolated tags,
 !fn:path resolution, !define alias, propagation, and DraconCallable/Partial/Pipe
-used directly. These cover existing behavior before the retrofit."""
+used directly."""
 
 import pytest
 from pydantic import BaseModel
@@ -210,7 +210,7 @@ val: ${pipeline(x=1.0, y=2.0)}
 # ── Symbol protocol on retrofitted classes ───────────────────────────────────
 
 class TestSymbolProtocolRetrofit:
-    """After Phase 2, DraconCallable/Partial/Pipe should implement Symbol."""
+    """DraconCallable/Partial/Pipe should implement Symbol."""
 
     def test_dracon_callable_is_symbol(self):
         """DraconCallable created via context implements Symbol protocol."""
@@ -283,8 +283,8 @@ class TestSymbolProtocolRetrofit:
 # ── _is_constructable_type_tag replacement ───────────────────────────────────
 
 class TestIsConstructableTypeTagReplacement:
-    """After Phase 2, _is_constructable_type_tag should still be importable
-    but internally uses symbol table lookups."""
+    """_is_constructable_type_tag should still be importable
+    and internally uses symbol table lookups."""
 
     def test_known_type_in_context(self):
         from dracon.instructions import _is_constructable_type_tag

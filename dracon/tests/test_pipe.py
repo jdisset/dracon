@@ -13,7 +13,7 @@ def _loads(yaml_str, **ctx):
     return config
 
 
-# ── Phase 1: Core behavior ──────────────────────────────────────────────────
+# ── Core behavior ──────────────────────────────────────────────────────────
 
 
 class TestPipeCoreBasic:
@@ -117,7 +117,7 @@ class TestPipeCoreBasic:
         assert config['out']['result'] == 3
 
 
-# ── Phase 2: Dict unpack vs typed threading ──────────────────────────────────
+# ── Dict unpack vs typed threading ────────────────────────────────────────────
 
 
 class TestPipeDictVsTyped:
@@ -197,7 +197,7 @@ class TestPipeDictVsTyped:
         assert config['out']['result'] == 'computed_1'
 
 
-# ── Phase 3: Signature introspection ─────────────────────────────────────────
+# ── Signature introspection ───────────────────────────────────────────────────
 
 
 class TestPipeSignatureIntrospection:
@@ -292,7 +292,7 @@ class TestPipeSignatureIntrospection:
             _get_unfilled_require(f, {})
 
 
-# ── Phase 4: Stage resolution & errors ───────────────────────────────────────
+# ── Stage resolution & errors ─────────────────────────────────────────────────
 
 
 class TestPipeStageErrors:
@@ -336,7 +336,7 @@ class TestPipeStageErrors:
             _loads(yaml)
 
 
-# ── Phase 5: Composition & invocation ────────────────────────────────────────
+# ── Composition & invocation ──────────────────────────────────────────────────
 
 
 class TestPipeComposition:
@@ -434,7 +434,7 @@ class TestPipeComposition:
         assert config['results'] == [1, 3, 5, 7]
 
 
-# ── Phase 6: Integration ─────────────────────────────────────────────────────
+# ── Integration ──────────────────────────────────────────────────────────────
 
 
 class TestPipeIntegration:
