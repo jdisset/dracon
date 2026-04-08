@@ -163,7 +163,7 @@ _templates: ${__scope__.names(kind='template')}
 _service_iface: ${__scope__.interface('Service')}
 ```
 
-The `__scope__` proxy exposes `names()`, `has()`, `interface()`, `kinds()`, and `exported()`.
+The `__scope__` object is the symbol table itself and exposes `names()`, `has()`, `interface()`, `kinds()`, `exported()`, `describe()`, and `to_json()`.
 
 ## Variable inspection
 

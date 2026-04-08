@@ -5,10 +5,9 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import MutableMapping, Iterator, Iterable
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 from dracon.symbols import (
     Symbol,

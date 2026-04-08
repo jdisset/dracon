@@ -43,4 +43,4 @@ def is_callable_symbol(table: SymbolTable, name: str) -> bool:
     if sym is None:
         return False
     kind = sym.interface().kind
-    return kind in (SymbolKind.CALLABLE, SymbolKind.TEMPLATE, SymbolKind.PIPE)
+    return kind in (SymbolKind.CALLABLE, SymbolKind.TEMPLATE, SymbolKind.PIPE, SymbolKind.DEFERRED)

@@ -484,7 +484,7 @@ class Draconstructor(Constructor):
 
         sym = auto_symbol(obj, name=tag_name)
         kind = sym.interface().kind
-        if kind not in (SymbolKind.CALLABLE, SymbolKind.TEMPLATE, SymbolKind.PIPE):
+        if kind not in (SymbolKind.CALLABLE, SymbolKind.TEMPLATE, SymbolKind.PIPE, SymbolKind.DEFERRED):
             return _SYMBOL_MISS
 
         if isinstance(node, MappingNode):
