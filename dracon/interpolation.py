@@ -24,6 +24,7 @@ from dracon.interpolation_utils import (
     InterpolationMatch,
     find_field_references,
     transform_dollar_vars,
+    unescape_dracon_specials,
 )
 
 
@@ -580,6 +581,7 @@ def evaluate_expression(
     enable_shorthand_vars: bool = True,
     source_context: Optional[SourceContext] = None,
     permissive: bool = False,
+    _unescape_result: bool = True,
 ) -> Any:
     from dracon.merge import merged, cached_merge_key
 
@@ -592,6 +594,8 @@ def evaluate_expression(
         interpolations = init_outermost_interpolations
 
     if not interpolations:
+        if _unescape_result and isinstance(expr, str):
+            return unescape_dracon_specials(expr)
         return expr
 
     if isinstance(current_path, str):
@@ -627,6 +631,7 @@ def evaluate_expression(
             enable_shorthand_vars=enable_shorthand_vars,
             source_context=source_context,
             permissive=permissive,
+            _unescape_result=False,
         )
         evaluated_expr = do_safe_eval(str(resolved_expr), engine, symbols, source_context, permissive=permissive)
         if evaluated_expr is UNRESOLVED_SENTINEL:
@@ -651,6 +656,7 @@ def evaluate_expression(
                 enable_shorthand_vars=enable_shorthand_vars,
                 source_context=source_context,
                 permissive=permissive,
+                _unescape_result=False,
             )
             evaluated_expr = do_safe_eval(str(resolved_expr), engine, symbols, source_context, permissive=permissive)
             if evaluated_expr is UNRESOLVED_SENTINEL:
@@ -667,6 +673,8 @@ def evaluate_expression(
 
     # short-circuit recursion if permissive and no progress made
     if permissive and not made_progress:
+        if _unescape_result and isinstance(endexpr, str):
+            return unescape_dracon_specials(endexpr)
         return endexpr
 
     if allow_recurse != 0 and isinstance(endexpr, str) and '${' in endexpr:
@@ -680,7 +688,10 @@ def evaluate_expression(
             enable_shorthand_vars=enable_shorthand_vars,
             source_context=source_context,
             permissive=permissive,
+            _unescape_result=_unescape_result,
         )
+    if _unescape_result and isinstance(endexpr, str):
+        endexpr = unescape_dracon_specials(endexpr)
     return endexpr
 
 

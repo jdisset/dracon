@@ -27,7 +27,8 @@ def transform_dollar_vars(text: str) -> str:
     """Replaces non-escaped $VAR patterns with ${VAR} for standard interpolation."""
     # pattern: $ followed by a valid python identifier start, then identifier chars.
     # ensures we don't match just '$' or '$123' etc.
-    pattern = rf"{NOT_ESCAPED_REGEX}\$([a-zA-Z_][a-zA-Z0-9_]*)"
+    # also reject $$ escape: (?<!\$) ensures we don't match the second $ in $$VAR
+    pattern = rf"(?<!\$){NOT_ESCAPED_REGEX}\$([a-zA-Z_][a-zA-Z0-9_]*)"
 
     def repl(match):
         var_name = match.group(1)
@@ -74,7 +75,7 @@ def outermost_interpolation_exprs(
     )
     scanner = pp.Combine(interpolation_start_char + scanner)
 
-    # handle escaped characters
+    # handle escaped characters (\$ and $$ escapes)
     for match_obj, start, end in scanner.scanString(text):
         num_backslashes = 0
         k = start - 1
@@ -83,18 +84,33 @@ def outermost_interpolation_exprs(
             k -= 1
         if num_backslashes % 2 == 1:
             continue
+        # $$ escape: preceding non-escaped $ means literal passthrough
+        if start > 0 and text[start - 1] == '$':
+            k2 = start - 2
+            pre_bs = 0
+            while k2 >= 0 and text[k2] == '\\':
+                pre_bs += 1
+                k2 -= 1
+            if pre_bs % 2 == 0:  # preceding $ is not itself escaped
+                continue
         matches.append(InterpolationMatch(start, end, match_obj[0][2:-1]))
 
     return sorted(matches, key=lambda m: m.start)
 
 
 def unescape_dracon_specials(text: str) -> str:
-    if '\\$' not in text:
+    has_backslash_dollar = '\\$' in text
+    has_double_dollar = '$$' in text
+    if not has_backslash_dollar and not has_double_dollar:
         return text
 
-    text = re.sub(r'\\(\$\{)', r'\1', text)
-    text = re.sub(r'\\(\$\()', r'\1', text)
-    text = re.sub(r'\\(\$([a-zA-Z_][a-zA-Z0-9_]*))(?![a-zA-Z0-9_])', r'\1', text)
+    if has_backslash_dollar:
+        text = re.sub(r'\\(\$\{)', r'\1', text)
+        text = re.sub(r'\\(\$\()', r'\1', text)
+        text = re.sub(r'\\(\$([a-zA-Z_][a-zA-Z0-9_]*))(?![a-zA-Z0-9_])', r'\1', text)
+    if has_double_dollar:
+        # $$ -> $ (must run after backslash unescaping so \$$ is handled correctly)
+        text = re.sub(r'(?<!\\)\$\$', '$', text)
     return text
 
 

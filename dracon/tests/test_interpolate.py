@@ -6,7 +6,7 @@ from dracon.interpolation import outermost_interpolation_exprs
 from dracon.lazy import LazyInterpolable
 from dracon.keypath import KeyPath
 import copy
-from dracon.interpolation_utils import find_field_references
+from dracon.interpolation_utils import find_field_references, unescape_dracon_specials
 from dracon.include import compose_from_include_str
 import pytest
 from dracon.keypath import ROOTPATH
@@ -827,6 +827,67 @@ def test_escaped_interpolations():
     assert config.dollar_prefix_string == 1
     assert config.dollar_curly_incomplete == "${foo"
     assert config.dollar_with_space == "$ {"
+
+
+def test_mixed_escaped_and_interpolated():
+    """backslash escape must survive when same string also has real interpolations"""
+    yaml_content = """
+    mixed: 'hello ${name}, metric=\\${value}'
+    all_escaped: '\\${value} and \\${other}'
+    all_interpolated: '${name} and ${greeting}'
+    escape_at_start: '\\${passthrough} then ${name}'
+    escape_at_end: '${name} then \\${passthrough}'
+    multiple_mixed: '${name} \\${a} ${greeting} \\${b}'
+    """
+    loader = dr.DraconLoader(
+        enable_interpolation=True,
+        context={'name': 'world', 'greeting': 'hi'},
+    )
+    config = loader.loads(yaml_content)
+    resolve_all_lazy(config)
+
+    assert config.mixed == 'hello world, metric=${value}'
+    assert config.all_escaped == '${value} and ${other}'
+    assert config.all_interpolated == 'world and hi'
+    assert config.escape_at_start == '${passthrough} then world'
+    assert config.escape_at_end == 'world then ${passthrough}'
+    assert config.multiple_mixed == 'world ${a} hi ${b}'
+
+
+def test_double_dollar_escape():
+    """$$ as escape for literal $ -- common convention in template engines"""
+    yaml_content = """
+    escaped_curly: "$${value}"
+    escaped_paren: "$$(expr)"
+    mixed: "hello ${name}, metric=$${value}"
+    plain_double_dollar: "cost is $$5"
+    multiple: "$${a} and ${name} and $${b}"
+    """
+    loader = dr.DraconLoader(
+        enable_interpolation=True,
+        context={'name': 'world'},
+    )
+    config = loader.loads(yaml_content)
+    resolve_all_lazy(config)
+
+    assert config.escaped_curly == '${value}'
+    assert config.escaped_paren == '$(expr)'
+    assert config.mixed == 'hello world, metric=${value}'
+    assert config.plain_double_dollar == 'cost is $5'
+    assert config.multiple == '${a} and world and ${b}'
+
+
+def test_double_dollar_unescape_utility():
+    """unescape_dracon_specials handles $$ -> $ conversion"""
+    assert unescape_dracon_specials('$${value}') == '${value}'
+    assert unescape_dracon_specials('$$(expr)') == '$(expr)'
+    assert unescape_dracon_specials('$$VAR') == '$VAR'
+    assert unescape_dracon_specials('cost is $$5') == 'cost is $5'
+    # single $ left alone
+    assert unescape_dracon_specials('${value}') == '${value}'
+    assert unescape_dracon_specials('$5') == '$5'
+    # triple $ -> $$ (one consumed as escape)
+    assert unescape_dracon_specials('$$${value}') == '$${value}'
 
 
 def test_instruction_if_then_else_simple():

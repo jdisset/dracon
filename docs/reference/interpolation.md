@@ -27,11 +27,37 @@ path: $HOME/.config    # equivalent to: ${HOME}/.config
 
 ### Escaping
 
-Prefix with backslash to produce a literal:
+Two ways to prevent interpolation and produce a literal `${...}` in the output:
 
 ```yaml
-template: \${not_evaluated}   # output: ${not_evaluated}
+# backslash escape
+template: \${not_evaluated}    # -> ${not_evaluated}
+
+# double-dollar escape
+template: $${not_evaluated}    # -> ${not_evaluated}
 ```
+
+Both work for all interpolation forms:
+
+| You write | Output |
+|-----------|--------|
+| `\${expr}` | `${expr}` |
+| `$${expr}` | `${expr}` |
+| `\$(expr)` | `$(expr)` |
+| `$$(expr)` | `$(expr)` |
+| `\$VAR` | `$VAR` |
+| `$$` (anywhere) | `$` |
+
+The `$$` form is often easier since it avoids interactions with YAML's own backslash handling. Both work in strings that also contain real interpolations:
+
+```yaml
+!define name: world
+
+# mix resolved and passthrough expressions in the same value
+msg: "hello ${name}, metric=$${value}"   # -> hello world, metric=${value}
+```
+
+This is useful when a host application needs certain `${...}` tokens to survive Dracon construction for later runtime resolution.
 
 ---
 
