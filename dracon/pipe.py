@@ -32,6 +32,14 @@ def _stage_interface(stage):
     return sym.interface()
 
 
+def _stage_name(stage) -> str:
+    """Resolve a stage to its canonical tag-body name for emission."""
+    iface_name = _stage_interface(stage).name
+    if iface_name:
+        return iface_name
+    return getattr(stage, '__name__', None) or repr(stage)
+
+
 class DraconPipe:
     """Composed callable that chains a sequence of callables.
 
@@ -89,6 +97,20 @@ class DraconPipe:
 
     def represented_type(self):
         return None  # pipes compose callables, no type identity
+
+    def dracon_dump_to_node(self, representer):
+        items = []
+        for stage, pre_kwargs in zip(self._stages, self._stage_kwargs):
+            if hasattr(stage, 'dracon_dump_to_node'):
+                # DraconCallable / DraconPartial / BoundSymbol owns its tag.
+                # pre_kwargs merges into kwargs by construction, so stages
+                # that already carry kwargs shouldn't also have pre_kwargs.
+                items.append(stage)
+            elif pre_kwargs:
+                items.append({_stage_name(stage): dict(pre_kwargs)})
+            else:
+                items.append(_stage_name(stage))
+        return representer.represent_sequence('!pipe', items)
 
     # ── existing API ─────────────────────────────────────────────────────
 

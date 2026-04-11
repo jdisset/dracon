@@ -81,6 +81,14 @@ class DraconCallable:
     def represented_type(self):
         return None  # templates have no single underlying Python type
 
+    def dracon_dump_to_node(self, representer):
+        # copy the template body so the representer sees fresh identities
+        # and loaded callables don't recurse through back-references.
+        from dracon.composer import fast_copy_node_tree
+        inner = representer.represent_data(fast_copy_node_tree(self._template_node))
+        inner.tag = f'!fn:{self._name}' if self._name else '!fn'
+        return inner
+
     # ── param scanning (owns interface extraction) ───────────────────────
 
     def _scan_params(self):

@@ -174,6 +174,13 @@ class BoundSymbol:
     def represented_type(self) -> type | None:
         return None  # bound symbols carry kwargs, not type identity
 
+    def dracon_dump_to_node(self, representer: Any) -> Any:
+        inner_iface = self._inner.interface()
+        tag = f'!fn:{inner_iface.name}' if inner_iface.name else '!fn'
+        if self._kwargs:
+            return representer.represent_mapping(tag, self._kwargs)
+        return representer.represent_scalar(tag, '')
+
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 

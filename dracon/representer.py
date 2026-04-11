@@ -20,33 +20,73 @@ from dracon.nodes import (
     DraconSequenceNode,
     DraconScalarNode,
 )
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from typing_extensions import runtime_checkable, Protocol
 from enum import Enum
 import logging
 import numpy as np
 
+if TYPE_CHECKING:
+    from dracon.symbol_table import SymbolTable
+
 logger = logging.getLogger(__name__)
+
+
+_DEFAULT_TAGS = frozenset({DEFAULT_MAP_TAG, DEFAULT_SEQ_TAG, DEFAULT_SCALAR_TAG, '!'})
+
+
+def _is_default_tag(tag: Any) -> bool:
+    """True if tag is one of ruamel's default type tags (unset/identifiable)."""
+    return tag is None or str(tag) in _DEFAULT_TAGS
 
 
 @runtime_checkable
 class DraconDumpable(Protocol):
-    def dracon_dump_to_node(self, representer): ...
+    def dracon_dump_to_node(self, representer: 'DraconRepresenter') -> Node:
+        """Produce a Node for this value.
+
+        Recursion rule: nested child values MUST be represented by calling
+        representer.represent_data(child). Do not call dump(), construct a
+        new loader, or otherwise leave the current representer pipeline.
+        The representer is the single recursion boundary.
+
+        If this value owns an intrinsic tag (e.g. !deferred, !Resolvable,
+        !fn:name), set it on the returned node; the representer will not
+        overwrite it. If the value doesn't care about tag naming, leave
+        the node with its default tag and the vocabulary will paint it.
+        """
+        ...
 
 
 class DraconRepresenter(RoundTripRepresenter):
-    def __init__(self, *args, full_module_path=True, exclude_defaults=True, **kwargs):
+    def __init__(
+        self,
+        *args: Any,
+        full_module_path: bool = True,
+        exclude_defaults: bool = True,
+        **kwargs: Any,
+    ):
         super().__init__(*args, **kwargs)
+        # qualname-fallback verbosity: when no vocabulary match exists and
+        # the tag must be painted, full_module_path=True emits
+        # !{module}.{class}, False emits just !{class}.
         self.full_module_path = full_module_path
         self.exclude_defaults = exclude_defaults
+        self._vocabulary: 'SymbolTable | None' = None
 
-    def _get_pydantic_tag(self, data: BaseModel) -> str:
-        """Generates the YAML tag for a Pydantic model."""
-        cls = data.__class__
+    def _name_for(self, data: Any) -> str:
+        """Tag body (without leading '!') for a data value.
+
+        Vocabulary wins when present; qualname fallback otherwise.
+        """
+        if self._vocabulary is not None:
+            name = self._vocabulary.identify(data)
+            if name is not None:
+                return name
+        cls = type(data)
         if self.full_module_path:
-            return f"!{cls.__module__}.{cls.__name__}"
-        else:
-            return f"!{cls.__name__}"
+            return f"{cls.__module__}.{cls.__name__}"
+        return cls.__name__
 
     def _get_deferred_tag(self, data: DeferredNode, inner_node_tag: str) -> str:
         """Generates the YAML tag for a DeferredNode."""
@@ -102,15 +142,27 @@ class DraconRepresenter(RoundTripRepresenter):
         return self.represent_scalar(data.tag, data.value, anchor=data.anchor)
 
     def represent_resolvable(self, data: Resolvable) -> Node:
-        # represent the inner node directly, or null if empty
+        # keep the !Resolvable wrapper so round-trips preserve the type
         if data.node is None:
-            return self.represent_scalar('tag:yaml.org,2002:null', '')
-        return self.represent_data(data.node)
+            node = self.represent_scalar('tag:yaml.org,2002:null', '')
+        else:
+            node = self.represent_data(data.node)
+        inner_type = getattr(data, 'inner_type', None)
+        if inner_type is None or inner_type is Any:
+            node.tag = '!Resolvable'
+        elif isinstance(inner_type, type):
+            node.tag = f'!Resolvable[{inner_type.__name__}]'
+        else:
+            node.tag = f'!Resolvable[{inner_type}]'
+        return node
 
     def represent_deferred_node(self, data: DeferredNode) -> Node:
-        # represent the inner value node first
-        node = self.represent_data(data.value)
-        # calculate and set the specific deferred tag
+        # copy the inner tree so the representer's alias tracker sees
+        # fresh identities; otherwise loaded DeferredNodes recurse
+        # through their own context back-references.
+        from dracon.composer import fast_copy_node_tree
+        copied = fast_copy_node_tree(data.value)
+        node = self.represent_data(copied)
         node.tag = self._get_deferred_tag(data, node.tag)
         return node
 
@@ -127,7 +179,7 @@ class DraconRepresenter(RoundTripRepresenter):
         return data.dracon_dump_to_node(self)
 
     def represent_pydantic_model(self, data: BaseModel) -> Node:
-        tag = self._get_pydantic_tag(data)
+        tag = f'!{self._name_for(data)}'
 
         # get serialized values to respect serializers and exclusion rules
         dump_dict = data.model_dump(mode='python', exclude_defaults=self.exclude_defaults)
@@ -222,9 +274,13 @@ class DraconRepresenter(RoundTripRepresenter):
 
     @ftrace(watch=[])
     def represent_data(self, data: Any) -> Node:
-        # handle aliasing first
+        # handle aliasing first; nodes with cyclic __hash__ (e.g. loaded
+        # DeferredNode trees) fall back to id-only aliasing.
         alias_key = None
-        hashable_data_key = make_hashable(data)
+        try:
+            hashable_data_key = make_hashable(data)
+        except RecursionError:
+            hashable_data_key = id(data)
         is_aliasable = hashable_data_key is not None
         if is_aliasable and not self.ignore_aliases(data):
             alias_key = id(data)
@@ -319,6 +375,18 @@ class DraconRepresenter(RoundTripRepresenter):
 
         if not isinstance(node, (DraconScalarNode, DraconMappingNode, DraconSequenceNode)):
             raise RepresenterError(f"Final node is not a DraconNode subtype: {type(node)}")
+
+        # paint vocabulary tag onto nodes that don't own an intrinsic tag.
+        # identify() already returns None for primitives and unregistered types,
+        # so the check is a no-op on anything we don't want to rename.
+        if (
+            self._vocabulary is not None
+            and node is not data
+            and _is_default_tag(node.tag)
+        ):
+            name = self._vocabulary.identify(data)
+            if name is not None:
+                node.tag = f'!{name}'
 
         return node
 

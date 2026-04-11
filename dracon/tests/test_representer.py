@@ -205,20 +205,47 @@ def test_represent_lazy_interpolable(representer_default):
 
 
 def test_represent_resolvable(representer_default):
-    # resolvable should represent its underlying node
+    # the !Resolvable wrapper is emitted, keeping the inner node's value
     inner_node = representer_default.represent_scalar('!int', '123')
     resolvable = Resolvable(node=inner_node)
     node = representer_default.represent_data(resolvable)
-    # check if it's the *same kind* of node with same value/tag
     assert isinstance(node, DraconScalarNode)
     assert node.value == inner_node.value
-    assert node.tag == inner_node.tag
+    assert node.tag == '!Resolvable'
 
-    # test empty resolvable
+    # with a typed inner, the tag carries the type name
+    typed = Resolvable(node=inner_node, inner_type=SimpleModel)
+    typed_node = representer_default.represent_data(typed)
+    assert typed_node.tag == '!Resolvable[SimpleModel]'
+
+    # empty resolvable still emits the wrapper tag
     empty_resolvable = Resolvable(node=None)
     empty_node = representer_default.represent_data(empty_resolvable)
     assert isinstance(empty_node, DraconScalarNode)
-    assert empty_node.tag == 'tag:yaml.org,2002:null'
+    assert empty_node.tag == '!Resolvable'
+
+
+def test_resolvable_wrapper_round_trips():
+    """Regression: Resolvable[T] used to drop its wrapper on dump."""
+    loader = DraconLoader(context={'SimpleModel': SimpleModel})
+    loader.yaml.representer.full_module_path = False
+    inner = loader.yaml.representer.represent_data(SimpleModel(name="r"))
+    r = Resolvable(node=inner, inner_type=SimpleModel)
+    text = dump(r, loader=loader)
+    assert '!Resolvable' in text
+    reloaded = loads(text, loader=loader)
+    assert isinstance(reloaded, Resolvable)
+
+
+def test_loaded_deferred_node_dumps_without_recursion():
+    """Regression: dumping a DeferredNode that came from a prior load used to recurse."""
+    loader = DraconLoader()
+    data = loader.loads('x: !deferred\n  a: 1\n  b: 2\n')
+    # must not raise RecursionError
+    text = loader.dump(data)
+    assert '!deferred' in text
+    reloaded = loader.loads(text)
+    assert isinstance(reloaded['x'], DeferredNode)
 
 
 def test_represent_deferred_node(representer_default):
@@ -514,3 +541,127 @@ def test_represent_str_enum(representer_default):
     node = representer_default.represent_data(TestStrEnum.FOO)
     assert isinstance(node, DraconScalarNode)
     assert node.value == "foo"
+
+
+# --- vocabulary-aware tag emission ---
+
+
+def _symbol_table_with(**entries):
+    """Build a SymbolTable with canonical entries for the given name -> type map."""
+    from dracon.symbol_table import SymbolTable, SymbolEntry
+    from dracon.symbols import CallableSymbol
+    tbl = SymbolTable()
+    for name, value in entries.items():
+        tbl.define(SymbolEntry(name=name, symbol=CallableSymbol(value, name=name)))
+    return tbl
+
+
+def test_dump_without_vocabulary_uses_full_module_path():
+    loader = DraconLoader()
+    loader.yaml.representer.full_module_path = True
+    out = loader.dump(SimpleModel(name="x"))
+    assert f'!{SimpleModel.__module__}.SimpleModel' in out
+
+
+def test_dump_without_vocabulary_respects_full_module_path_false():
+    loader = DraconLoader()
+    loader.yaml.representer.full_module_path = False
+    out = loader.dump(SimpleModel(name="x"))
+    assert '!SimpleModel' in out
+    assert f'{SimpleModel.__module__}.SimpleModel' not in out
+
+
+def test_dump_with_vocabulary_uses_short_tag():
+    loader = DraconLoader()
+    loader.context = _symbol_table_with(MyModel=SimpleModel)
+    out = loader.dump(SimpleModel(name="x"))
+    assert '!MyModel' in out
+    # fall-through qualname path must not appear when the vocabulary matched
+    assert f'{SimpleModel.__module__}.SimpleModel' not in out
+
+
+def test_dump_same_value_two_vocabularies_gives_two_tags():
+    l1 = DraconLoader()
+    l1.context = _symbol_table_with(Alpha=SimpleModel)
+    l2 = DraconLoader()
+    l2.context = _symbol_table_with(Beta=SimpleModel)
+    assert '!Alpha' in l1.dump(SimpleModel(name="x"))
+    assert '!Beta' in l2.dump(SimpleModel(name="x"))
+
+
+def test_vocabulary_paint_skips_intrinsic_tagged_nodes():
+    # DeferredNode sets !deferred; vocabulary must not override it
+    loader = DraconLoader()
+    loader.context = _symbol_table_with(SimpleModel=SimpleModel)
+    data = loader.loads('!deferred\nname: inner\n')
+    out = loader.dump(data)
+    assert '!deferred' in out
+
+
+def test_loader_dump_uses_loader_context():
+    loader = DraconLoader(context={'Foo': SimpleModel})
+    # loader.context is a SymbolTable; but __setitem__ makes entries non-canonical.
+    # use the explicit vocabulary-entry path.
+    loader.context = _symbol_table_with(Foo=SimpleModel)
+    text = loader.dump(SimpleModel(name="y"))
+    assert '!Foo' in text
+
+
+def test_top_level_dump_accepts_context_kwarg():
+    from dracon import dump as top_dump
+    loader = DraconLoader()
+    loader.context = _symbol_table_with(Qux=SimpleModel)
+    text = top_dump(SimpleModel(name="z"), loader=loader)
+    assert '!Qux' in text
+
+
+def test_vocabulary_save_restore_survives_reentry():
+    # simulate a dracon_dump_to_node that re-enters the dump pipeline
+    loader = DraconLoader()
+    loader.context = _symbol_table_with(Outer=SimpleModel)
+
+    class Reentrant(DraconDumpable):
+        def __init__(self, inner):
+            self.inner = inner
+
+        def dracon_dump_to_node(self, representer):
+            # nested dump inside our own dump path must not clobber outer vocab
+            inner_text = loader.dump(self.inner)
+            return representer.represent_mapping('!Reentrant', {'payload': inner_text})
+
+    out = loader.dump(Reentrant(SimpleModel(name="nested")))
+    assert '!Reentrant' in out
+    assert '!Outer' in out
+
+
+# --- symbol-kind dumpables ---
+
+
+def test_dracon_callable_round_trips_as_fn_tag():
+    from dracon.callable import DraconCallable
+    from dracon.nodes import DraconMappingNode, DraconScalarNode, DEFAULT_MAP_TAG
+    loader = DraconLoader()
+    empty = DraconMappingNode(tag=DEFAULT_MAP_TAG, value=[
+        (DraconScalarNode(tag=DEFAULT_SCALAR_TAG, value='k'),
+         DraconScalarNode(tag=DEFAULT_SCALAR_TAG, value='v')),
+    ])
+    c = DraconCallable(template_node=empty, loader=loader, name="make_x")
+    text = loader.dump(c)
+    assert '!fn' in text
+
+
+def test_dracon_pipe_round_trips_as_pipe_tag():
+    from dracon.pipe import DraconPipe
+    loader = DraconLoader()
+    p = DraconPipe(stages=[lambda x=0: x], stage_kwargs=[{}], name="p")
+    text = loader.dump(p)
+    assert '!pipe' in text
+
+
+def test_bound_symbol_round_trips():
+    from dracon.symbols import BoundSymbol, CallableSymbol
+    loader = DraconLoader()
+    inner = CallableSymbol(SimpleModel, name="SimpleModel")
+    bs = BoundSymbol(inner, name="pre")
+    text = loader.dump(bs)
+    assert '!fn:SimpleModel' in text
