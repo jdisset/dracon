@@ -1,7 +1,7 @@
 # Copyright (c) 2025 Jean Disset
 # MIT License - see LICENSE file for details.
 
-"""Round-trip property tests + per-bug regressions (v5 step 05).
+"""Round-trip property tests + per-bug regressions.
 
 Pins the bidirectional contract::
 
@@ -12,9 +12,9 @@ Pins the bidirectional contract::
   and fail consistently at resolve-time, not at dump or load.
 
 The equivalence relation ``≅`` is defined in :func:`equivalent` and
-documented there. Property tests use Hypothesis to generate values
-over the load-side universe; regression tests are deterministic
-anchors for specific bugs fixed in steps 02-04.
+documented there. Property tests use Hypothesis to generate values over
+the load-side universe; regression tests are deterministic anchors for
+the individual bugs fixed while wiring up bidirectional vocabulary.
 """
 
 from __future__ import annotations
@@ -434,11 +434,11 @@ def test_tier2_resolvable_field_round_trips_structurally(name):
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-# ── step 02: wrapper representers ───────────────────────────────────────────
+# ── wrapper representers ────────────────────────────────────────────────────
 
 
-class TestStep02WrapperRegressions:
-    """Regression anchors for the four step-02 bugs."""
+class TestWrapperRegressions:
+    """Regression anchors for the four wrapper-dump bugs."""
 
     def test_resolvable_wrapper_preserved_on_round_trip(self):
         """``represent_resolvable`` used to drop the wrapper."""
@@ -498,10 +498,10 @@ class TestStep02WrapperRegressions:
         assert reloaded(y=7) == Point(x=5, y=7)
 
 
-# ── step 03: pydantic hybrid quoter ─────────────────────────────────────────
+# ── pydantic hybrid quoter ──────────────────────────────────────────────────
 
 
-class TestStep03HybridQuoterRegressions:
+class TestHybridQuoterRegressions:
     """Regression anchors for the pydantic nested-wrapper flattening bugs."""
 
     def test_pydantic_dict_field_preserves_deferred_node(self):
@@ -542,10 +542,10 @@ class TestStep03HybridQuoterRegressions:
         assert isinstance(reloaded.events[1], DogEvent)
 
 
-# ── step 04: dump_to_node wiring ────────────────────────────────────────────
+# ── dump_to_node wiring ─────────────────────────────────────────────────────
 
 
-class TestStep04DumpToNodeRegressions:
+class TestDumpToNodeRegressions:
     """Regression anchors for the context-discard bug."""
 
     def test_loader_dump_to_node_uses_loader_context(self):
@@ -575,7 +575,7 @@ class TestStep04DumpToNodeRegressions:
 
 
 class TestCapturedGlobalsInteraction:
-    """``table[k] = v`` must never mint canonical entries (step 01)."""
+    """``table[k] = v`` must never mint canonical entries."""
 
     def test_captured_globals_are_not_canonical_emitters(self):
         tbl = SymbolTable()

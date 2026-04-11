@@ -1,4 +1,4 @@
-"""Tests for dump_to_node as a first-class public API (step 04).
+"""Tests for dump_to_node as a first-class public API.
 
 Bug-fix regressions live in test_roundtrip_property.py; this file covers
 the first-class API shape.

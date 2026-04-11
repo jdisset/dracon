@@ -155,3 +155,111 @@ loader.yaml.representer.full_module_path = False
 loader.yaml.representer.exclude_defaults = False
 yaml_str = loader.dump(config)
 ```
+
+## Vocabulary-driven tag emission
+
+A `DraconLoader`'s `context` is a `SymbolTable` — the same object the
+load path uses to resolve tags back into types. On the dump side, the
+representer consults that same table to pick a canonical short name for
+any value whose type is registered. Two projects that bind the same
+Python class under different names emit different tags:
+
+```python
+vocab_a = SymbolTable()
+vocab_a.define(SymbolEntry(name="Server", symbol=CallableSymbol(Host, name="Server")))
+
+vocab_b = SymbolTable()
+vocab_b.define(SymbolEntry(name="Node", symbol=CallableSymbol(Host, name="Node")))
+
+host = Host(name="h1", cpus=8)
+loader_a = DraconLoader(); loader_a.context = vocab_a
+loader_b = DraconLoader(); loader_b.context = vocab_b
+
+loader_a.dump(host)   # !Server\nname: h1\ncpus: 8\n
+loader_b.dump(host)   # !Node\nname: h1\ncpus: 8\n
+```
+
+`SymbolTable.identify(value)` walks the MRO, so subclasses of a
+registered type emit the nearest canonical base name. Only entries
+added via `define()` / `set_default()` participate in identification —
+captured globals (assigned via `table[k] = v`) stay invisible, which
+prevents accidental renames from polluting the dump side.
+
+`full_module_path` only controls the *fallback*: when a value is not in
+the vocabulary, dracon falls back to a qualname-based tag, and
+`full_module_path=True` (the default) produces the fully qualified
+form.
+
+## Wrapper round-trip
+
+All dracon-native wrapper types round-trip through dump/load, including
+when they are nested inside pydantic models, plain dicts, and lists:
+
+- `DeferredNode` — emits the `!deferred` tag; a loaded deferred can be
+  dumped again without recursion, even when it contains more
+  `DeferredNode`s inside.
+- `Resolvable[T]` — emits `!Resolvable[T]` and reloads as a
+  `Resolvable`, never as a bare `T`.
+- `LazyInterpolable` — emits its `${expr}` source, not the resolved
+  value.
+- `DraconCallable` (`!fn` templates), `DraconPipe`, `BoundSymbol`,
+  `DraconPartial` — all emit under their own tags and round-trip to
+  invokable forms.
+
+The pinning contract is:
+
+```
+loads(dump(x, V), V) ≅ x
+```
+
+for any value `x` in vocabulary `V`. Pydantic fields of type `dict`,
+`list`, or `Any` preserve any wrapper values they contain — there is no
+flattening pass, so broodmon-style walkers are unnecessary.
+
+## Line-framed streams
+
+For wire protocols, log-replay streams, and IPC pipes, use
+`dump_line` / `loads_line` / `document_stream`:
+
+```python
+from dracon import dump_line, loads_line, document_stream
+
+line = dump_line(event, context=vocab)      # -> bytes, ends with '\n'
+reloaded = loads_line(line, context=vocab)
+
+async for doc in document_stream(reader, context=vocab):
+    handle(doc)
+```
+
+`dump_line` collapses to single-line flow-style YAML. If a value cannot
+be expressed on one line (e.g. a top-level literal scalar with an
+embedded newline), `NotLineableError` fires loudly instead of silently
+corrupting the frame.
+
+## Node construction helpers
+
+`DraconDumpable` implementations previously had to import ruamel node
+classes and tag constants. Three helpers make that invisible:
+
+```python
+from dracon.nodes import make_scalar_node, make_sequence_node, make_mapping_node
+from dracon.representer import DraconDumpable
+
+class Point3D(DraconDumpable):
+    def __init__(self, x, y, z):
+        self.x, self.y, self.z = x, y, z
+
+    def dracon_dump_to_node(self, representer):
+        return make_mapping_node(
+            {
+                "x": make_scalar_node(str(self.x), tag="tag:yaml.org,2002:int"),
+                "y": make_scalar_node(str(self.y), tag="tag:yaml.org,2002:int"),
+                "z": make_scalar_node(str(self.z), tag="tag:yaml.org,2002:int"),
+            },
+            tag="!Point3D",
+        )
+```
+
+`make_mapping_node` accepts either an iterable of `(key_node, value_node)`
+tuples or a plain dict whose keys are strings (auto-wrapped in scalar
+nodes). Pick whichever reads best for your case.

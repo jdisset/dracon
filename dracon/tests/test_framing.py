@@ -1,7 +1,7 @@
 # Copyright (c) 2025 Jean Disset
 # MIT License - see LICENSE file for details.
 
-"""Tests for line-framing utilities (v5 step 06).
+"""Tests for line-framing utilities.
 
 Covers:
 - ``dump_line`` / ``loads_line`` one-document-per-line framing

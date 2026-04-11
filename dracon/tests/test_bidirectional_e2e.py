@@ -1,16 +1,16 @@
 # Copyright (c) 2025 Jean Disset
 # MIT License - see LICENSE file for details.
 
-"""High-level end-to-end tests for the v5 bidirectional vocabulary refactor.
+"""High-level end-to-end tests for the bidirectional vocabulary contract.
 
 These tests exercise the full compose → construct → dump → reload → resolve
 pipeline across combinations of dracon-native types, pydantic models, and
 vocabularies. Each test is designed to fail loudly if a hidden interaction
-between steps 01-06 regresses.
+between the quotation/construction/resolution phases regresses.
 
-Where individual unit/regression tests focus on one feature at a time,
-this suite aims to catch bugs that only surface when multiple features
-interact in realistic ways.
+Where individual unit/regression tests focus on one feature at a time, this
+suite aims to catch bugs that only surface when multiple features interact
+in realistic ways.
 """
 
 from __future__ import annotations
@@ -67,8 +67,8 @@ class Job(BaseModel):
     """Pydantic model with defaults, an untyped slot, and a nested container.
 
     The untyped ``env`` slot is the canonical place where nested dracon-native
-    wrappers surface; preserving them across dump/load is the step-03 hybrid
-    quoter's contract.
+    wrappers surface; preserving them across dump/load is the hybrid-quoter
+    contract on pydantic models.
     """
 
     model_config = {"arbitrary_types_allowed": True}
@@ -126,7 +126,7 @@ def round_trip(value: Any, vocab: SymbolTable | None = None) -> Any:
 
 
 class TestVocabularyDrivenTagging:
-    """Step 01 identify + step 02 emission, end-to-end."""
+    """SymbolTable.identify + representer emission, end-to-end."""
 
     def test_same_type_two_vocabularies_disambiguate(self):
         """Two vocabularies can bind the same class under different canonical names.
@@ -155,7 +155,7 @@ class TestVocabularyDrivenTagging:
         assert make_loader(vocab_b).loads(text_b) == h
 
     def test_dump_to_node_uses_loader_vocabulary(self):
-        """Step 04: loader.dump_to_node must consult loader context, not a fresh one."""
+        """loader.dump_to_node must consult loader.context, not a fresh one."""
         vocab = make_vocab()
         loader = make_loader(vocab)
         node = loader.dump_to_node(Host(name="x", cpus=2))
@@ -173,7 +173,7 @@ class TestVocabularyDrivenTagging:
 
 
 class TestPydanticWithAllWrappersNested:
-    """Step 03 hybrid quoter + all wrapper representers exercised together."""
+    """Hybrid quoter + all wrapper representers exercised together."""
 
     def test_job_with_deferred_resolvable_and_lazy_all_survive(self):
         """Drop a DeferredNode, a Resolvable, and a LazyInterpolable into one ``env``."""
@@ -256,7 +256,7 @@ class TestPydanticWithAllWrappersNested:
 
 
 class TestTemplatesPipesAndBoundSymbolsInDocument:
-    """Step 02 new DraconDumpable impls exercised end to end."""
+    """DraconDumpable impls for templates/pipes/bound symbols, exercised end to end."""
 
     def test_fn_template_dumps_and_reloads(self):
         loader = make_loader()
@@ -292,7 +292,7 @@ class TestTemplatesPipesAndBoundSymbolsInDocument:
 
 
 class TestLoadedDeferredNodeDoesNotRecurse:
-    """Regression for the step 02 RecursionError on re-dump of a loaded deferred."""
+    """Regression: loaded DeferredNode must re-dump without recursing."""
 
     def test_yaml_loaded_deferred_dumped_from_inside_model(self):
         """Load YAML containing a deferred, wrap it in a pydantic model, dump, reload."""
@@ -323,7 +323,7 @@ job: !Job
 
 
 class TestLineFramedStream:
-    """Step 06 dump_line/loads_line across the full vocabulary surface."""
+    """dump_line/loads_line across the full vocabulary surface."""
 
     def test_stream_of_events_round_trips(self):
         vocab = make_vocab()
@@ -374,7 +374,7 @@ class TestLineFramedStream:
 
 
 class TestNodeHelpersThroughDumpable:
-    """Step 06 node-construction helpers let DraconDumpable impls avoid ruamel details."""
+    """Node-construction helpers let DraconDumpable impls avoid ruamel details."""
 
     def test_custom_dumpable_uses_make_helpers(self):
         class Point3D(DraconDumpable):
@@ -480,7 +480,7 @@ class TestDumpToNodeIdempotence:
         assert second is node
 
     def test_dump_to_node_then_text_equals_direct_dump(self):
-        """loader.dump(x) == emit(loader.dump_to_node(x)) by construction of step 04."""
+        """loader.dump(x) == emit(loader.dump_to_node(x)) by construction."""
         loader = make_loader(make_vocab())
         h = Host(name="x", cpus=2)
         direct = loader.dump(h)
@@ -520,8 +520,8 @@ class TestDeepNestingOfWrappers:
 class TestNestedDeferredNodes:
     """Regression: a DeferredNode whose inner tree contains another DeferredNode.
 
-    Step 02's ``represent_deferred_node`` copied the inner tree and handed it
-    back to ``represent_data``; the fast-path short-circuit then returned the
+    ``represent_deferred_node`` copies the inner tree and hands it back to
+    ``represent_data``; the fast-path short-circuit used to return the
     mapping as-is, leaving the inner DeferredNode untransformed. The
     serializer later choked trying to treat that wrapped scalar as yaml text.
     """
@@ -613,7 +613,7 @@ class TestMakeMappingNodeDictInput:
 
 
 class TestIdentifyMROWalk:
-    """Step 01 identify() walks the MRO; dumps of subclass instances emit
+    """SymbolTable.identify walks the MRO; dumps of subclass instances emit
     the nearest canonical base name."""
 
     def test_subclass_emits_base_canonical_name(self):

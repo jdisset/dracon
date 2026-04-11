@@ -117,6 +117,8 @@ python app.py +base.yaml +prod.yaml --workers 8
 - Runtime deferral with `!deferred` and `Resolvable[T]`
 - `make_callable()` for turning YAML into reusable Python factories
 - `dracon show` and provenance tracing for debugging composition
+- Bidirectional vocabulary: `dump`/`dump_to_node` round-trip Pydantic models and dracon-native wrappers through the same `SymbolTable` that drives the load path
+- `dump_line`/`loads_line`/`document_stream` for line-framed wire protocols and log-replay streams
 
 ## Patterns Worth Knowing
 
