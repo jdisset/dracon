@@ -114,7 +114,7 @@ class Sub2(BaseModel):
 
 
 @dracon_program(name="testprog")
-class TestProg(BaseModel):
+class ProgModel(BaseModel):
     command: Subcommand(Sub1, Sub2)
     verbose: Annotated[bool, Arg(short="v", help="verbose")] = False
 
@@ -123,26 +123,26 @@ class TestCompleteProtocol:
     """--_complete flag triggers completion output."""
 
     def test_complete_subcommands(self):
-        candidates = _run_complete(TestProg, "testprog ")
+        candidates = _run_complete(ProgModel, "testprog ")
         assert "sub1" in candidates
         assert "sub2" in candidates
 
     def test_complete_subcommand_prefix(self):
-        candidates = _run_complete(TestProg, "testprog s")
+        candidates = _run_complete(ProgModel, "testprog s")
         assert "sub1" in candidates
         assert "sub2" in candidates
 
     def test_complete_flags(self):
-        candidates = _run_complete(TestProg, "testprog --")
+        candidates = _run_complete(ProgModel, "testprog --")
         assert "--verbose" in candidates
 
     def test_complete_subcmd_flags(self):
-        candidates = _run_complete(TestProg, "testprog sub2 --")
+        candidates = _run_complete(ProgModel, "testprog sub2 --")
         assert "--count" in candidates
 
     def test_complete_file_prefix(self):
         """+ prefix should trigger yaml file completion."""
-        candidates = _run_complete(TestProg, f"testprog +{CONFIGS}/simpl")
+        candidates = _run_complete(ProgModel, f"testprog +{CONFIGS}/simpl")
         yaml_matches = [c for c in candidates if c.endswith(".yaml")]
         assert any("simple.yaml" in c for c in yaml_matches)
 
