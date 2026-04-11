@@ -665,3 +665,170 @@ def test_bound_symbol_round_trips():
     bs = BoundSymbol(inner, name="pre")
     text = loader.dump(bs)
     assert '!fn:SimpleModel' in text
+
+
+# --- hybrid quoter: nested dracon-native value preservation ---
+
+
+def _loader_for(**types):
+    loader = DraconLoader(enable_interpolation=True, context=dict(types))
+    loader.yaml.representer.full_module_path = False
+    return loader
+
+
+def test_pydantic_list_of_models_preserves_inner_tags():
+    """list[Inner] fields used to flatten Inner to a plain dict on dump."""
+
+    class Inner(BaseModel):
+        name: str
+        val: int = 0
+
+    class Outer(BaseModel):
+        things: list[Inner] = Field(default_factory=list)
+
+    loader = _loader_for(Inner=Inner, Outer=Outer)
+    o = Outer(things=[Inner(name='a', val=5), Inner(name='b')])
+    text = dump(o, loader=loader)
+    assert '!Inner' in text
+    reloaded = loads(text, loader=loader)
+    assert isinstance(reloaded, Outer)
+    assert all(isinstance(x, Inner) for x in reloaded.things)
+    assert reloaded == o
+
+
+def test_pydantic_dict_of_models_preserves_inner_tags():
+    class Inner(BaseModel):
+        name: str
+
+    class Outer(BaseModel):
+        items: dict[str, Inner] = Field(default_factory=dict)
+
+    loader = _loader_for(Inner=Inner, Outer=Outer)
+    o = Outer(items={'k': Inner(name='v')})
+    text = dump(o, loader=loader)
+    assert '!Inner' in text
+    reloaded = loads(text, loader=loader)
+    assert isinstance(reloaded.items['k'], Inner)
+
+
+def test_pydantic_dict_any_field_preserves_deferred_node():
+    """The broodmon bug: dict field holding a DeferredNode used to get flattened."""
+
+    class Outer(BaseModel):
+        bag: dict[str, object] = Field(default_factory=dict)
+
+    loader = _loader_for(Outer=Outer)
+    d = make_deferred({'a': 1}, loader=loader)
+    o = Outer(bag={'d': d})
+    text = dump(o, loader=loader)
+    assert '!deferred' in text
+    reloaded = loads(text, loader=loader)
+    assert isinstance(reloaded.bag['d'], DeferredNode)
+
+
+def test_pydantic_typed_list_preserves_deferred_children():
+    """A typed list with dracon-native payloads used to drop those payloads entirely."""
+
+    class Inner(BaseModel):
+        model_config = {'arbitrary_types_allowed': True}
+        name: str
+        payload: object = None
+
+    class Outer(BaseModel):
+        things: list[Inner] = Field(default_factory=list)
+
+    loader = _loader_for(Inner=Inner, Outer=Outer)
+    d = make_deferred({'v': 42}, loader=loader)
+    o = Outer(things=[Inner(name='x', payload=d)])
+    text = dump(o, loader=loader)
+    assert '!Inner' in text
+    assert '!deferred' in text
+    reloaded = loads(text, loader=loader)
+    assert isinstance(reloaded.things[0], Inner)
+    assert isinstance(reloaded.things[0].payload, DeferredNode)
+
+
+def test_pydantic_untyped_field_preserves_resolvable_wrapper():
+    class Inner(BaseModel):
+        name: str
+
+    class Outer(BaseModel):
+        model_config = {'arbitrary_types_allowed': True}
+        slot: object = None
+
+    loader = _loader_for(Inner=Inner, Outer=Outer)
+    inner_node = loader.yaml.representer.represent_data(Inner(name='r'))
+    o = Outer(slot=Resolvable(node=inner_node, inner_type=Inner))
+    text = dump(o, loader=loader)
+    assert '!Resolvable' in text
+    reloaded = loads(text, loader=loader)
+    assert isinstance(reloaded.slot, Resolvable)
+
+
+def test_pydantic_dict_of_any_preserves_resolvable_wrapper():
+    class Inner(BaseModel):
+        name: str
+
+    class Outer(BaseModel):
+        stuff: dict[str, object] = Field(default_factory=dict)
+
+    loader = _loader_for(Inner=Inner, Outer=Outer)
+    inner_node = loader.yaml.representer.represent_data(Inner(name='r'))
+    o = Outer(stuff={'k': Resolvable(node=inner_node, inner_type=Inner)})
+    text = dump(o, loader=loader)
+    assert '!Resolvable' in text
+    reloaded = loads(text, loader=loader)
+    assert isinstance(reloaded.stuff['k'], Resolvable)
+
+
+def test_pydantic_untyped_field_preserves_lazy_interpolable_expression():
+    """A LazyInterpolable stored in an untyped field must dump as its ${expr} form."""
+
+    class Outer(BaseModel):
+        model_config = {'arbitrary_types_allowed': True}
+        expr: object = None
+
+    loader = _loader_for(Outer=Outer)
+    lazy = LazyInterpolable(value="${1 + 2}")
+    o = Outer(expr=lazy)
+    text = dump(o, loader=loader)
+    assert '${1 + 2}' in text
+    # sanity: no eagerly resolved '3' in place of the expression
+    assert 'expr: 3' not in text
+
+
+def test_pydantic_alias_respected_on_dump():
+    class M(BaseModel):
+        name: str = Field(alias='n')
+        val: int = 0
+
+    loader = _loader_for(M=M)
+    text = dump(M(n='x', val=2), loader=loader)
+    assert '\nn: ' in text
+    assert 'name:' not in text
+
+
+def test_pydantic_computed_field_emitted():
+    from pydantic import computed_field
+
+    class M(BaseModel):
+        val: int = 3
+
+        @computed_field
+        def sq(self) -> int:
+            return self.val * self.val
+
+    loader = _loader_for(M=M)
+    text = dump(M(val=4), loader=loader)
+    assert 'sq: 16' in text
+
+
+def test_pydantic_extra_allow_fields_emitted():
+    class M(BaseModel):
+        model_config = {'extra': 'allow'}
+        name: str
+
+    loader = _loader_for(M=M)
+    m = M(name='x', extra_key='y')
+    text = dump(m, loader=loader)
+    assert 'extra_key: y' in text

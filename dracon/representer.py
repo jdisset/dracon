@@ -5,6 +5,7 @@ from ruamel.yaml.representer import RoundTripRepresenter, RepresenterError
 from ruamel.yaml.nodes import MappingNode, ScalarNode, SequenceNode, Node
 from ruamel.yaml.tag import Tag
 from pydantic import BaseModel
+from pydantic_core import PydanticUndefined
 from dracon.utils import make_hashable
 from dracon.resolvable import Resolvable
 from dracon.deferred import DeferredNode
@@ -20,6 +21,7 @@ from dracon.nodes import (
     DraconSequenceNode,
     DraconScalarNode,
 )
+from collections.abc import Iterator
 from typing import Any, TYPE_CHECKING
 from typing_extensions import runtime_checkable, Protocol
 from enum import Enum
@@ -38,6 +40,61 @@ _DEFAULT_TAGS = frozenset({DEFAULT_MAP_TAG, DEFAULT_SEQ_TAG, DEFAULT_SCALAR_TAG,
 def _is_default_tag(tag: Any) -> bool:
     """True if tag is one of ruamel's default type tags (unset/identifiable)."""
     return tag is None or str(tag) in _DEFAULT_TAGS
+
+
+_UNSET = object()
+
+
+def _pydantic_is_default(current: Any, info: Any) -> bool:
+    """Compare `current` to a pydantic FieldInfo's declared default.
+
+    Factory defaults are compared against a single factory call; if the
+    comparison raises the field is treated as non-default (emitted).
+    """
+    default = info.default
+    if default is PydanticUndefined:
+        factory = info.default_factory
+        if factory is None:
+            return False
+        try:
+            default = factory()
+        except Exception:
+            return False
+    try:
+        return bool(current == default)
+    except Exception:
+        return False
+
+
+def _emit_pydantic_fields(
+    model: BaseModel, *, exclude_defaults: bool
+) -> Iterator[tuple[str, str]]:
+    """Yield (attribute_name, emit_key) for each emittable declared or computed field.
+
+    Uses pydantic metadata for discovery (fields, aliases, defaults, computed
+    fields) and nothing else; callers fetch values via `getattr` and push them
+    back through `represent_data`, so nested dracon-native wrappers (DeferredNode,
+    Resolvable, LazyInterpolable, ...) survive intact.
+
+    Fields physically absent from the instance -- e.g. a `Model.__new__(Model)`
+    scaffold the CLI uses to capture declared defaults -- are skipped.
+
+    Intentionally NOT honored: @field_serializer, @model_serializer, mode='json',
+    SerializationInfo hooks. Users who need those should implement
+    DraconDumpable on their type or register a custom representer.
+    """
+    cls = type(model)
+    for name, info in cls.model_fields.items():
+        current = getattr(model, name, _UNSET)
+        if current is _UNSET:
+            continue
+        if exclude_defaults and _pydantic_is_default(current, info):
+            continue
+        yield name, info.alias or name
+    for name, info in getattr(cls, 'model_computed_fields', {}).items():
+        if getattr(model, name, _UNSET) is _UNSET:
+            continue
+        yield name, getattr(info, 'alias', None) or name
 
 
 @runtime_checkable
@@ -179,27 +236,21 @@ class DraconRepresenter(RoundTripRepresenter):
         return data.dracon_dump_to_node(self)
 
     def represent_pydantic_model(self, data: BaseModel) -> Node:
+        # hybrid quoter: pydantic supplies field metadata, values come straight
+        # from the live object so nested dracon-native types flow back through
+        # represent_data and keep their identities.
         tag = f'!{self._name_for(data)}'
-
-        # get serialized values to respect serializers and exclusion rules
-        dump_dict = data.model_dump(mode='python', exclude_defaults=self.exclude_defaults)
-
-        mapping_value_pairs = []
-        for field_name, serialized_value in dump_dict.items():
-            # represent the key
-            node_key = self.represent_data(field_name)
-
-            # decide whether to represent the original or serialized value
-            original_value = getattr(data, field_name)
-            value_to_represent = (
-                original_value if isinstance(original_value, BaseModel) else serialized_value
+        pairs = [
+            (self.represent_data(emit_key), self.represent_data(getattr(data, attr)))
+            for attr, emit_key in _emit_pydantic_fields(
+                data, exclude_defaults=self.exclude_defaults
             )
-            node_value = self.represent_data(value_to_represent)
-            mapping_value_pairs.append((node_key, node_value))
-
-        flow_style = self.default_flow_style  # can be None
-        node = self.represent_mapping(tag, mapping_value_pairs, flow_style=flow_style)
-        return node
+        ]
+        extra = getattr(data, '__pydantic_extra__', None) or {}
+        pairs.extend(
+            (self.represent_data(k), self.represent_data(v)) for k, v in extra.items()
+        )
+        return self.represent_mapping(tag, pairs, flow_style=self.default_flow_style)
 
     # --- override base representers to return dracon nodes ---
 
