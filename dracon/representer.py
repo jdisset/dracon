@@ -223,6 +223,39 @@ class DraconRepresenter(RoundTripRepresenter):
         node.tag = self._get_deferred_tag(data, node.tag)
         return node
 
+    def _represent_embedded_wrappers(self, node: Node) -> Node:
+        """Walk a Dracon node tree and re-represent embedded wrapper nodes.
+
+        A loaded tree may contain ``DeferredNode`` or ``InterpolableNode``
+        leaves that the fast-path short-circuit in :meth:`represent_data`
+        would otherwise leave untouched. Those leaves must be handed back
+        to their specific representers so the serializer sees a final
+        node form. Returns the input unchanged when no rewrite is needed.
+        """
+        if isinstance(node, (DeferredNode, InterpolableNode)):
+            return self.represent_data(node)
+        if isinstance(node, DraconMappingNode):
+            new_pairs = [
+                (self._represent_embedded_wrappers(k), self._represent_embedded_wrappers(v))
+                for k, v in node.value
+            ]
+            if all(nk is k and nv is v for (k, v), (nk, nv) in zip(node.value, new_pairs)):
+                return node
+            rebuilt = DraconMappingNode(
+                tag=node.tag, value=new_pairs, flow_style=node.flow_style,
+                anchor=node.anchor, comment=node.comment,
+            )
+            return rebuilt
+        if isinstance(node, DraconSequenceNode):
+            new_items = [self._represent_embedded_wrappers(v) for v in node.value]
+            if all(new is old for new, old in zip(new_items, node.value)):
+                return node
+            return DraconSequenceNode(
+                tag=node.tag, value=new_items, flow_style=node.flow_style,
+                anchor=node.anchor, comment=node.comment,
+            )
+        return node
+
     # --- representers for multi types (protocols/subclasses) ---
 
     def represent_ndarray(self, data: np.ndarray) -> Node:
@@ -346,7 +379,9 @@ class DraconRepresenter(RoundTripRepresenter):
             if isinstance(
                 data, (DraconScalarNode, DraconMappingNode, DraconSequenceNode)
             ) and not isinstance(data, (DeferredNode, InterpolableNode)):
-                node = data
+                # embedded wrapper nodes (DeferredNode, InterpolableNode) need
+                # to be re-represented so the serializer sees final node forms.
+                node = self._represent_embedded_wrappers(data)
             else:
                 # find the appropriate representer function
                 data_type = type(data)

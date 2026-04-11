@@ -254,10 +254,18 @@ def _round_trip(value: Any) -> Any:
 # ruamel's reader rejects most C0/C1 controls and the unicode line separators
 # used as YAML line breaks. we emit flow-safe text only so the property test
 # focuses on the dump/load contract and not on YAML reader edge cases.
+#
+# `$` is also filtered: dracon treats `${...}`, `$(...)`, `$ident`, and `$$`
+# in loaded YAML strings as template syntax (lazy/comptime interpolation,
+# shorthand vars, escape unwinding). A plain python string like `"$A"` is
+# not lossless through dump→load because the load path reinterprets it as
+# a template. This is documented semantics, not a bug; users who need
+# strict round-trip for dollar-prefixed strings should disable
+# `enable_shorthand_vars` and `interpolation_enabled` on the loader.
 _SAFE_TEXT = st.text(
     alphabet=st.characters(
         blacklist_categories=("Cs", "Cc"),
-        blacklist_characters="\x00\x85\u2028\u2029",
+        blacklist_characters="\x00\x85\u2028\u2029$",
     ),
     max_size=30,
 )

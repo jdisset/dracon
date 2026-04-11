@@ -615,15 +615,27 @@ def make_sequence_node(
 
 
 def make_mapping_node(
-    pairs: 'Iterable[tuple[Node, Node]]',
+    pairs: 'Mapping[str | Node, Node] | Iterable[tuple[Node, Node]]',
     *,
     tag: str | None = None,
     flow_style: bool | None = None,
 ) -> DraconMappingNode:
-    """Build a mapping node from already-quoted ``(key, value)`` node pairs."""
-    return DraconMappingNode(
-        tag=tag or DEFAULT_MAP_TAG, value=list(pairs), flow_style=flow_style
-    )
+    """Build a mapping node from ``(key, value)`` node pairs or a dict-like.
+
+    Accepts either an iterable of node-node pairs or a ``Mapping`` whose keys
+    may be bare strings (auto-wrapped in scalar nodes) and whose values must
+    already be nodes. This lets ``DraconDumpable`` impls write the common
+    case in dict-literal style.
+    """
+    from collections.abc import Mapping as _Mapping
+
+    if isinstance(pairs, _Mapping):
+        items = [
+            (make_scalar_node(k) if isinstance(k, str) else k, v) for k, v in pairs.items()
+        ]
+    else:
+        items = list(pairs)
+    return DraconMappingNode(tag=tag or DEFAULT_MAP_TAG, value=items, flow_style=flow_style)
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
