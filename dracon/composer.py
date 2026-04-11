@@ -684,13 +684,14 @@ def delete_unset_nodes(comp_res: CompositionResult):
     def _delete_unset_nodes(node: Node, parent: Optional[Node], key: Optional[Hashable]) -> Node:
         nonlocal has_changed
         if isinstance(node, DraconMappingNode):
+            original_was_empty = not node.value
             new_value = []
             for k, v in node.value:
                 if isinstance(v, UnsetNode):
                     has_changed = True
                     continue
                 new_value.append((k, _delete_unset_nodes(v, node, k)))
-            if not new_value and not node.tag.startswith('!'):
+            if not new_value and not original_was_empty and not node.tag.startswith('!'):
                 has_changed = True
                 return UnsetNode()
             new_node = DraconMappingNode(

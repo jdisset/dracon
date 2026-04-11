@@ -62,6 +62,8 @@ def _flow_loader() -> DraconLoader:
     """
     loader = DraconLoader()
     loader.yaml.default_flow_style = True
+    loader.yaml.width = 2**31 - 1  # prevent ruamel from wrapping long flow lines
+    loader.yaml.brace_single_entry_mapping_in_flow_sequence = True
     loader.yaml.representer.full_module_path = False
     return loader
 
@@ -158,13 +160,17 @@ def loads_line(
 
     Strips CRLF and surrounding whitespace. Empty lines return ``None``
     so streams can filter them out without special-casing.
+
+    Interpolation is disabled on the wire: framed strings must survive
+    round-trip verbatim, so ``${...}`` and friends are treated as literal
+    characters instead of lazy expressions.
     """
     if isinstance(line, bytes):
         line = line.decode("utf-8")
     stripped = line.strip()
     if not stripped:
         return None
-    loader = DraconLoader()
+    loader = DraconLoader(enable_interpolation=False)
     _bind_context(loader, context)
     return loader.loads(stripped)
 
