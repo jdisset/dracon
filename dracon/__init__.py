@@ -44,7 +44,16 @@ from dracon.diagnostics import (
 )
 from dracon.representer import DraconRepresenter
 from dracon.interpolation import evaluate_expression, InterpolableNode
-from dracon.nodes import DraconScalarNode, DraconMappingNode, DraconSequenceNode, ContextNode
+from dracon.nodes import (
+    DraconScalarNode,
+    DraconMappingNode,
+    DraconSequenceNode,
+    ContextNode,
+    make_scalar_node,
+    make_sequence_node,
+    make_mapping_node,
+)
+from dracon.framing import dump_line, loads_line, document_stream, NotLineableError
 from dracon.deferred import DeferredNode
 from dracon.composition_trace import CompositionTrace, TraceEntry
 from dracon.instructions import register_instruction, Instruction, unpack_mapping_key

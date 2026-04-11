@@ -592,6 +592,43 @@ class DraconSequenceNode(SourceContextMixin, SequenceNode):
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
+## {{{                   --     construction helpers     --
+def make_scalar_node(value: str, *, tag: str | None = None) -> DraconScalarNode:
+    """Build a scalar node. Defaults to the plain-string tag.
+
+    Sugar for :class:`DraconDumpable` implementations that want to produce
+    a node tree without importing ruamel node constructors or tag constants.
+    """
+    return DraconScalarNode(tag=tag or DEFAULT_SCALAR_TAG, value=value)
+
+
+def make_sequence_node(
+    items: 'Iterable[Node]',
+    *,
+    tag: str | None = None,
+    flow_style: bool | None = None,
+) -> DraconSequenceNode:
+    """Build a sequence node from already-quoted child nodes."""
+    return DraconSequenceNode(
+        tag=tag or DEFAULT_SEQ_TAG, value=list(items), flow_style=flow_style
+    )
+
+
+def make_mapping_node(
+    pairs: 'Iterable[tuple[Node, Node]]',
+    *,
+    tag: str | None = None,
+    flow_style: bool | None = None,
+) -> DraconMappingNode:
+    """Build a mapping node from already-quoted ``(key, value)`` node pairs."""
+    return DraconMappingNode(
+        tag=tag or DEFAULT_MAP_TAG, value=list(pairs), flow_style=flow_style
+    )
+
+
+##────────────────────────────────────────────────────────────────────────────}}}
+
+
 ## {{{                          --     hashes     --
 def dracon_scalar_node_hash(self):
     startmark_hash = (
