@@ -40,8 +40,81 @@ def make_default_empty_mapping_node():
     )
 
 
+_NON_CONSTRUCTIBLE_TAGS = frozenset({
+    '', '!', 'tag:yaml.org,2002:map', 'tag:yaml.org,2002:seq',
+    'tag:yaml.org,2002:str', 'tag:yaml.org,2002:int',
+    'tag:yaml.org,2002:float', 'tag:yaml.org,2002:bool',
+    'tag:yaml.org,2002:null', 'tag:yaml.org,2002:binary',
+    'tag:yaml.org,2002:timestamp',
+    '!include', '!include?', '!define', '!define?',
+    '!set_default', '!require', '!assert', '!unset',
+    '!fn', '!pipe', '!deferred', '!noconstruct',
+})
+
+
+def _has_constructible_tag(node):
+    """True if a node's tag names a type/callable that must be realised before it
+    can be used as a merge source. Default YAML tags, dracon builtins and empty
+    tags don't count. Only applies to mapping/sequence sources - scalar merge
+    sources (e.g. `!float 5` used with a keypath merge) are already handled
+    correctly by the existing merge path."""
+    if not isinstance(node, (DraconMappingNode, DraconSequenceNode)):
+        return False
+    tag = getattr(node, 'tag', None)
+    if not tag or not isinstance(tag, str):
+        return False
+    if tag in _NON_CONSTRUCTIBLE_TAGS:
+        return False
+    # parametrised dracon builtins like !deferred::clear_ctx=foo also skip
+    if tag.startswith('!deferred'):
+        return False
+    # interpolated tags ('!${...}' / '!$(...)') are still unresolved at this
+    # stage - leave them to the tag resolution path
+    if '${' in tag or '$(' in tag:
+        return False
+    return tag.startswith('!')
+
+
+def _realize_tagged_merge_source(merge_node, loader):
+    """Construct a tagged merge-source node so its *output* can be merged.
+
+    When a merge source like `!Pool { seed_job: seed }` reaches process_merges
+    it is still a tagged mapping whose children are the callable's arguments,
+    not its result. If we merged it as-is, the callable's arguments would
+    leak into the parent mapping and the tag would propagate, causing the
+    parent to later be re-constructed as `!Pool` on the wrong shape (and any
+    sibling keys of the parent would be fed in as extra unexpected kwargs).
+
+    We fix this by running the construct pipeline on the source now, then
+    converting the result back into a node that can be merged cleanly.
+    Returns the realised node, or the original node if realisation fails or
+    doesn't apply.
+    """
+    if loader is None:
+        return merge_node
+    if not _has_constructible_tag(merge_node):
+        return merge_node
+    from dracon.loader import dump_to_node
+    try:
+        result = loader.load_node(deepcopy(merge_node))
+    except Exception as e:
+        logger.debug(
+            f"could not realise merge source with tag {merge_node.tag}: {e}. "
+            f"falling back to naive merge."
+        )
+        return merge_node
+    try:
+        return dump_to_node(result)
+    except Exception as e:
+        logger.debug(
+            f"could not dump realised merge source back to a node: {e}. "
+            f"falling back to naive merge."
+        )
+        return merge_node
+
+
 @ftrace(watch=[])
-def process_merges(comp_res):
+def process_merges(comp_res, loader=None):
     """
     Process all merge nodes in the composition result recursively until there are no more merges to process.
     Returns the modified composition result and whether any merges were performed.
@@ -103,6 +176,10 @@ def process_merges(comp_res):
             parent_path = parent_path + KeyPath(merge_key.keypath)
 
         new_parent = parent_path.get_obj(comp_res.root)
+        # if the source has a constructible tag (e.g. !Pool, !Thing),
+        # realise it *now* so its output -- not its arguments -- is what
+        # gets merged into the parent.
+        merge_node = _realize_tagged_merge_source(merge_node, loader)
         # propagate parent context into merge source so hard values
         # (!define) override soft values (!set_default) in the source.
         # existing-wins preserves the include's own !define values;

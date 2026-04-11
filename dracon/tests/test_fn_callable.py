@@ -959,3 +959,78 @@ class TestPropagatedCallableInTemplate:
         config = loader.load(str(tmp_path / "top.yaml"))
         config.resolve_all_lazy()
         assert config['result']['inner']['tagged'] == 'hello'
+
+
+class TestFnCallableAsMergeSource:
+    """Using the output of a !fn-template invocation as a root-level merge
+    source must realise the call first, so its result (not its input args)
+    is what gets merged into the surrounding mapping."""
+
+    def test_fn_merge_at_root_preserves_siblings(self):
+        yaml = """
+!define Thing: !fn
+  !require name: "x"
+  !fn :
+    jobs:
+      - name: ${name}
+        run: echo hi
+
+channels:
+  - name: test-chan
+    retention: 100
+
+<<(<): !Thing { name: foo }
+"""
+        cfg = _loads(yaml)
+        assert set(cfg.keys()) == {'channels', 'jobs'}
+        assert cfg['channels'][0]['name'] == 'test-chan'
+        assert cfg['jobs'][0]['name'] == 'foo'
+
+    def test_fn_merge_existing_wins(self):
+        """Same pattern with explicit new-wins mapping merge."""
+        yaml = """
+!define Thing: !fn
+  !require name: "x"
+  !fn :
+    a: from-thing
+    b: from-thing
+
+a: existing
+c: other
+<<{<+}: !Thing { name: foo }
+"""
+        cfg = _loads(yaml)
+        assert cfg['a'] == 'from-thing'  # new wins
+        assert cfg['b'] == 'from-thing'  # added
+        assert cfg['c'] == 'other'       # preserved
+
+    def test_fn_merge_at_nested_path(self):
+        """Merging !fn result into a nested mapping should also work."""
+        yaml = """
+!define Thing: !fn
+  !require name: "x"
+  !fn :
+    kind: generated
+    label: ${name}
+
+env:
+  version: 1
+  <<(<): !Thing { name: prod }
+"""
+        cfg = _loads(yaml)
+        assert cfg['env']['version'] == 1
+        assert cfg['env']['kind'] == 'generated'
+        assert cfg['env']['label'] == 'prod'
+
+    def test_raw_dict_merge_still_works(self):
+        """Regression check: the non-tagged baseline must keep working."""
+        yaml = """
+channels:
+  - name: test-chan
+
+<<(<):
+  jobs:
+    - name: foo
+"""
+        cfg = _loads(yaml)
+        assert set(cfg.keys()) == {'channels', 'jobs'}

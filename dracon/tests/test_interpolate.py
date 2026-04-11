@@ -116,8 +116,13 @@ def test_lazy():
     assert isinstance(loaded._data['greetingroot'], LazyInterpolable)
     assert loaded.greetingroot == 'Hello, John!'
     assert isinstance(loaded._data['greetingroot'], str)
-    assert isinstance(loaded_copy._data['greetingroot'], str)
+    # shallow and deep copies both have their own independent storage,
+    # so resolving `loaded` doesn't mutate their entries
+    assert isinstance(loaded_copy._data['greetingroot'], LazyInterpolable)
     assert isinstance(loaded_deepcopy._data['greetingroot'], LazyInterpolable)
+    # but reading the value on each copy still resolves independently
+    assert loaded_copy.greetingroot == 'Hello, John!'
+    assert loaded_deepcopy.greetingroot == 'Hello, John!'
 
     assert loaded.nested.inner.greeting == 'greetings, dear John!'
     assert loaded.nested.inner.ref == 'Hello, John!'
@@ -1655,6 +1660,64 @@ class TestTagInterpolation:
         """)
         assert isinstance(config.obj, ClassA)
         assert config.obj.index == 5
+
+
+class TestMappingIsDict:
+    """dracon.dracontainer.Mapping must be a dict subclass so interpolation
+    code that branches on isinstance(x, dict) behaves as Python devs expect."""
+
+    def test_mapping_isinstance_dict(self):
+        from dracon.dracontainer import Mapping as DMapping
+
+        m = DMapping({'a': 1, 'b': 2})
+        assert isinstance(m, dict)
+
+    def test_sequence_isinstance_list(self):
+        from dracon.dracontainer import Sequence as DSequence
+
+        s = DSequence([1, 2, 3])
+        assert isinstance(s, list)
+
+    def test_loaded_mapping_isinstance_dict(self):
+        cfg = dr.loads("a: 1\nb: 2\n")
+        assert isinstance(cfg, dict)
+        assert cfg['a'] == 1
+
+    def test_loaded_sequence_isinstance_list(self):
+        cfg = dr.loads("- 1\n- 2\n- 3\n")
+        assert isinstance(cfg, list)
+        assert cfg[0] == 1
+
+    def test_isinstance_dict_inside_interpolation(self):
+        """The original bug: interpolation that branches on isinstance(x, dict)
+        must treat dracon mapping values as dicts."""
+        yaml = """
+!set_default angles:
+  - {name: a, focus: alpha}
+  - beta
+!define _angles: ${[a if isinstance(a, dict) else dict(name=f'x-{i}', focus=a) for i, a in enumerate(angles)]}
+out: ${_angles}
+"""
+        r = dr.loads(yaml)
+        out = r['out']
+        # first element should pass through unchanged (was already a dict)
+        assert out[0]['name'] == 'a'
+        assert out[0]['focus'] == 'alpha'
+        # second element should be wrapped
+        assert out[1]['name'] == 'x-1'
+        assert out[1]['focus'] == 'beta'
+
+    def test_dict_star_unpack_mapping(self):
+        """{**mapping} should work on a dracon Mapping the same way as on dict."""
+        cfg = dr.loads("a: 1\nb: 2\n")
+        merged = {**cfg, 'c': 3}
+        assert merged == {'a': 1, 'b': 2, 'c': 3}
+
+    def test_dict_constructor_from_mapping(self):
+        cfg = dr.loads("a: 1\nb: 2\n")
+        as_plain = dict(cfg)
+        assert as_plain == {'a': 1, 'b': 2}
+        assert type(as_plain) is dict
 
 
 # }}}

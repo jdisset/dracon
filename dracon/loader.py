@@ -482,7 +482,7 @@ class DraconLoader:
         check_pending_requirements(comp, self)
         comp = process_assertions(comp, self)
         comp.make_map()
-        comp, merge_changed = process_merges(comp)
+        comp, merge_changed = process_merges(comp, loader=self)
         comp, delete_changed = delete_unset_nodes(comp)
         if merge_changed or delete_changed:
             comp.make_map()
