@@ -225,29 +225,6 @@ def test_represent_resolvable(representer_default):
     assert empty_node.tag == '!Resolvable'
 
 
-def test_resolvable_wrapper_round_trips():
-    """Regression: Resolvable[T] used to drop its wrapper on dump."""
-    loader = DraconLoader(context={'SimpleModel': SimpleModel})
-    loader.yaml.representer.full_module_path = False
-    inner = loader.yaml.representer.represent_data(SimpleModel(name="r"))
-    r = Resolvable(node=inner, inner_type=SimpleModel)
-    text = dump(r, loader=loader)
-    assert '!Resolvable' in text
-    reloaded = loads(text, loader=loader)
-    assert isinstance(reloaded, Resolvable)
-
-
-def test_loaded_deferred_node_dumps_without_recursion():
-    """Regression: dumping a DeferredNode that came from a prior load used to recurse."""
-    loader = DraconLoader()
-    data = loader.loads('x: !deferred\n  a: 1\n  b: 2\n')
-    # must not raise RecursionError
-    text = loader.dump(data)
-    assert '!deferred' in text
-    reloaded = loader.loads(text)
-    assert isinstance(reloaded['x'], DeferredNode)
-
-
 def test_represent_deferred_node(representer_default):
     inner_map = DraconMappingNode(
         tag=DEFAULT_MAP_TAG,
@@ -634,37 +611,8 @@ def test_vocabulary_save_restore_survives_reentry():
     assert '!Outer' in out
 
 
-# --- symbol-kind dumpables ---
-
-
-def test_dracon_callable_round_trips_as_fn_tag():
-    from dracon.callable import DraconCallable
-    from dracon.nodes import DraconMappingNode, DraconScalarNode, DEFAULT_MAP_TAG
-    loader = DraconLoader()
-    empty = DraconMappingNode(tag=DEFAULT_MAP_TAG, value=[
-        (DraconScalarNode(tag=DEFAULT_SCALAR_TAG, value='k'),
-         DraconScalarNode(tag=DEFAULT_SCALAR_TAG, value='v')),
-    ])
-    c = DraconCallable(template_node=empty, loader=loader, name="make_x")
-    text = loader.dump(c)
-    assert '!fn' in text
-
-
-def test_dracon_pipe_round_trips_as_pipe_tag():
-    from dracon.pipe import DraconPipe
-    loader = DraconLoader()
-    p = DraconPipe(stages=[lambda x=0: x], stage_kwargs=[{}], name="p")
-    text = loader.dump(p)
-    assert '!pipe' in text
-
-
-def test_bound_symbol_round_trips():
-    from dracon.symbols import BoundSymbol, CallableSymbol
-    loader = DraconLoader()
-    inner = CallableSymbol(SimpleModel, name="SimpleModel")
-    bs = BoundSymbol(inner, name="pre")
-    text = loader.dump(bs)
-    assert '!fn:SimpleModel' in text
+# symbol-kind dumpables (DraconCallable, DraconPipe, BoundSymbol) are
+# round-tripped in test_roundtrip_property.py.
 
 
 # --- hybrid quoter: nested dracon-native value preservation ---
@@ -711,21 +659,6 @@ def test_pydantic_dict_of_models_preserves_inner_tags():
     assert isinstance(reloaded.items['k'], Inner)
 
 
-def test_pydantic_dict_any_field_preserves_deferred_node():
-    """The broodmon bug: dict field holding a DeferredNode used to get flattened."""
-
-    class Outer(BaseModel):
-        bag: dict[str, object] = Field(default_factory=dict)
-
-    loader = _loader_for(Outer=Outer)
-    d = make_deferred({'a': 1}, loader=loader)
-    o = Outer(bag={'d': d})
-    text = dump(o, loader=loader)
-    assert '!deferred' in text
-    reloaded = loads(text, loader=loader)
-    assert isinstance(reloaded.bag['d'], DeferredNode)
-
-
 def test_pydantic_typed_list_preserves_deferred_children():
     """A typed list with dracon-native payloads used to drop those payloads entirely."""
 
@@ -748,23 +681,6 @@ def test_pydantic_typed_list_preserves_deferred_children():
     assert isinstance(reloaded.things[0].payload, DeferredNode)
 
 
-def test_pydantic_untyped_field_preserves_resolvable_wrapper():
-    class Inner(BaseModel):
-        name: str
-
-    class Outer(BaseModel):
-        model_config = {'arbitrary_types_allowed': True}
-        slot: object = None
-
-    loader = _loader_for(Inner=Inner, Outer=Outer)
-    inner_node = loader.yaml.representer.represent_data(Inner(name='r'))
-    o = Outer(slot=Resolvable(node=inner_node, inner_type=Inner))
-    text = dump(o, loader=loader)
-    assert '!Resolvable' in text
-    reloaded = loads(text, loader=loader)
-    assert isinstance(reloaded.slot, Resolvable)
-
-
 def test_pydantic_dict_of_any_preserves_resolvable_wrapper():
     class Inner(BaseModel):
         name: str
@@ -779,22 +695,6 @@ def test_pydantic_dict_of_any_preserves_resolvable_wrapper():
     assert '!Resolvable' in text
     reloaded = loads(text, loader=loader)
     assert isinstance(reloaded.stuff['k'], Resolvable)
-
-
-def test_pydantic_untyped_field_preserves_lazy_interpolable_expression():
-    """A LazyInterpolable stored in an untyped field must dump as its ${expr} form."""
-
-    class Outer(BaseModel):
-        model_config = {'arbitrary_types_allowed': True}
-        expr: object = None
-
-    loader = _loader_for(Outer=Outer)
-    lazy = LazyInterpolable(value="${1 + 2}")
-    o = Outer(expr=lazy)
-    text = dump(o, loader=loader)
-    assert '${1 + 2}' in text
-    # sanity: no eagerly resolved '3' in place of the expression
-    assert 'expr: 3' not in text
 
 
 def test_pydantic_alias_respected_on_dump():

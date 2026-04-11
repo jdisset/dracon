@@ -1,20 +1,15 @@
 """Tests for dump_to_node as a first-class public API (step 04).
 
-Covers:
-- loader.dump_to_node() uses the loader's own context and representer (bug fix)
-- loader.dump() and loader.dump_to_node() use the same representer instance
-- top-level dump_to_node() accepts context kwarg
-- dump_to_node is idempotent on existing Node inputs
-- dump(value) equals emit(dump_to_node(value))
+Bug-fix regressions live in test_roundtrip_property.py; this file covers
+the first-class API shape.
 """
 
 from io import StringIO
 
-import pytest
 from pydantic import BaseModel
 from ruamel.yaml import Node
 
-from dracon import DraconLoader, dump, dump_to_node
+from dracon import DraconLoader, dump_to_node
 from dracon.symbol_table import SymbolEntry, SymbolTable
 from dracon.symbols import CallableSymbol
 
@@ -29,28 +24,6 @@ def _vocab(**entries) -> SymbolTable:
     for name, value in entries.items():
         tbl.define(SymbolEntry(name=name, symbol=CallableSymbol(value, name=name)))
     return tbl
-
-
-# --- bug fix regression ---
-
-
-def test_loader_dump_to_node_uses_loader_context():
-    """Regression: DraconLoader.dump_to_node() used to discard loader context."""
-    loader = DraconLoader()
-    loader.context = _vocab(Gadget=Widget)
-    node = loader.dump_to_node(Widget(name="x"))
-    assert isinstance(node, Node)
-    assert node.tag == '!Gadget'
-
-
-def test_loader_dump_and_dump_to_node_share_representer_behavior():
-    """Both methods must emit the same tag for the same input."""
-    loader = DraconLoader()
-    loader.context = _vocab(Thing=Widget)
-    text = loader.dump(Widget(name="y"))
-    node = loader.dump_to_node(Widget(name="y"))
-    assert '!Thing' in text
-    assert node.tag == '!Thing'
 
 
 def test_loader_dump_to_node_respects_full_module_path_fallback():

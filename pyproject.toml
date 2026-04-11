@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["pytest", "hypothesis>=6"]
 docs = [
     "mkdocs>=1.5",
     "mkdocs-material>=9.0",
