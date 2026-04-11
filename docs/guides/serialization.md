@@ -2,6 +2,32 @@
 
 You need to dump a config back to YAML, or serialize config objects for storage or IPC.
 
+## The four-peer model
+
+Dracon splits both directions of the object-node-text pipeline into two named
+steps, giving you four peers total:
+
+| direction | semantic step                   | syntactic step       |
+|-----------|---------------------------------|----------------------|
+| load      | `compose(source)` -> Node       | `loads`/`load` -> value |
+| dump      | `dump_to_node(value)` -> Node   | `dump` -> text       |
+
+`dump_to_node` is the inverse of `construct`. Use it when you want a Node tree
+for further processing (e.g. inserting a value as a layer into a
+`CompositionStack`) rather than YAML text. `dump` is just
+`emit(dump_to_node(value))` underneath, and both paths use the same
+representer instance on a given loader.
+
+```python
+import dracon
+
+node = dracon.dump_to_node(config)          # Node tree, same vocabulary as dump()
+text = dracon.dump(config)                  # YAML text
+```
+
+Both `dump_to_node` and `dump` accept a `context=` kwarg for vocabulary-aware
+tag emission; on a bound loader, both consult `loader.context` automatically.
+
 ## dracon.dump()
 
 The `dump()` function serializes any config object to a YAML string:

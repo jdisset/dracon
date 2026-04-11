@@ -645,21 +645,38 @@ class DraconLoader:
 
         comp.walk(add_trace)
 
-    def dump(self, data, stream=None):
+    def dump_to_node(self, data: Any) -> Node:
+        """Quote data into a Node using this loader's bound vocabulary.
+
+        Semantic boundary for the object -> node direction, peer of
+        :meth:`construct`. The loader's :attr:`context` (a SymbolTable)
+        drives vocabulary-aware tag emission; any value whose type is
+        registered canonically gets its short tag, with qualname fallback
+        otherwise.
+        """
+        if isinstance(data, Node):
+            return data
         prev = self.yaml.representer._vocabulary
         self.yaml.representer._vocabulary = self.context
         try:
-            if stream is None:
-                from io import StringIO
-                string_stream = StringIO()
-                self.yaml.dump(data, string_stream)
-                return string_stream.getvalue()
-            return self.yaml.dump(data, stream)
+            return self.yaml.representer.represent_data(data)
         finally:
             self.yaml.representer._vocabulary = prev
 
-    def dump_to_node(self, data):
-        return dump_to_node(data)
+    def dump(self, data, stream=None):
+        """Quote and emit data as YAML text using this loader's vocabulary.
+
+        Equivalent to ``emit(self.dump_to_node(data))``. When ``stream`` is
+        None, returns the YAML string; otherwise writes to the stream and
+        returns None (ruamel convention).
+        """
+        node = self.dump_to_node(data)
+        if stream is None:
+            from io import StringIO
+            buf = StringIO()
+            self.yaml.dump(node, buf)
+            return buf.getvalue()
+        return self.yaml.dump(node, stream)
 
     def stack(self, *sources, **ctx) -> 'CompositionStack':
         from dracon.stack import CompositionStack, LayerSpec
@@ -675,11 +692,31 @@ class DraconLoader:
 
 
 @ftrace(watch=[])
-def dump_to_node(data):
+def dump_to_node(
+    data: Any,
+    context: SymbolTable | dict[str, Any] | None = None,
+) -> Node:
+    """Quote a Python value into a Node against the given vocabulary.
+
+    Semantic boundary for the object -> node direction, peer of
+    :func:`construct`. Use this when you want a Node tree for further
+    processing (e.g. inserting as a layer into a ``CompositionStack``)
+    rather than YAML text.
+
+    The vocabulary controls tag naming: any value whose type is registered
+    in the SymbolTable gets its canonical short tag. Values without a
+    vocabulary-local name fall back to qualname, governed by the
+    representer's ``full_module_path``.
+    """
     if isinstance(data, Node):
         return data
-    representer = DraconRepresenter()
-    return representer.represent_data(data)
+    loader = DraconLoader()
+    if isinstance(context, SymbolTable):
+        # preserve canonical entries that would be lost via dict-style .update
+        loader.context = context
+    elif context:
+        loader.context.update(context)
+    return loader.dump_to_node(data)
 
 
 def load(
@@ -744,11 +781,13 @@ def loads(config_str: str, raw_dict=False, **kwargs):
 
 
 def dump(data, stream=None, **kwargs):
-    loader_instance = kwargs.pop('loader', None)
-    if loader_instance:
-        loader = loader_instance
-    else:
-        loader = DraconLoader(**kwargs)
+    """Quote and emit data as YAML text.
+
+    Peer of :func:`dump_to_node` for the text boundary. Accepts a
+    ``loader=`` kwarg to reuse an existing ``DraconLoader``; otherwise
+    remaining kwargs (including ``context=``) build a fresh one.
+    """
+    loader = kwargs.pop('loader', None) or DraconLoader(**kwargs)
     return loader.dump(data, stream)
 
 
