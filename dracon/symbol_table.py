@@ -9,6 +9,7 @@ from collections.abc import MutableMapping, Iterator, Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from dracon.diagnostics import DraconError
 from dracon.symbols import (
     Symbol,
     SymbolKind,
@@ -20,6 +21,10 @@ from dracon.symbols import (
 )
 
 
+class CanonicalCollisionError(DraconError):
+    """Two canonical symbol entries claim the same Python type."""
+
+
 @dataclass(frozen=True)
 class SymbolEntry:
     name: str
@@ -27,6 +32,7 @@ class SymbolEntry:
     exported: bool = True
     source: SymbolSourceInfo | None = None
     docs: str | None = None
+    canonical: bool = True  # False = consume-only alias, invisible to identify()
 
 
 class SymbolTable(MutableMapping):
@@ -38,7 +44,11 @@ class SymbolTable(MutableMapping):
     For symbol-level access, use lookup_symbol() / lookup_entry().
     """
 
-    __slots__ = ('_entries', '_soft_keys', '_parent', '_accessed_keys', '_defined_var_keys', '_suspend_tracking')
+    __slots__ = (
+        '_entries', '_soft_keys', '_parent',
+        '_accessed_keys', '_defined_var_keys', '_suspend_tracking',
+        '_identify_cache',
+    )
     __dracon_no_merge__ = True
 
     def __init__(self, parent: SymbolTable | None = None):
@@ -48,6 +58,7 @@ class SymbolTable(MutableMapping):
         self._accessed_keys: set[str] | None = None
         self._defined_var_keys: set[str] | None = None
         self._suspend_tracking: bool = False
+        self._identify_cache: dict[type, str] | None = None
 
     # ── access tracking (for CLI unused-var warnings) ────────────────────
 
@@ -79,9 +90,16 @@ class SymbolTable(MutableMapping):
             return default
 
     def __setitem__(self, key: str, value: Any) -> None:
-        """Convenience: wrap raw value in ValueSymbol and define."""
+        """Convenience: wrap raw value in ValueSymbol and define.
+
+        Inserts are always non-canonical: this path is used by composition
+        propagation and captured-globals sweep. Explicit vocabulary
+        registration goes through define(SymbolEntry(...)).
+        """
         sym = auto_symbol(value, name=key)
-        self._entries[key] = SymbolEntry(name=key, symbol=sym)
+        self._insert_with_collision_check(
+            SymbolEntry(name=key, symbol=sym, canonical=False)
+        )
         self._soft_keys.discard(key)
 
     def __delitem__(self, key: str) -> None:
@@ -92,6 +110,7 @@ class SymbolTable(MutableMapping):
                 raise KeyError(f"cannot delete inherited key '{key}'")
             raise
         self._soft_keys.discard(key)
+        self._identify_cache = None
 
     def __contains__(self, key: object) -> bool:
         if key in self._entries:
@@ -135,14 +154,28 @@ class SymbolTable(MutableMapping):
     def define(self, entry: SymbolEntry, *, overwrite: bool = True) -> None:
         if not overwrite and entry.name in self._entries:
             return
-        self._entries[entry.name] = entry
+        self._insert_with_collision_check(entry)
         self._soft_keys.discard(entry.name)
 
     def set_default(self, entry: SymbolEntry) -> None:
         if entry.name in self._entries or (self._parent is not None and entry.name in self._parent):
             return
-        self._entries[entry.name] = entry
+        self._insert_with_collision_check(entry)
         self._soft_keys.add(entry.name)
+
+    def _insert_with_collision_check(self, entry: SymbolEntry) -> None:
+        """Shared entry point: verify no canonical collision, then insert."""
+        if entry.canonical:
+            rep_type = entry.symbol.represented_type()
+            if rep_type is not None:
+                existing = self._canonical_type_cache().get(rep_type)
+                if existing is not None and existing != entry.name:
+                    raise CanonicalCollisionError(
+                        f"type {rep_type.__name__} already registered as "
+                        f"'{existing}', cannot also register as '{entry.name}'"
+                    )
+        self._entries[entry.name] = entry
+        self._identify_cache = None
 
     def is_soft(self, key: str) -> bool:
         return key in self._soft_keys
@@ -167,6 +200,41 @@ class SymbolTable(MutableMapping):
         for entry in self._entries.values():
             if entry.exported:
                 yield entry
+
+    # ── reverse lookup: value -> canonical name ──────────────────────────
+
+    def identify(self, value: Any) -> str | None:
+        """Return the canonical dump name for value, or None.
+
+        Walks type(value).__mro__ in order against the canonical map; the
+        first class whose canonical entry matches wins. Falls through to
+        the parent chain if no local match is found. Non-canonical entries
+        (aliases, captured globals) are invisible to this lookup.
+        """
+        if value is None:
+            return None
+        mro = type(value).__mro__
+        cache = self._canonical_type_cache()
+        for cls in mro:
+            name = cache.get(cls)
+            if name is not None:
+                return name
+        if self._parent is not None:
+            return self._parent.identify(value)
+        return None
+
+    def _canonical_type_cache(self) -> dict[type, str]:
+        """Lazy {type -> canonical name} map over local entries."""
+        if self._identify_cache is None:
+            cache: dict[type, str] = {}
+            for name, entry in self._entries.items():
+                if not entry.canonical:
+                    continue
+                rep_type = entry.symbol.represented_type()
+                if rep_type is not None:
+                    cache[rep_type] = name
+            self._identify_cache = cache
+        return self._identify_cache
 
     # ── query API (used by __scope__ in interpolation) ───────────────────
 
@@ -222,6 +290,7 @@ class SymbolTable(MutableMapping):
         tbl._accessed_keys = self._accessed_keys
         tbl._defined_var_keys = self._defined_var_keys
         tbl._suspend_tracking = False
+        tbl._identify_cache = None  # rebuild lazily on the clone
         return tbl
 
     def copy(self) -> SymbolTable:
@@ -230,6 +299,7 @@ class SymbolTable(MutableMapping):
     def clear(self) -> None:
         self._entries.clear()
         self._soft_keys.clear()
+        self._identify_cache = None
 
     def __copy__(self) -> SymbolTable:
         return self.copy()

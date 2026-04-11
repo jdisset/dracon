@@ -87,6 +87,9 @@ class DraconPipe:
     def materialize(self):
         return self
 
+    def represented_type(self):
+        return None  # pipes compose callables, no type identity
+
     # ── existing API ─────────────────────────────────────────────────────
 
     def __call__(self, **kwargs):

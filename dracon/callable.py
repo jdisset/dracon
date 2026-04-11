@@ -78,6 +78,9 @@ class DraconCallable:
     def materialize(self):
         return self
 
+    def represented_type(self):
+        return None  # templates have no single underlying Python type
+
     # ── param scanning (owns interface extraction) ───────────────────────
 
     def _scan_params(self):

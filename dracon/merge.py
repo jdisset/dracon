@@ -529,26 +529,41 @@ def _merge_into_symbol_table(table, new_context, merge_key):
     Mirrors the soft key logic from merged()/merge_dicts():
     pdict is the priority dict (winner), other is the loser.
     If pdict has a soft key and other has a hard key, other's value wins.
+
+    When new_context is also a SymbolTable, entries are preserved whole
+    (source, canonical flag, docs). Plain-dict merges route through
+    __setitem__ and produce non-canonical entries.
     """
+    from dracon.symbol_table import SymbolTable
+
     existing_wins = merge_key.dict_priority == MergePriority.EXISTING
     new_soft = getattr(new_context, '_soft_keys', None)
+    new_is_table = isinstance(new_context, SymbolTable)
+
+    def _write(k, v):
+        if new_is_table:
+            entry = new_context._entries.get(k)
+            if entry is not None:
+                table.define(entry)
+                return
+        table[k] = v
 
     if existing_wins:
         # existing (table) is pdict, new_context is other
         for k, v in new_context.items():
             if k not in table:
-                table[k] = v
+                _write(k, v)
                 if new_soft and k in new_soft:
                     table._soft_keys.add(k)
             elif table.is_soft(k) and not (new_soft and k in new_soft):
                 # pdict (table) has soft key, other (new) has hard key -> other wins
-                table[k] = v
+                _write(k, v)
                 table._soft_keys.discard(k)
     else:
         # new_context is pdict, table (existing) is other
         for k, v in new_context.items():
             if k not in table:
-                table[k] = v
+                _write(k, v)
                 if new_soft and k in new_soft:
                     table._soft_keys.add(k)
             else:
@@ -558,7 +573,7 @@ def _merge_into_symbol_table(table, new_context, merge_key):
                 if is_new_soft and not is_existing_soft:
                     # pdict (new) has soft key, other (existing) has hard key -> other wins, skip
                     continue
-                table[k] = v
+                _write(k, v)
                 if is_new_soft:
                     table._soft_keys.add(k)
                 else:

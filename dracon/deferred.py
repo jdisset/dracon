@@ -164,6 +164,9 @@ class DeferredNode(ContextNode, Generic[T]):
     def materialize(self):
         return self
 
+    def represented_type(self):
+        return None  # deferred branches are node trees, not types
+
     @ftrace(watch=[])
     def update_context(self, context):
         add_to_context(context, self)

@@ -64,6 +64,7 @@ class Symbol(Protocol[T]):
     def bind(self, **kwargs: Any) -> Symbol[Any]: ...
     def invoke(self, **kwargs: Any) -> T: ...
     def materialize(self) -> Any: ...
+    def represented_type(self) -> type | None: ...
 
 
 # ── concrete symbols ─────────────────────────────────────────────────────────
@@ -89,6 +90,9 @@ class ValueSymbol:
 
     def materialize(self) -> Any:
         return self._value
+
+    def represented_type(self) -> type | None:
+        return self._value if isinstance(self._value, type) else None
 
 
 class CallableSymbol:
@@ -119,6 +123,9 @@ class CallableSymbol:
 
     def materialize(self) -> Any:
         return self._callable
+
+    def represented_type(self) -> type | None:
+        return self._callable if isinstance(self._callable, type) else None
 
 
 class BoundSymbol:
@@ -164,6 +171,9 @@ class BoundSymbol:
             return self  # bound symbol with kwargs is the materialized form
         return self._inner.materialize()
 
+    def represented_type(self) -> type | None:
+        return None  # bound symbols carry kwargs, not type identity
+
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -201,7 +211,9 @@ def auto_symbol(value: Any, *, name: str | None = None, source: SymbolSourceInfo
     # instances that already satisfy the protocol (DraconCallable, DraconPartial, DraconPipe, DeferredNode, etc.)
     if isinstance(value, (ValueSymbol, CallableSymbol, BoundSymbol)):
         return value
-    if hasattr(value, 'interface') and hasattr(value, 'bind') and hasattr(value, 'invoke') and hasattr(value, 'materialize'):
+    if (hasattr(value, 'interface') and hasattr(value, 'bind')
+        and hasattr(value, 'invoke') and hasattr(value, 'materialize')
+        and hasattr(value, 'represented_type')):
         return value
     if callable(value):
         return CallableSymbol(value, name=name, source=source)

@@ -52,6 +52,9 @@ class DraconPartial:
     def materialize(self):
         return self
 
+    def represented_type(self):
+        return self._func if isinstance(self._func, type) else None
+
     # ── existing API ─────────────────────────────────────────────────────
 
     def __call__(self, *args, **runtime_kwargs):
