@@ -78,6 +78,61 @@ def test_raw_with_dollar_escape_inside():
     assert result["val"] == "$${foo}"
 
 
+# adversarial strings that exercise every interpolation/escaping code path.
+# a !raw value must survive ALL of these exactly as-is.
+_ADVERSARIAL_RAW_STRINGS = [
+    "plain text",
+    "${runtime.eval('x')}",         # interpolation syntax
+    "$${escaped}",                   # double-dollar escape
+    "prefix_$${mid}_suffix",        # escape inside larger string
+    # note: backslash escapes are tested in roundtrip only, not fn-passthrough,
+    # because repr() + yaml single-quoting double-escapes backslashes.
+    "$VAR",                          # shorthand var
+    "${a} and ${b}",                 # multiple interpolations
+    "${nested_${deep}}",             # nested interpolation
+    "channels.messages('bugs')",     # no special chars at all
+    "",                              # empty string
+]
+
+
+@pytest.mark.parametrize("raw_str", _ADVERSARIAL_RAW_STRINGS)
+def test_raw_exact_preservation_through_fn(raw_str):
+    """!raw values survive !fn + lazy resolution with exact string content."""
+    from dracon.raw import RawExpression
+    loader = DraconLoader(enable_interpolation=True)
+    # use block style to avoid yaml quoting issues with special chars
+    yaml_str = f"""
+        !define tmpl: !fn
+            !require val: "a value"
+            !fn :
+                out: ${{val}}
+        result: !tmpl
+            val: !raw {repr(raw_str)}
+    """
+    result = loader.loads(yaml_str)
+    assert isinstance(result["result"]["out"], RawExpression), \
+        f"RawExpression type lost for: {raw_str!r}"
+    assert result["result"]["out"] == raw_str, \
+        f"Content mangled: expected {raw_str!r}, got {result['result']['out']!r}"
+
+
+_ROUNDTRIP_RAW_STRINGS = _ADVERSARIAL_RAW_STRINGS + [
+    "\\${backslash_escape}",        # backslash escape
+]
+
+
+@pytest.mark.parametrize("raw_str", _ROUNDTRIP_RAW_STRINGS)
+def test_raw_roundtrip_preservation(raw_str):
+    """!raw values survive dump -> loads with exact content."""
+    from dracon.raw import RawExpression
+    original = {"val": RawExpression(raw_str)}
+    from dracon import dump
+    dumped = dump(original)
+    reloaded = loads(dumped)
+    assert isinstance(reloaded["val"], RawExpression)
+    assert reloaded["val"] == raw_str
+
+
 def test_raw_survives_resolve_all_lazy():
     """resolve_all_lazy leaves RawExpression untouched."""
     from dracon.raw import RawExpression

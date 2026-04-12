@@ -673,12 +673,13 @@ def evaluate_expression(
 
     # short-circuit recursion if permissive and no progress made
     if permissive and not made_progress:
-        if _unescape_result and isinstance(endexpr, str):
+        if _unescape_result and type(endexpr) is str:
             return unescape_dracon_specials(endexpr)
         return endexpr
 
-    from dracon.raw import RawExpression
-    if allow_recurse != 0 and isinstance(endexpr, str) and not isinstance(endexpr, RawExpression) and '${' in endexpr:
+    # only recurse / unescape plain str, never str subclasses (e.g. RawExpression).
+    # type() is str fails closed: marked strings are automatically excluded.
+    if allow_recurse != 0 and type(endexpr) is str and '${' in endexpr:
         return evaluate_expression(
             endexpr,
             current_path,
@@ -691,7 +692,7 @@ def evaluate_expression(
             permissive=permissive,
             _unescape_result=_unescape_result,
         )
-    if _unescape_result and isinstance(endexpr, str):
+    if _unescape_result and type(endexpr) is str:
         endexpr = unescape_dracon_specials(endexpr)
     return endexpr
 
