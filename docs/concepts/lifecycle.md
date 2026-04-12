@@ -78,6 +78,7 @@ The composed node tree is walked top-down and turned into Python objects.
 - Pydantic models are validated via `model_validate()`
 - `!noconstruct` nodes are left as raw dicts/lists
 - `!deferred` nodes are wrapped in `DeferredNode` and paused
+- `!raw` nodes are constructed as `RawExpression` -- opaque strings that Dracon never evaluates
 - `${...}` expressions in non-lazy containers are resolved here
 
 The constructor looks at each node's tag to decide what to do. A tag like `!MyModel` triggers a lookup: first in the loader's context (for types defined via `!define`), then via Python import resolution. If the tag resolves to a Pydantic model, the node's children become the model's field values.

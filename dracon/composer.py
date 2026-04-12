@@ -492,6 +492,10 @@ class DraconComposer(Composer):
 
     def handle_interpolation(self, node) -> Node:
         from dracon.interpolation_utils import transform_dollar_vars
+        from dracon.raw import RAW_TAG
+
+        if node.tag == RAW_TAG:
+            return node
 
         value_for_scan = node.value
         tag_for_scan = node.tag

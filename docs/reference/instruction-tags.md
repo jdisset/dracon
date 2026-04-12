@@ -16,7 +16,7 @@ After all instructions:
 5. `!require` -- checked for unsatisfied requirements
 6. `!assert` -- evaluated in a separate pass
 
-`!include`, `!deferred`, `!noconstruct`, and `!unset` are handled by the composition pipeline directly, not by the instruction registry.
+`!include`, `!deferred`, `!raw`, `!noconstruct`, and `!unset` are handled by the composition pipeline directly, not by the instruction registry.
 
 ---
 
@@ -326,6 +326,53 @@ Combine query params and a type:
 config: !deferred::reroot=true:ServerConfig
   host: localhost
 ```
+
+---
+
+## !raw
+
+Mark a scalar value as opaque to all Dracon phases. The string is carried through composition, construction, and lazy resolution without any interpretation. Downstream systems (runtimes, template engines, shells) can evaluate the contents however they like.
+
+```yaml
+env:
+  HUNT_KNOWN_BUGS: !raw "channels.messages('known_bugs')"
+  SHELL_HOME: !raw "${HOME}/.config"
+```
+
+`!raw` is the scalar dual of `!deferred`:
+
+- `!deferred` pauses a **subtree** for later construction by Dracon
+- `!raw` marks a **scalar** that Dracon will never evaluate
+
+The phase boundary is on the value, not the template. A `!raw` value flows through `!fn` invocations untouched:
+
+```yaml
+!define make_job: !fn
+  !require cmd: "command expression"
+  !fn :
+    run: ${cmd}
+
+job: !make_job
+  cmd: !raw "runtime.dispatch('task')"
+# job.run is a RawExpression, not an interpolated string
+```
+
+### When to use `!raw` vs escaping
+
+Use `!raw` when a value is meant for a different evaluator entirely. Use `$${}` escaping when you just need a literal `${...}` in the output. The key difference: `!raw` survives any number of `!fn` nesting levels without counting escape layers.
+
+### Python type
+
+`RawExpression` is a `str` subclass. It works anywhere a string does and round-trips through `dump`/`loads` preserving the `!raw` tag.
+
+```python
+from dracon import RawExpression
+
+expr = RawExpression("channels.messages('bugs')")
+isinstance(expr, str)  # True
+```
+
+In Pydantic models, type the field as `RawExpression | str` to accept both regular strings and raw expressions.
 
 ---
 

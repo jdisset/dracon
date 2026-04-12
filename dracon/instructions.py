@@ -904,6 +904,19 @@ class If(Instruction):
 
         del parent_node[key_node.value]
 
+        # if the parent mapping is now empty and lives inside a sequence,
+        # remove the empty mapping from the sequence (false !if in a list)
+        if (
+            isinstance(parent_node, DraconMappingNode)
+            and len(parent_node.value) == 0
+            and parent_path.parent
+        ):
+            grandparent = parent_path.parent.get_obj(comp_res.root)
+            if isinstance(grandparent, DraconSequenceNode):
+                grandparent.value = [
+                    item for item in grandparent.value if item is not parent_node
+                ]
+
         # record if-branch trace
         if comp_res.trace is not None:
             branch = "then" if condition else "else"

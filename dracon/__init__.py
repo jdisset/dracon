@@ -55,6 +55,7 @@ from dracon.nodes import (
 )
 from dracon.framing import dump_line, loads_line, document_stream, NotLineableError
 from dracon.deferred import DeferredNode
+from dracon.raw import RawExpression
 from dracon.composition_trace import CompositionTrace, TraceEntry
 from dracon.instructions import register_instruction, Instruction, unpack_mapping_key
 from dracon.callable import DraconCallable

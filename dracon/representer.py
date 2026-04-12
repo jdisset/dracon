@@ -487,6 +487,8 @@ DraconRepresenter.add_representer(DeferredNode, DraconRepresenter.represent_defe
 DraconRepresenter.add_representer(InterpolableNode, DraconRepresenter.represent_interpolable_node)
 DraconRepresenter.add_representer(np.ndarray, DraconRepresenter.represent_ndarray)
 
+from dracon.raw import RawExpression
+DraconRepresenter.add_representer(RawExpression, DraconRepresenter.represent_dracon_dumpable)
 DraconRepresenter.add_multi_representer(DraconDumpable, DraconRepresenter.represent_dracon_dumpable)
 DraconRepresenter.add_multi_representer(BaseModel, DraconRepresenter.represent_pydantic_model)
 DraconRepresenter.add_multi_representer(Enum, DraconRepresenter.represent_enum)

@@ -312,6 +312,11 @@ class Draconstructor(Constructor):
             if str(tag) in _SKIP_TAGS:
                 return None
 
+            # !raw: opaque value, skip all dracon processing
+            if tag == '!raw':
+                from dracon.raw import RawExpression
+                return RawExpression(node.value)
+
             # !fn:path universal binding
             if tag and isinstance(tag, str) and tag.startswith('!fn:') and target_type is None:
                 return self._construct_fn_target(tag[4:], node, current_loader_context)
@@ -347,7 +352,7 @@ class Draconstructor(Constructor):
                 if isinstance(node, InterpolableNode):
                     return self.construct_interpolable(node)
 
-                if tag.startswith('!'):
+                if not tag or tag.startswith('!'):
                     reset_tag(node)
                 obj = self.base_construct_object(node, deep=True)
 

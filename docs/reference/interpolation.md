@@ -59,6 +59,9 @@ msg: "hello ${name}, metric=$${value}"   # -> hello world, metric=${value}
 
 This is useful when a host application needs certain `${...}` tokens to survive Dracon construction for later runtime resolution.
 
+!!! tip "For values owned by a downstream runtime"
+    If the entire value belongs to an external system (not just a literal `$`), use [`!raw`](instruction-tags.md#raw) instead of escaping. `!raw` survives any nesting depth without counting escape layers.
+
 ---
 
 ## Expression Evaluation
