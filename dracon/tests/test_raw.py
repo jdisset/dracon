@@ -102,6 +102,21 @@ def test_raw_in_pydantic_model():
     assert result.expr == "runtime.x()"
 
 
+def test_raw_with_interpolation_syntax_in_fn():
+    """!raw containing ${...} survives !fn without recursive interpolation."""
+    from dracon.raw import RawExpression
+    result = loads("""
+        !define tmpl: !fn
+            !require expr: "an expression"
+            !fn :
+                val: ${expr}
+        out: !tmpl
+            expr: !raw "${runtime.eval('x')}"
+    """)
+    assert isinstance(result["out"]["val"], RawExpression)
+    assert result["out"]["val"] == "${runtime.eval('x')}"
+
+
 def test_raw_nested_fn():
     """!raw flows through multiple levels of !fn nesting."""
     from dracon.raw import RawExpression

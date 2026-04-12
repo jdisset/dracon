@@ -677,7 +677,8 @@ def evaluate_expression(
             return unescape_dracon_specials(endexpr)
         return endexpr
 
-    if allow_recurse != 0 and isinstance(endexpr, str) and '${' in endexpr:
+    from dracon.raw import RawExpression
+    if allow_recurse != 0 and isinstance(endexpr, str) and not isinstance(endexpr, RawExpression) and '${' in endexpr:
         return evaluate_expression(
             endexpr,
             current_path,
