@@ -2992,3 +2992,68 @@ def test_plus_token_with_nested_subcommand_list_positional():
     assert isinstance(conf.command, WatcherCmd)
     assert isinstance(conf.command.sub, AddCmd)
     assert conf.command.sub.files == ["+spec.yaml", "+other.yaml"]
+
+
+# -- positional collection types behind Optional / Union --
+# _get_collection_type must unwrap Optional[list[...]] etc., otherwise a single
+# positional value is passed through as a bare string and pydantic rejects it.
+
+
+def test_positional_optional_list_str_collects_values():
+    """Annotated[list[str] | None, Arg(positional=True)] must still be collected as list"""
+
+    class CLI(BaseModel):
+        command: Annotated[list[str] | None, Arg(positional=True)] = None
+
+    prog = make_program(CLI, name="tool")
+    conf, _ = prog.parse_args(["echo hello"])
+    assert conf.command == ["echo hello"]
+
+
+def test_positional_typing_optional_list_str():
+    """typing.Optional[list[str]] behaves identically to list[str] | None"""
+
+    class CLI(BaseModel):
+        command: Annotated[Optional[List[str]], Arg(positional=True)] = None
+
+    prog = make_program(CLI, name="tool")
+    conf, _ = prog.parse_args(["a", "b", "c"])
+    assert conf.command == ["a", "b", "c"]
+
+
+def test_positional_union_dict_positional_collects_pairs():
+    """Optional[dict[...]] positional must still collect key=value pairs"""
+
+    class CLI(BaseModel):
+        data: Annotated[Dict[str, str] | None, Arg(positional=True)] = None
+
+    prog = make_program(CLI, name="tool")
+    conf, _ = prog.parse_args(["a=1", "b=2"])
+    assert conf.data == {"a": "1", "b": "2"}
+
+
+def test_subcommand_positional_optional_list_str():
+    """subcommand with Optional[list[str]] positional — broodmon submit shape"""
+
+    @subcommand('submit')
+    class SubmitCmd(BaseModel):
+        command: Annotated[list[str] | None, Arg(positional=True)] = None
+
+    class CLI(BaseModel):
+        sub: Subcommand(SubmitCmd)
+
+    prog = make_program(CLI, name="tool")
+    conf, _ = prog.parse_args(["submit", "echo hello"])
+    assert conf.sub.command == ["echo hello"]
+
+
+def test_positional_list_rejects_second_positional_with_optional():
+    """the 'list positional implies no other positional' invariant must hold
+    through Optional — regression for the union-unwrap fix"""
+
+    class CLI(BaseModel):
+        items: Annotated[list[str] | None, Arg(positional=True)] = None
+        other: Annotated[str, Arg(positional=True)] = ""
+
+    with pytest.raises(ValueError, match="no other positional arguments"):
+        make_program(CLI, name="tool")

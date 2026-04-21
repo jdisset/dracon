@@ -1,0 +1,4 @@
+<<(<): !include pkg:dracon:tests/test_vocab_define_propagation_vocab.yaml
+
+result: !greet
+  name: world

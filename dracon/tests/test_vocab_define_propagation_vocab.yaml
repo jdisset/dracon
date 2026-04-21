@@ -1,0 +1,4 @@
+!define greet: !fn
+  !require name: "person to greet"
+  !set_default prefix: Hello
+  !fn : ${prefix + ', ' + name + '!'}

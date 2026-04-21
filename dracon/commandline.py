@@ -212,6 +212,41 @@ def _is_str_field(arg_type) -> bool:
     return False
 
 
+def _detect_collection_type(tp) -> Optional[str]:
+    """Recursively unwrap Annotated / Optional / Union to find a list-like or
+    dict-like member. Returns 'list_like', 'dict_like', or None.
+
+    Must see through `list[str] | None`, `Optional[dict[...]]`, etc. so that
+    positional CLI args still collect multi-value / key=value syntax rather
+    than being handed to pydantic as a bare string.
+    """
+    import types as _types
+
+    origin = typing_get_origin(tp)
+    if origin is Annotated:
+        args = get_args(tp)
+        return _detect_collection_type(args[0]) if args else None
+    if origin is Union or origin is _types.UnionType:
+        for arg in get_args(tp):
+            if arg is type(None):
+                continue
+            res = _detect_collection_type(arg)
+            if res is not None:
+                return res
+        return None
+
+    target = origin if origin else tp
+    try:
+        dummy = target()
+    except Exception:
+        return None
+    if dict_like(dummy):
+        return "dict_like"
+    if list_like(dummy) or isinstance(dummy, set):
+        return "list_like"
+    return None
+
+
 def getArg(program: "Program", name: str, pydantic_field) -> Arg:
     """creates the final Arg object based on model field and program defaults."""
     base_arg = Arg(
@@ -1234,25 +1269,7 @@ class Program(BaseModel, Generic[T]):
         """checks if an argument expects a collection type and returns the type"""
         if not arg_obj or not arg_obj.arg_type:
             return None
-
-        # unwrap Annotated types
-        actual_type = arg_obj.arg_type
-        origin = typing_get_origin(actual_type)
-        if origin is Annotated:
-            actual_type = get_args(actual_type)[0]
-            origin = typing_get_origin(actual_type) or actual_type
-        elif not origin:
-            origin = actual_type
-
-        try:  # test by creating an empty instance
-            dummy = origin()
-            if dict_like(dummy):
-                return "dict_like"
-            elif list_like(dummy) or isinstance(dummy, set):
-                return "list_like"
-        except:
-            pass
-        return None
+        return _detect_collection_type(arg_obj.arg_type)
 
     def _read_value(
         self, argv: List[str], i: int, arg_obj: Optional[Arg] = None

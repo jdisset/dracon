@@ -290,9 +290,23 @@ _BUILTIN_TAGS = frozenset({
 
 
 def _is_constructable_type_tag(node, loader) -> bool:
-    """True iff the node is a mapping/sequence whose tag resolves to a Python type.
+    """True iff the node's tag should be constructed lazily (via LazyConstructable)
+    rather than eagerly during !define processing.
 
-    Uses symbol table lookup when available, falls back to resolve_type.
+    Resolvable type tags are always deferred (the lazy path is the point).
+    Unknown tags that look like plain identifiers are *also* deferred —
+    vocabularies pulled in via `<<(<): !include vocab.yaml` attach their
+    exports to node contexts during the merge pass, which runs after
+    instructions. Eager construction inside a !define body would see a
+    context without those exports and fail; LazyConstructable resolves
+    later (when ${var} is evaluated) by which point merges have injected
+    the vocabulary. If the name is still undefined at that point, the
+    error surfaces there with full context.
+
+    Compound tags (!fn:path, !pipe:name, !mod.Class) are NOT deferred here:
+    they have dedicated eager handling in construct_object (or resolve via
+    import) and need to produce a bound result at define-time so later tag
+    references (e.g. `result: !fast`) can find it in the symbol table.
     """
     if not isinstance(node, (DraconMappingNode, DraconSequenceNode)):
         return False
@@ -320,13 +334,18 @@ def _is_constructable_type_tag(node, loader) -> bool:
         val = ctx.get(tag_name)
         if val is not None:
             return isinstance(val, type)
-    # import fallback
+    # import fallback: tag resolves to a type now
     try:
         from dracon.draconstructor import resolve_type
         resolved = resolve_type(tag, localns={})
-        return resolved is not Any
+        if resolved is not Any:
+            return True
     except (ValueError, ImportError):
-        return False
+        pass
+    # unknown simple-identifier tag: defer in case a merge-included vocab
+    # defines it. compound tags (with ':' or '.') fall through to the eager
+    # path where !fn:/!pipe:/dotted-import handlers can resolve them.
+    return tag_name.isidentifier()
 
 
 class Define(Instruction):

@@ -490,9 +490,16 @@ def test_is_constructable_type_tag():
     assert _is_constructable_type_tag(
         DraconMappingNode(tag='!define', value=[]), loader) is False
 
-    # mapping with unknown tag -> not constructable
+    # mapping with unknown *identifier* tag -> constructable (deferred so
+    # vocabularies merge-included later can still resolve it)
     assert _is_constructable_type_tag(
-        DraconMappingNode(tag='!CompletelyFakeType', value=[]), loader) is False
+        DraconMappingNode(tag='!CompletelyFakeType', value=[]), loader) is True
+
+    # compound tag (contains ':' or '.') falls through to eager path
+    assert _is_constructable_type_tag(
+        DraconMappingNode(tag='!fn:unknown_name', value=[]), loader) is False
+    assert _is_constructable_type_tag(
+        DraconMappingNode(tag='!unknown.Class', value=[]), loader) is False
 
     # mapping with builtin yaml tag -> not constructable
     assert _is_constructable_type_tag(
@@ -510,6 +517,31 @@ def test_is_constructable_type_tag():
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # e2e: file-based loading
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+def test_define_unknown_tag_surfaces_at_use_time():
+    """Deferred unknown tags give a clear error when ${g} is evaluated,
+    not silently hidden. Truly-unused !define is allowed (lazy)."""
+    loader = DraconLoader()
+    cfg = loader.loads("""
+!define g: !TotallyUnknownSym
+  key: value
+result: ${g}
+""")
+    with pytest.raises(Exception) as exc_info:
+        cfg.resolve_all_lazy()
+    assert "TotallyUnknownSym" in str(exc_info.value) or "TotallyUnknownSym" in repr(exc_info.value)
+
+
+def test_define_unused_unknown_tag_is_silently_deferred():
+    """Unused !define with unknown identifier tag must not error at load time."""
+    loader = DraconLoader()
+    cfg = loader.loads("""
+!define g: !TotallyUnknownSym
+  key: value
+result: 42
+""")
+    assert cfg['result'] == 42
 
 
 def test_e2e_file_load(tmp_path):

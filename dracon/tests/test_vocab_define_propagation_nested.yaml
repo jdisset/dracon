@@ -1,0 +1,11 @@
+<<(<): !include pkg:dracon:tests/test_vocab_define_propagation_vocab.yaml
+
+!define a: !greet
+  name: alice
+
+!define b: !greet
+  name: ${a.split(', ')[1].rstrip('!')}
+
+result:
+  a: ${a}
+  b: ${b}

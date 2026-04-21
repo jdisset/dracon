@@ -294,11 +294,24 @@ class TestIsConstructableTypeTagReplacement:
         assert _is_constructable_type_tag(node, loader) is True
 
     def test_unknown_type(self):
+        """Unknown identifier-shaped tag is deferred (LazyConstructable) so
+        vocabularies merge-included after instruction processing still resolve."""
         from dracon.instructions import _is_constructable_type_tag
         from dracon.composer import DraconMappingNode
         loader = DraconLoader()
         node = DraconMappingNode(tag="!NonExistentType99", value=[])
-        assert _is_constructable_type_tag(node, loader) is False
+        assert _is_constructable_type_tag(node, loader) is True
+
+    def test_unknown_compound_tag_not_deferred(self):
+        """Compound tags (!fn:x, !mod.Class) keep the eager path — they have
+        their own handlers in construct_object and must not be deferred."""
+        from dracon.instructions import _is_constructable_type_tag
+        from dracon.composer import DraconMappingNode
+        loader = DraconLoader()
+        assert _is_constructable_type_tag(
+            DraconMappingNode(tag="!fn:nothing", value=[]), loader) is False
+        assert _is_constructable_type_tag(
+            DraconMappingNode(tag="!unknown.Class", value=[]), loader) is False
 
     def test_instruction_tag(self):
         from dracon.instructions import _is_constructable_type_tag

@@ -35,3 +35,34 @@ def test_setdefault_propagates_to_deferred_reroot():
     assert isinstance(config["result"], DeferredNode)
     constructed = config["result"].construct()
     assert constructed["value"] == 42
+
+
+# vocabulary tags (!fn templates pulled in via `<<(<): !include vocab.yaml`)
+# must be resolvable from inside !define bodies too, not only at direct-use
+# sites. this exercises the class of bugs where instruction processing resolves
+# tag-dependent values eagerly, before merges have injected the vocabulary.
+
+
+def test_vocab_greet_direct_use():
+    config = get_config("dracon:tests/test_vocab_define_propagation_direct.yaml")
+    assert config["result"] == "Hello, world!"
+
+
+def test_vocab_greet_inside_define_body():
+    """`!define g: !greet ...` where !greet comes from a merge-included vocab"""
+    config = get_config("dracon:tests/test_vocab_define_propagation_via_define.yaml")
+    assert config["result"] == "Hello, world!"
+
+
+def test_vocab_greet_inside_set_default_body():
+    """SetDefault extends Define — same deferral must apply to vocab tags."""
+    config = get_config("dracon:tests/test_vocab_define_propagation_setdefault.yaml")
+    assert config["result"] == "Hello, world!"
+
+
+def test_vocab_greet_nested_define_chain():
+    """Two !defines whose bodies both reference the same merge-included vocab tag,
+    where the second also interpolates the first's result."""
+    config = get_config("dracon:tests/test_vocab_define_propagation_nested.yaml")
+    assert config["result"]["a"] == "Hello, alice!"
+    assert config["result"]["b"] == "Hello, alice!"
