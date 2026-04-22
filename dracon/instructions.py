@@ -82,20 +82,24 @@ class Instruction:
 
 @ftrace()
 def process_instructions(comp_res: CompositionResult, loader) -> CompositionResult:
-    seen_paths = set()
+    # Track processed instructions by node identity, not by path. Sibling
+    # mutations (e.g. pruning a false !if from a sequence) shift siblings
+    # into lower indices — if we keyed on paths, the shifted sibling's
+    # new path would collide with the just-consumed path and be skipped.
+    seen_node_ids: set[int] = set()
 
     def _find_instructions():
         """Scan node_map for instruction nodes, return sorted list."""
         result = []
         assert comp_res.node_map is not None
         for path, node in comp_res.node_map.items():
-            if path in seen_paths:
+            if id(node) in seen_node_ids:
                 continue
             tag = getattr(node, 'tag', None)
             if tag:
                 inst = match_instruct(tag)
                 if inst is not None and not getattr(inst, 'deferred', False):
-                    result.append((inst, path))
+                    result.append((inst, path, node))
         result.sort(key=lambda x: len(x[1]))
         return result
 
@@ -103,9 +107,11 @@ def process_instructions(comp_res: CompositionResult, loader) -> CompositionResu
     instruction_nodes = _find_instructions()
 
     while instruction_nodes:
-        inst, path = instruction_nodes.pop(0)
-        assert path not in seen_paths, f"Instruction {inst} at {path} already processed"
-        seen_paths.add(path)
+        inst, path, node = instruction_nodes.pop(0)
+        assert id(node) not in seen_node_ids, (
+            f"Instruction {inst} at {path} already processed"
+        )
+        seen_node_ids.add(id(node))
         comp_res = inst.process(comp_res, path.copy(), loader)
         comp_res.make_map()
         instruction_nodes = _find_instructions()
