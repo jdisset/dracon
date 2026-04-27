@@ -64,7 +64,20 @@ Soft definition. Sets the variable only if it does not already exist in the cont
 !define? env: "development"
 ```
 
-Also supports typed coercion: `!set_default:int`, `!define?:float`, etc.
+Also supports typed coercion for primitives: `!set_default:int`, `!define?:float`, etc.
+
+For arbitrary type names (resolved through the active scope), the `:Type`
+suffix records type metadata on the surrounding template's `InterfaceSpec`
+without coercing the value:
+
+```yaml
+!define mk: !fn
+  !set_default:Gate gate: "default-gate"
+  ok: 1
+```
+
+The `Gate` annotation surfaces in `mk.interface().params[0].annotation_name`
+(and as the resolved type in `.annotation` when `Gate` is in scope).
 
 ---
 
@@ -77,6 +90,45 @@ Declares that a variable must be provided by some outer scope (a `!define`, a `!
 ```
 
 If the variable is not satisfied by end of composition, raises `CompositionError` with the hint message. Removed from the tree (pure validation).
+
+### Typed `!require:Type`
+
+Add a type-annotation suffix to record the parameter's type on the
+surrounding template's `InterfaceSpec`:
+
+```yaml
+!define MakePlot: !fn
+  !require:list[Event] events: "events to plot"
+  !require:Gate gate: "active gate"
+  !returns:PlotData _:
+  kind: derive
+```
+
+The annotation is metadata only — Dracon does not perform runtime type
+checking beyond what construction or callable invocation already does.
+`Type` is resolved through the active scope (just like a tag), so a class
+made visible by `!include vocab.yaml` or by `context_types=[...]` becomes
+the live `annotation` on the param. Strings that don't resolve stay in
+`annotation_name` for documentation and JSON output. Untyped `!require`
+remains valid.
+
+---
+
+## !returns
+
+Pure metadata marker for `!fn` and `!deferred` bodies that records the
+return type on the symbol's `InterfaceSpec`. Removed from the final tree.
+
+```yaml
+!define mk: !fn
+  !returns:PlotData _:
+  !fn :
+    rows: 3
+```
+
+Two YAML-friendly forms are accepted: `!returns:Type _:` (type in the tag,
+empty key) and `!returns _: Type` (type in the value). Both produce the
+same `return_annotation_name` on the resulting `InterfaceSpec`.
 
 ---
 

@@ -166,8 +166,14 @@ LayerSpec(
     merge_key: str = "<<{<+}[<~]",
     scope: LayerScope = LayerScope.ISOLATED,
     label: str | None = None,
+    metadata: dict[str, Any] = {},
 )
 ```
+
+`metadata` is opaque to Dracon. It is preserved across `push`, `replace`,
+`fork`, `snapshot`, and `restore`, and surfaces on `LayerInfo` and on
+trace entries via `TraceEntry.layer.metadata`. Downstream packages own
+the schema (authorship, source URI, audit tags, ...).
 
 ### LayerScope
 
@@ -190,6 +196,63 @@ Exports are `!define`d variables from earlier layers. `PREV` is a constructed sn
 | `composed` | Property. Returns the fully composed `CompositionResult`. |
 | `construct(**kwargs)` | Compose, then construct. Extra kwargs update loader context. |
 | `layers` | Property. The list of `LayerSpec` objects. |
+| `snapshot()` | Return a `CompositionStackSnapshot` of the current layers and cache. |
+| `restore(snapshot)` | Replace layers and cache with the snapshot. Layer/result objects are restored by reference. |
+| `transaction()` | Return a `StackTransaction` context manager (rolls back unless `commit()`). |
+| `layer_info(index_or_label)` | `LayerInfo` with `prefix`, `contribution`, `composed`, label, metadata. |
+| `composed_at(index)` | The composed `CompositionResult` after layer `index`. |
+
+### Transactional mutation
+
+```python
+from dracon import CompositionStack, LayerSpec
+
+stack = CompositionStack(loader)
+stack.push(LayerSpec(source=base_node, label="base", metadata={"author": "system"}))
+
+with stack.transaction() as tx:
+    stack.push(LayerSpec(source=fragment_node, label="agent-panel",
+                         metadata={"author": "agent:debugger"}))
+    spec = stack.construct()
+    validate(spec)   # raises -> rollback
+    tx.commit()       # otherwise rollback on context exit
+```
+
+Nested transactions each capture their own snapshot, so an inner rollback
+does not affect outer state. Exceptions propagate unchanged. For async
+validation, hold the transaction object explicitly:
+
+```python
+tx = stack.transaction()
+tx.__enter__()
+try:
+    ...
+    await validate(...)
+    tx.commit()
+finally:
+    tx.__exit__(*sys.exc_info())
+```
+
+This API makes long-lived daemons, live configuration editors, and UI
+graph systems able to attempt layer mutations atomically and inspect the
+active stack without reaching into private cache state.
+
+### LayerInfo
+
+```python
+LayerInfo(
+    index: int,
+    label: str | None,
+    metadata: dict[str, Any],
+    layer: LayerSpec,
+    prefix: CompositionResult | None,    # None for index 0
+    contribution: CompositionResult,      # this layer alone
+    composed: CompositionResult,          # stack including this layer
+)
+```
+
+`prefix`, `contribution`, and `composed` are composition-layer objects;
+construction remains an explicit caller choice.
 
 ---
 

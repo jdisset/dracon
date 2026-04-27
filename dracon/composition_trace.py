@@ -35,6 +35,21 @@ ViaKind = Literal[
 
 
 @dataclass(slots=True)
+class LayerTraceRecord:
+    """Generic layer attribution attached to trace entries.
+
+    Carries the layer index, label, and metadata associated with a
+    CompositionStack write. Trace consumers can answer:
+    - which layer last wrote this key,
+    - which label and metadata that layer carried,
+    - which previous layer it overrode, by walking `replaced`.
+    """
+    index: int
+    label: Optional[str] = None
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class TraceEntry:
     """One step in a value's provenance chain."""
     value: Any
@@ -42,6 +57,7 @@ class TraceEntry:
     via: ViaKind
     detail: str = ""                 # human-readable context
     replaced: Optional[TraceEntry] = None
+    layer: Optional[LayerTraceRecord] = None
 
     def __repr__(self):
         src = str(self.source) if self.source else "?"

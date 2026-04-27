@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import inspect
+import typing
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol, TypeVar, runtime_checkable
@@ -30,6 +31,8 @@ class ParamSpec:
     name: str
     required: bool
     default: Any = field(default_factory=lambda: _MISSING)
+    annotation: Any = field(default_factory=lambda: _MISSING)
+    annotation_name: str | None = None
     docs: str | None = None
 
 
@@ -54,6 +57,8 @@ class InterfaceSpec:
     params: tuple[ParamSpec, ...] = ()
     contracts: tuple[ContractSpec, ...] = ()
     returns_mapping: bool | None = None
+    return_annotation: Any = field(default_factory=lambda: _MISSING)
+    return_annotation_name: str | None = None
     source: SymbolSourceInfo | None = None
     docs: str | None = None
 
@@ -110,8 +115,10 @@ class CallableSymbol:
             return self._cached_interface
         kind = SymbolKind.TYPE if isinstance(self._callable, type) else SymbolKind.CALLABLE
         params = _params_from_callable(self._callable)
+        ret_anno, ret_name = _return_annotation_from_callable(self._callable)
         self._cached_interface = InterfaceSpec(
             kind=kind, name=self._name, params=params, source=self._source,
+            return_annotation=ret_anno, return_annotation_name=ret_name,
         )
         return self._cached_interface
 
@@ -151,6 +158,8 @@ class BoundSymbol:
         return InterfaceSpec(
             kind=base.kind, name=base.name, params=remaining,
             contracts=base.contracts, returns_mapping=base.returns_mapping,
+            return_annotation=base.return_annotation,
+            return_annotation_name=base.return_annotation_name,
             source=base.source, docs=base.docs,
         )
 
@@ -185,20 +194,121 @@ class BoundSymbol:
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def _params_from_callable(obj: Any) -> tuple[ParamSpec, ...]:
-    """Extract ParamSpec tuple from a callable's signature."""
-    try:
-        sig = inspect.signature(obj)
-    except (ValueError, TypeError):
+    """Extract ParamSpec tuple from a callable's signature.
+
+    Preserves Python annotations: real type objects in `annotation`,
+    a stable string form in `annotation_name`. String forward refs
+    are resolved when possible (modules with `from __future__ import
+    annotations`); unresolvable strings stay as strings in `annotation`.
+    """
+    sig = _signature(obj)
+    if sig is None:
         return ()
     params = []
     for name, p in sig.parameters.items():
         if p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD):
             continue
-        if p.default is p.empty:
-            params.append(ParamSpec(name=name, required=True))
+        anno = p.annotation
+        if anno is p.empty:
+            anno_obj: Any = _MISSING
+            anno_name: str | None = None
         else:
-            params.append(ParamSpec(name=name, required=False, default=p.default))
+            anno_obj = anno
+            anno_name = format_annotation(anno)
+        if p.default is p.empty:
+            params.append(ParamSpec(
+                name=name, required=True,
+                annotation=anno_obj, annotation_name=anno_name,
+            ))
+        else:
+            params.append(ParamSpec(
+                name=name, required=False, default=p.default,
+                annotation=anno_obj, annotation_name=anno_name,
+            ))
     return tuple(params)
+
+
+def _return_annotation_from_callable(obj: Any) -> tuple[Any, str | None]:
+    """Return (annotation_obj, annotation_name) for a callable's return type."""
+    sig = _signature(obj)
+    if sig is None:
+        return _MISSING, None
+    ret = sig.return_annotation
+    if ret is sig.empty:
+        return _MISSING, None
+    return ret, format_annotation(ret)
+
+
+def _signature(obj: Any) -> "inspect.Signature | None":
+    """`inspect.signature` with annotation evaluation enabled.
+
+    When the source module uses `from __future__ import annotations`,
+    `inspect.signature` returns string annotations by default. `eval_str=True`
+    resolves those strings to real objects when names are available;
+    falls back to plain signature() if evaluation fails.
+    """
+    try:
+        return inspect.signature(obj, eval_str=True)
+    except (ValueError, TypeError):
+        pass
+    except (NameError, AttributeError, SyntaxError):
+        pass
+    try:
+        return inspect.signature(obj)
+    except (ValueError, TypeError):
+        return None
+
+
+def format_annotation(anno: Any) -> str:
+    """Stable string form of a Python annotation.
+
+    Used for ParamSpec.annotation_name and JSON output. Bare types render
+    as `Name`; generics recurse through `__origin__` / `__args__` so
+    `list[Event]` stays readable instead of leaking module paths.
+    """
+    if anno is _MISSING:
+        return ''
+    if anno is None or anno is type(None):
+        return 'None'
+    if isinstance(anno, str):
+        return anno
+    if isinstance(anno, type):
+        return getattr(anno, '__name__', None) or repr(anno)
+    origin = getattr(anno, '__origin__', None)
+    args = getattr(anno, '__args__', None)
+    if origin is not None and args is not None:
+        origin_name = format_annotation(origin)
+        if origin is typing.Union:  # render as "X | Y"
+            return ' | '.join(format_annotation(a) for a in args)
+        inner = ', '.join(format_annotation(a) for a in args)
+        return f"{origin_name}[{inner}]"
+    try:
+        s = repr(anno)
+    except Exception:
+        return str(anno)
+    if s.startswith('typing.'):
+        return s[len('typing.'):]
+    return s
+
+
+def resolve_annotation(name: str | None, scope: Any) -> Any:
+    """Look up a type-annotation name in a symbol scope.
+
+    `scope` is anything mapping-like (a `SymbolTable` or plain dict). Tries
+    the exact string first, then falls back to the bare class name with
+    subscripts/quotes stripped — enough for `list[Event]` to resolve to
+    `Event`. Returns `MISSING` when nothing matches; callers keep the
+    string form on `annotation_name`.
+    """
+    if not name or scope is None:
+        return _MISSING
+    for candidate in (name, name.rstrip("'\""), name.split('[', 1)[0].strip()):
+        if candidate and candidate in scope:
+            try:
+                return scope[candidate]
+            except Exception:
+                pass
+    return _MISSING
 
 
 def auto_symbol(value: Any, *, name: str | None = None, source: SymbolSourceInfo | None = None) -> Symbol[Any]:

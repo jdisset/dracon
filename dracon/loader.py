@@ -129,7 +129,7 @@ def _get_node_source(node) -> 'Optional[SourceContext]':
     return src
 
 
-def _record_leaves(trace, node_map, via, detail):
+def _record_leaves(trace, node_map, via, detail, layer=None):
     """Fast-path: record trace entries for all leaf nodes in a node_map."""
     from dracon.composition_trace import TraceEntry, MAPPING_KEY
     from dracon.keypath import KeyPathToken
@@ -152,6 +152,7 @@ def _record_leaves(trace, node_map, via, detail):
         src = getattr(node, 'source_context', None) or getattr(node, '_source_context', None)
         _record(path_str, TraceEntry(
             value=getattr(node, 'value', None), source=src, via=via, detail=detail,
+            layer=layer,
         ))
 
 
@@ -162,11 +163,17 @@ def _record_initial_definitions(comp: CompositionResult):
     _record_leaves(comp.trace, comp.node_map, "definition", "local key")
 
 
-def _record_file_layer_trace(comp: CompositionResult, layer_comp: CompositionResult, layer_idx: int, layer_path: str):
+def _record_file_layer_trace(comp: CompositionResult, layer_comp: CompositionResult, layer_idx: int, layer_path: str, metadata=None):
     """Record trace entries for nodes that came from a file layer merge."""
     if comp.trace is None or layer_comp.node_map is None:
         return
-    _record_leaves(comp.trace, layer_comp.node_map, "file_layer", f"file layer {layer_idx} ({layer_path})")
+    from dracon.composition_trace import LayerTraceRecord
+    layer_record = LayerTraceRecord(index=layer_idx, label=layer_path, metadata=dict(metadata or {}))
+    _record_leaves(
+        comp.trace, layer_comp.node_map,
+        "file_layer", f"file layer {layer_idx} ({layer_path})",
+        layer=layer_record,
+    )
 
 
 def _record_subtree_trace(comp: CompositionResult, subtree_root_path: 'KeyPath', via: str, detail: str):
@@ -476,13 +483,30 @@ class DraconLoader:
         if _needs_initial_trace:
             _record_initial_definitions(comp)
         comp = self.update_deferred_nodes(comp)
-        comp = process_instructions(comp, self)
-        comp = self.process_includes(comp)
-        # composition contracts: check pending !require, then run !assert
-        check_pending_requirements(comp, self)
-        comp = process_assertions(comp, self)
-        comp.make_map()
-        comp, merge_changed = process_merges(comp, loader=self)
+        # composition phase: while this block runs, LazyConstructable
+        # resolution failures are translated to LazyResolutionPending so
+        # instructions depending on not-yet-merged vocab can be deferred and
+        # retried below. Save/restore the previous value so nested
+        # post_process_composed calls (triggered by LazyConstructable.resolve
+        # re-entering the loader) don't clobber the outer phase.
+        prev_phase = getattr(self, '_composition_phase', False)
+        self._composition_phase = True
+        try:
+            comp = process_instructions(comp, self)
+            comp = self.process_includes(comp)
+            # composition contracts: check pending !require, then run !assert
+            check_pending_requirements(comp, self)
+            comp = process_assertions(comp, self)
+            comp.make_map()
+            comp, merge_changed = process_merges(comp, loader=self)
+            if merge_changed:
+                comp.make_map()
+        finally:
+            self._composition_phase = prev_phase
+        # retry pass runs with real-error semantics: any remaining
+        # unresolved tags surface as genuine CompositionErrors now.
+        from dracon.instructions import retry_deferred_instructions
+        comp = retry_deferred_instructions(comp, self)
         comp, delete_changed = delete_unset_nodes(comp)
         if merge_changed or delete_changed:
             comp.make_map()

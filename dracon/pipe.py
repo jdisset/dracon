@@ -63,25 +63,28 @@ class DraconPipe:
     def interface(self):
         if self._cached_interface is not None:
             return self._cached_interface
-        from dracon.symbols import InterfaceSpec, SymbolKind, ParamSpec
-        all_required, all_optional = [], []
+        from dracon.symbols import InterfaceSpec, SymbolKind, MISSING
+        seen_required: dict = {}
+        seen_optional: dict = {}
+        last_iface = None
         for stage, pre_kwargs in zip(self._stages, self._stage_kwargs):
             iface = _stage_interface(stage)
+            last_iface = iface
             for p in iface.params:
                 if p.name in pre_kwargs:
                     continue
-                if p.required:
-                    if p.name not in all_required:
-                        all_required.append(p.name)
-                else:
-                    if p.name not in all_optional:
-                        all_optional.append(p.name)
-        params = tuple(
-            [ParamSpec(name=n, required=True) for n in all_required]
-            + [ParamSpec(name=n, required=False) for n in all_optional]
-        )
+                bucket = seen_required if p.required else seen_optional
+                if p.name not in bucket:
+                    bucket[p.name] = p
+        params = tuple(list(seen_required.values()) + list(seen_optional.values()))
+        ret_anno = MISSING
+        ret_anno_name = None
+        if last_iface is not None:
+            ret_anno = last_iface.return_annotation
+            ret_anno_name = last_iface.return_annotation_name
         self._cached_interface = InterfaceSpec(
             kind=SymbolKind.PIPE, name=self._name, params=params,
+            return_annotation=ret_anno, return_annotation_name=ret_anno_name,
         )
         return self._cached_interface
 

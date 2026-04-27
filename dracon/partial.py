@@ -32,12 +32,17 @@ class DraconPartial:
     def interface(self):
         if self._cached_interface is not None:
             return self._cached_interface
-        from dracon.symbols import InterfaceSpec, SymbolKind, _params_from_callable
+        from dracon.symbols import (
+            InterfaceSpec, SymbolKind, _params_from_callable,
+            _return_annotation_from_callable,
+        )
         all_params = _params_from_callable(self._func)
         bound_names = frozenset(self._kwargs)
         remaining = tuple(p for p in all_params if p.name not in bound_names)
+        ret_anno, ret_name = _return_annotation_from_callable(self._func)
         self._cached_interface = InterfaceSpec(
             kind=SymbolKind.CALLABLE, name=self._func_path, params=remaining,
+            return_annotation=ret_anno, return_annotation_name=ret_name,
         )
         return self._cached_interface
 

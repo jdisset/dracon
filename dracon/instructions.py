@@ -80,13 +80,25 @@ class Instruction:
         raise NotImplementedError
 
 
+
+
 @ftrace()
 def process_instructions(comp_res: CompositionResult, loader) -> CompositionResult:
+    """Process composition-time instructions (!define, !each, !if, !require).
+
+    Instructions whose evaluation depends on symbols still arriving via
+    includes/merges (e.g. `!each(x) ${D}` where D is a LazyConstructable on
+    a merge-included vocab tag) raise LazyResolutionPending from deep inside
+    .resolve(). We collect those here and retry after the composition pass
+    finishes, via retry_deferred_instructions.
+    """
+    from dracon.interpolation import LazyResolutionPending
     # Track processed instructions by node identity, not by path. Sibling
     # mutations (e.g. pruning a false !if from a sequence) shift siblings
     # into lower indices — if we keyed on paths, the shifted sibling's
     # new path would collide with the just-consumed path and be skipped.
     seen_node_ids: set[int] = set()
+    deferred: list = []
 
     def _find_instructions():
         """Scan node_map for instruction nodes, return sorted list."""
@@ -112,14 +124,39 @@ def process_instructions(comp_res: CompositionResult, loader) -> CompositionResu
             f"Instruction {inst} at {path} already processed"
         )
         seen_node_ids.add(id(node))
-        comp_res = inst.process(comp_res, path.copy(), loader)
+        try:
+            comp_res = inst.process(comp_res, path.copy(), loader)
+        except LazyResolutionPending:
+            # an expression referenced a LazyConstructable that can't resolve
+            # yet; retry after includes/merges populate the vocab
+            deferred.append((inst, path))
         comp_res.make_map()
         instruction_nodes = _find_instructions()
 
+    comp_res._deferred_instructions = deferred  # type: ignore[attr-defined]
     return comp_res
 
 
 @ftrace()
+def retry_deferred_instructions(
+    comp_res: CompositionResult, loader
+) -> CompositionResult:
+    """Re-run instructions deferred by process_instructions.
+
+    Caller must have set loader._composition_phase = False so LazyConstructable
+    failures propagate as real errors on this pass instead of deferring again.
+    """
+    pending = getattr(comp_res, '_deferred_instructions', None) or []
+    if not pending:
+        return comp_res
+    comp_res._deferred_instructions = []  # type: ignore[attr-defined]
+    comp_res.make_map()
+    for inst, path in pending:
+        comp_res = inst.process(comp_res, path.copy(), loader)
+        comp_res.make_map()
+    return comp_res
+
+
 @ftrace()
 def process_assertions(comp_res: CompositionResult, loader) -> CompositionResult:
     """Process all !assert instructions after other instructions have resolved."""
@@ -282,7 +319,13 @@ _COERCE_TYPES: dict[str, type] = {
     'list': list, 'dict': dict,
 }
 _TYPED_DEFINE_RE = re.compile(r'^!define:(\w+)$')
-_TYPED_SET_DEFAULT_RE = re.compile(r'^!(?:define\?|set_default):(\w+)$')
+# !set_default:foo — primitive coerce types match \w+; arbitrary type names
+# (e.g. list[Event], pkg.Mod) are accepted as pure annotation metadata.
+_TYPED_SET_DEFAULT_RE = re.compile(r'^!(?:define\?|set_default):(.+)$')
+# !require:Type — pure annotation metadata
+_TYPED_REQUIRE_RE = re.compile(r'^!require:(.+)$')
+# !returns or !returns:Type
+_RETURNS_RE = re.compile(r'^!returns(?::(.+))?$')
 
 # tags that are dracon instructions or built-ins, never constructable types
 _BUILTIN_TAGS = frozenset({
@@ -472,11 +515,20 @@ class Define(Instruction):
 class SetDefault(Define):
     """
     `!set_default var_name : default_value`
+    `!set_default:TypeName var_name : default_value`  (typed annotation)
 
-    Similar to !define, but only sets the variable if it doesn't already exist in the context
+    Similar to !define, but only sets the variable if it doesn't already exist in the context.
+
+    The optional `:TypeName` is metadata (surfaces in `InterfaceSpec.params`).
+    For primitive types (int, float, str, bool, list, dict) the value is also
+    coerced. For arbitrary type names, only the annotation is recorded.
 
     If value is an interpolation, this node triggers composition-time evaluation
     """
+
+    def __init__(self, target_type=None, annotation_name: str | None = None):
+        super().__init__(target_type=target_type)
+        self.annotation_name = annotation_name
 
     @staticmethod
     def match(value: Optional[str]) -> Optional['SetDefault']:
@@ -487,25 +539,23 @@ class SetDefault(Define):
         m = _TYPED_SET_DEFAULT_RE.match(value)
         if m:
             type_name = m.group(1)
-            if type_name not in _COERCE_TYPES:
-                from dracon.diagnostics import CompositionError
-                raise CompositionError(
-                    f"unknown type '{type_name}' in {value}. "
-                    f"Supported types: {', '.join(_COERCE_TYPES)}"
-                )
-            return SetDefault(target_type=_COERCE_TYPES[type_name])
+            target = _COERCE_TYPES.get(type_name)  # None for non-primitive types -> annotation only
+            return SetDefault(target_type=target, annotation_name=type_name)
         return None
 
     @ftrace(watch=[])
     def process(self, comp_res: CompositionResult, path: KeyPath, loader):
         var_name, value, parent_node = self.get_name_and_value(comp_res, path, loader)
 
-        # mark as accessed for usage tracking when the variable already exists
-        if var_name in loader.context:
-            _ = loader.context[var_name]
+        # if an authoritative binding already exists upstream (loader.context,
+        # e.g. CLI ++var or context= kwarg), keep it in defined_vars too.
+        # otherwise downstream consumers that re-propagate defined_vars
+        # (LazyConstructable.resolve) would reinject the default and clobber
+        # the real value in sub-composition node contexts.
+        effective = loader.context[var_name] if var_name in loader.context else value
 
         def _add_and_soften(node):
-            add_to_context({var_name: value}, node, merge_key=cached_merge_key('<<{>~}[>~]'))
+            add_to_context({var_name: effective}, node, merge_key=cached_merge_key('<<{>~}[>~]'))
             ctx = getattr(node, 'context', None)
             sk = getattr(ctx, '_soft_keys', None)
             if sk is not None and var_name in ctx:
@@ -513,8 +563,8 @@ class SetDefault(Define):
 
         walk_node(node=parent_node, callback=_add_and_soften)
 
-        comp_res.defined_vars.setdefault(var_name, value)
-        if var_name not in comp_res.defined_vars or values_equal(comp_res.defined_vars[var_name], value):
+        comp_res.defined_vars.setdefault(var_name, effective)
+        if var_name not in comp_res.defined_vars or values_equal(comp_res.defined_vars[var_name], effective):
             comp_res.default_vars.add(var_name)
 
         return comp_res
@@ -964,11 +1014,19 @@ class If(Instruction):
 class Require(Instruction):
     """
     `!require var_name : "hint message"`
+    `!require:TypeName var_name : "hint message"`  (typed for InterfaceSpec)
 
     Declares that var_name must be provided by some outer scope (define, set_default, CLI ++).
     If not satisfied by end of composition, raises CompositionError with the hint.
     Removed from the final tree (pure validation).
+
+    The optional `:TypeName` is metadata: it does not perform runtime type
+    checking. It surfaces in the template's `InterfaceSpec.params[i].annotation_name`
+    so downstream tools can derive typed schemas from the same SSOT.
     """
+
+    def __init__(self, annotation_name: str | None = None):
+        self.annotation_name = annotation_name
 
     @staticmethod
     def match(value: Optional[str]) -> Optional['Require']:
@@ -976,6 +1034,9 @@ class Require(Instruction):
             return None
         if value == '!require':
             return Require()
+        m = _TYPED_REQUIRE_RE.match(value)
+        if m:
+            return Require(annotation_name=m.group(1).strip())
         return None
 
     @ftrace(watch=[])
@@ -999,6 +1060,43 @@ class Require(Instruction):
 
         ctx = node_source(key_node)
         comp_res.pending_requirements.append((var_name, hint, ctx))
+        return comp_res
+
+
+##────────────────────────────────────────────────────────────────────────────}}}
+## {{{                          --     returns     --
+
+
+class Returns(Instruction):
+    """
+    `!returns: TypeName`
+    `!returns:TypeName : <ignored>`
+
+    Pure metadata marker for `!fn` and `!deferred` bodies that records the
+    return type in the symbol's `InterfaceSpec`. Removed from the final tree.
+    The annotation is read by `_scan_returns_marker` during interface
+    extraction. Processing here is a no-op cleanup so the marker doesn't
+    leak into the constructed mapping.
+    """
+
+    def __init__(self, annotation_name: str | None = None):
+        self.annotation_name = annotation_name
+
+    @staticmethod
+    def match(value: Optional[str]) -> Optional['Returns']:
+        if not value:
+            return None
+        m = _RETURNS_RE.match(value)
+        if m:
+            return Returns(annotation_name=(m.group(1) or '').strip() or None)
+        return None
+
+    @ftrace(watch=[])
+    def process(self, comp_res: CompositionResult, path: KeyPath, loader):
+        # remove the marker from the tree; type metadata was already harvested
+        # by interface scanning before composition processing.
+        key_node, value_node, parent_node = unpack_mapping_key(comp_res, path, 'returns')
+        del parent_node[str(path[-1])]
         return comp_res
 
 
@@ -1069,6 +1167,7 @@ INSTRUCTION_REGISTRY: dict[str, type[Instruction]] = {
     '!each': Each,               # note: Each.match uses a regex, handled specially
     '!if': If,
     '!require': Require,
+    '!returns': Returns,
     '!assert': Assert,
 }
 

@@ -346,12 +346,13 @@ def _param_sig(iface: InterfaceSpec) -> str:
     """Build a short parameter signature string."""
     parts = []
     for p in iface.params:
+        anno = f": {p.annotation_name}" if p.annotation_name else ""
         if p.required:
-            parts.append(p.name)
+            parts.append(f"{p.name}{anno}")
         elif p.default is not MISSING:
-            parts.append(f"{p.name}={p.default!r}")
+            parts.append(f"{p.name}{anno}={p.default!r}")
         else:
-            parts.append(f"{p.name}=...")
+            parts.append(f"{p.name}{anno}=...")
     return ", ".join(parts)
 
 
@@ -379,6 +380,8 @@ def _describe_one(table: SymbolTable, name: str) -> str:
         label = f"!{name}({sig})" if kind in ("template", "type") else f"{name}({sig})"
     else:
         label = f"!{name}" if kind in ("template", "type") else name
+    if iface.return_annotation_name:
+        label = f"{label} -> {iface.return_annotation_name}"
     return f"{label:<40} {kind:<12} {source}".rstrip()
 
 
@@ -403,20 +406,26 @@ def _json_safe(val: Any) -> Any:
     return str(val)
 
 
+def _param_to_json(p) -> dict[str, Any]:
+    out: dict[str, Any] = {"name": p.name, "required": p.required}
+    if p.default is not MISSING:
+        out["default"] = _json_safe(p.default)
+    if p.annotation_name:
+        out["annotation"] = p.annotation_name
+    if p.docs:
+        out["docs"] = p.docs
+    return out
+
+
 def _symbol_to_json_entry(sym, iface) -> dict[str, Any]:
     """Build a JSON-safe dict for a single symbol's interface."""
     entry_data: dict[str, Any] = {"kind": iface.kind.value}
     if iface.params:
-        entry_data["params"] = [
-            {
-                "name": p.name,
-                "required": p.required,
-                **({"default": _json_safe(p.default)} if p.default is not MISSING else {}),
-            }
-            for p in iface.params
-        ]
+        entry_data["params"] = [_param_to_json(p) for p in iface.params]
     else:
         entry_data["params"] = []
+    if iface.return_annotation_name:
+        entry_data["returns"] = iface.return_annotation_name
     if iface.contracts:
         entry_data["contracts"] = [
             {"kind": c.kind, "name": c.name, **({"message": c.message} if c.message else {})}

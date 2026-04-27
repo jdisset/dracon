@@ -139,17 +139,21 @@ class DeferredNode(ContextNode, Generic[T]):
     def interface(self):
         if self._cached_interface is not None:
             return self._cached_interface
-        from dracon.symbols import InterfaceSpec, SymbolKind, ParamSpec, ContractSpec, SymbolSourceInfo
-        params, contracts = _scan_deferred_interface(self.value)
+        from dracon.symbols import InterfaceSpec, SymbolKind, SymbolSourceInfo, MISSING, resolve_annotation
+        params, contracts, ret_anno_name = _scan_deferred_interface(self.value, self._loader)
         source = None
         if self._creation_context:
             source = SymbolSourceInfo(
                 file_path=getattr(self._creation_context, 'file_path', None),
                 line=getattr(self._creation_context, 'line', None),
             )
+        scope = getattr(self._loader, 'context', None) if self._loader else None
+        ret_anno_obj = resolve_annotation(ret_anno_name, scope) if ret_anno_name else MISSING
         self._cached_interface = InterfaceSpec(
             kind=SymbolKind.DEFERRED, name=None, params=params,
             contracts=contracts, source=source,
+            return_annotation=ret_anno_obj,
+            return_annotation_name=ret_anno_name,
         )
         return self._cached_interface
 
@@ -330,40 +334,36 @@ class DeferredNode(ContextNode, Generic[T]):
         return json_schema
 
 
-def _scan_deferred_interface(node):
-    """Extract params and contracts from a deferred node's value tree.
+def _scan_deferred_interface(node, loader=None):
+    """Extract params, contracts, and return annotation from a deferred node's value tree.
 
-    Walks the top-level mapping keys looking for !require, !set_default, !assert tags.
-    Returns (tuple[ParamSpec, ...], tuple[ContractSpec, ...]).
+    Routes param/return scanning through the same helper used for !fn templates
+    so type annotations and docs stay consistent across both kinds. Also
+    collects `!assert` contracts.
+
+    Returns (tuple[ParamSpec, ...], tuple[ContractSpec, ...], return_annotation_name|None).
     """
-    from dracon.symbols import ParamSpec, ContractSpec
+    from dracon.symbols import ContractSpec
     from dracon.composer import DraconMappingNode
     from dracon.interpolation import InterpolableNode
-
-    params = []
-    contracts = []
+    from dracon.callable import _scan_template_interface
 
     if not isinstance(node, DraconMappingNode):
-        return (), ()
+        return (), (), None
 
+    params, ret_anno_name = _scan_template_interface(node, loader)
+
+    contracts: list = []
     for k_node, v_node in node.value:
         tag = getattr(k_node, 'tag', None)
-        if not tag or not isinstance(tag, str):
+        if not tag or not isinstance(tag, str) or tag != '!assert':
             continue
         name = getattr(k_node, 'value', None)
         hint = getattr(v_node, 'value', None) if hasattr(v_node, 'value') else str(v_node)
-        if tag == '!require':
-            params.append(ParamSpec(name=name, required=True, docs=hint))
-        elif tag in ('!set_default', '!define?'):
-            params.append(ParamSpec(name=name, required=False, docs=hint))
-        elif tag == '!assert':
-            # key is the expression (may be interpolable), value is the message
-            expr = name
-            if isinstance(k_node, InterpolableNode):
-                expr = k_node.value
-            contracts.append(ContractSpec(kind='assert', name=expr or '', message=hint))
+        expr = k_node.value if isinstance(k_node, InterpolableNode) else name
+        contracts.append(ContractSpec(kind='assert', name=expr or '', message=hint))
 
-    return tuple(params), tuple(contracts)
+    return params, tuple(contracts), ret_anno_name
 
 
 def make_deferred(

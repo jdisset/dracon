@@ -13,6 +13,56 @@ from dracon.utils import deepcopy
 _MAX_CALL_DEPTH = 32
 
 
+def _scan_template_interface(node, loader) -> tuple:
+    """Single pass over a template/deferred mapping body.
+
+    Reads `!require[:Type]` / `!set_default[:Type]` / `!define?[:Type]`
+    keys for params, and `!returns[:Type]` for the return annotation.
+
+    Returns `(params_tuple, return_annotation_name | None)`.
+    """
+    from dracon.composer import DraconMappingNode
+    from dracon.instructions import match_instruct, Require, SetDefault, Returns
+    from dracon.symbols import ParamSpec, MISSING, resolve_annotation
+    if not isinstance(node, DraconMappingNode):
+        return (), None
+    scope = getattr(loader, 'context', None) if loader is not None else None
+    required: list[ParamSpec] = []
+    optional: list[ParamSpec] = []
+    ret_anno_name: str | None = None
+    for k_node, v_node in node.value:
+        tag = getattr(k_node, 'tag', None)
+        if not tag:
+            continue
+        inst = match_instruct(tag)
+        if inst is None:
+            continue
+        if isinstance(inst, Returns):
+            if inst.annotation_name:
+                ret_anno_name = inst.annotation_name
+            else:
+                v_val = getattr(v_node, 'value', None)
+                if isinstance(v_val, str) and v_val.strip():
+                    ret_anno_name = v_val.strip()
+            continue
+        if not isinstance(inst, (Require, SetDefault)):
+            continue
+        name = getattr(k_node, 'value', None)
+        if name is None:
+            continue
+        anno_name = getattr(inst, 'annotation_name', None)
+        anno_obj = resolve_annotation(anno_name, scope) if anno_name else MISSING
+        v_val = getattr(v_node, 'value', None)
+        docs = v_val if isinstance(v_val, str) and v_val else None
+        is_required = isinstance(inst, Require)
+        spec = ParamSpec(
+            name=name, required=is_required, docs=docs,
+            annotation=anno_obj, annotation_name=anno_name,
+        )
+        (required if is_required else optional).append(spec)
+    return tuple(required + optional), ret_anno_name
+
+
 class DraconCallable:
     """Callable YAML template, created by !fn, invoked via tag or ${...}.
 
@@ -43,17 +93,27 @@ class DraconCallable:
     def interface(self):
         if self._cached_interface is not None:
             return self._cached_interface
-        from dracon.symbols import InterfaceSpec, SymbolKind, ParamSpec, SymbolSourceInfo
-        params = self._scan_params()
+        from dracon.symbols import (
+            InterfaceSpec, SymbolKind, SymbolSourceInfo, MISSING, resolve_annotation,
+        )
+        if self._cached_params is not None:
+            params, ret_anno_name = self._cached_params
+        else:
+            params, ret_anno_name = _scan_template_interface(self._template_node, self._loader)
+            self._cached_params = (params, ret_anno_name)
         source = None
         if self._source:
             source = SymbolSourceInfo(
                 file_path=getattr(self._source, 'file_path', None),
                 line=getattr(self._source, 'line', None),
             )
+        scope = getattr(self._loader, 'context', None) if self._loader else None
+        ret_anno_obj = resolve_annotation(ret_anno_name, scope) if ret_anno_name else MISSING
         self._cached_interface = InterfaceSpec(
             kind=SymbolKind.TEMPLATE, name=self._name,
             params=params, source=source,
+            return_annotation=ret_anno_obj,
+            return_annotation_name=ret_anno_name,
         )
         return self._cached_interface
 
@@ -88,42 +148,6 @@ class DraconCallable:
         inner = representer.represent_data(fast_copy_node_tree(self._template_node))
         inner.tag = f'!fn:{self._name}' if self._name else '!fn'
         return inner
-
-    # ── param scanning (owns interface extraction) ───────────────────────
-
-    def _scan_params(self):
-        """Walk template node for !require/!set_default. Cached."""
-        if self._cached_params is not None:
-            req, opt = self._cached_params
-        else:
-            req, opt = self._do_scan_params()
-            self._cached_params = (req, opt)
-        from dracon.symbols import ParamSpec
-        return tuple(
-            [ParamSpec(name=n, required=True) for n in req]
-            + [ParamSpec(name=n, required=False) for n in opt]
-        )
-
-    def _do_scan_params(self):
-        from dracon.composer import DraconMappingNode
-        from dracon.instructions import match_instruct, Require, SetDefault
-        node = self._template_node
-        if not isinstance(node, DraconMappingNode):
-            return [], []
-        required, optional = [], []
-        for k_node, v_node in node.value:
-            tag = getattr(k_node, 'tag', None)
-            if not tag:
-                continue
-            inst = match_instruct(tag)
-            if inst is None:
-                continue
-            name = getattr(k_node, 'value', None)
-            if isinstance(inst, Require):
-                required.append(name)
-            elif isinstance(inst, SetDefault):
-                optional.append(name)
-        return required, optional
 
     # ── internal ─────────────────────────────────────────────────────────
 

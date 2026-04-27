@@ -221,3 +221,36 @@ The default merge key is `<<{<+}[<~]` (recurse dicts with new-wins priority, rep
 - **Interactive exploration**: in a notebook or REPL, push/pop layers to try different configurations.
 - **Hot-reload**: `replace(index, new_file)` swaps a layer without rebuilding the rest.
 - **Multi-phase pipelines**: each phase pushes its config layer, inheriting from previous phases via EXPORTS.
+
+## Transactional layers
+
+Layer mutations can be wrapped in a transaction. The stack snapshots itself
+on entry and rolls back on exit unless `commit()` is called. Useful for
+long-lived daemons, live editors, and UI systems where a candidate layer
+might fail downstream validation.
+
+```python
+from dracon import CompositionStack, LayerSpec
+
+stack = CompositionStack(loader)
+stack.push(LayerSpec(source=base_node, label="base", metadata={"author": "system"}))
+
+with stack.transaction() as tx:
+    stack.push(LayerSpec(source=fragment_node, label="agent-panel",
+                         metadata={"author": "agent:debugger"}))
+    spec = stack.construct()
+    validate(spec)        # if this raises, rollback is automatic
+    tx.commit()           # otherwise the layer is preserved
+
+info = stack.layer_info("agent-panel")
+print(info.metadata, info.contribution)
+```
+
+`LayerSpec.metadata` is opaque to Dracon — it survives push, replace, fork,
+snapshot, and restore. Trace consumers see the same metadata via
+`TraceEntry.layer.metadata`.
+
+`layer_info(index_or_label)` returns a `LayerInfo` with `prefix` (the stack
+just below the layer), `contribution` (this layer's own composed result),
+and `composed` (the stack including the layer). Same data, no private
+cache access.

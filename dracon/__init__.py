@@ -61,7 +61,10 @@ from dracon.instructions import register_instruction, Instruction, unpack_mappin
 from dracon.callable import DraconCallable
 from dracon.pipe import DraconPipe
 from dracon.partial import DraconPartial
-from dracon.stack import CompositionStack, LayerSpec, LayerScope
+from dracon.stack import (
+    CompositionStack, LayerSpec, LayerScope,
+    CompositionStackSnapshot, LayerInfo, StackTransaction,
+)
 from dracon.symbols import (
     SymbolKind,
     ParamSpec,

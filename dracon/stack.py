@@ -6,7 +6,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from ruamel.yaml.nodes import Node
 
 from dracon.composer import CompositionResult
@@ -30,13 +30,93 @@ class LayerScope(str, Enum):
 
 
 class LayerSpec(BaseModel):
+    """One unit of composition input pushed onto a CompositionStack.
+
+    `metadata` is opaque to dracon: it survives push/replace/fork/snapshot/
+    restore unchanged so downstream packages (UIs, daemons, audit systems)
+    can attach provenance, authorship, or routing tags without inventing a
+    parallel side-table.
+    """
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     source: str | Node | CompositionResult
-    context: dict[str, Any] = {}
+    context: dict[str, Any] = Field(default_factory=dict)
     merge_key: str = "<<{<+}[<~]"
     scope: LayerScope = LayerScope.ISOLATED
     label: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CompositionStackSnapshot(BaseModel):
+    """Opaque structural copy of a stack's layer list and caches.
+
+    Returned by `CompositionStack.snapshot()`; consumed by
+    `CompositionStack.restore()`. Layer objects and CompositionResult
+    objects are kept by reference — restore is a structural rewind, not
+    a deep copy of node trees.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    layers: tuple[LayerSpec, ...]
+    cache: tuple[CompositionResult, ...]
+    contributions: tuple[CompositionResult, ...] = ()
+
+
+class LayerInfo(BaseModel):
+    """Inspection record for a single layer.
+
+    `prefix` is the composed stack just below this layer (None for index 0).
+    `contribution` is the layer's own composed CompositionResult before
+    merging into the prefix. `composed` is the stack including this layer.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    index: int
+    label: str | None
+    metadata: dict[str, Any]
+    layer: LayerSpec
+    prefix: CompositionResult | None
+    contribution: CompositionResult
+    composed: CompositionResult
+
+
+class StackTransaction:
+    """Snapshot/restore handle returned by CompositionStack.transaction().
+
+    Use as a context manager: leaving without `commit()` restores the stack
+    to the snapshot taken at entry; leaving after `commit()` keeps the
+    mutations. Exceptions propagate unchanged. Nested transactions each
+    take their own snapshot, so an inner rollback does not affect outer
+    state.
+    """
+
+    __slots__ = ("_stack", "_snapshot", "_committed", "_active")
+
+    def __init__(self, stack: CompositionStack):
+        self._stack = stack
+        self._snapshot: CompositionStackSnapshot | None = None
+        self._committed = False
+        self._active = False
+
+    def __enter__(self) -> StackTransaction:
+        if self._active:
+            raise RuntimeError("StackTransaction already entered")
+        self._snapshot = self._stack.snapshot()
+        self._active = True
+        return self
+
+    def commit(self) -> None:
+        self._committed = True
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        if not self._active:
+            return False
+        self._active = False
+        if not self._committed:
+            assert self._snapshot is not None
+            self._stack.restore(self._snapshot)
+        return False  # never swallow exceptions
 
 
 def exported_context_from(comp: CompositionResult) -> dict[str, Any]:
@@ -49,12 +129,16 @@ def exported_context_from(comp: CompositionResult) -> dict[str, Any]:
 
 
 class CompositionStack:
-    __slots__ = ("_loader", "_layers", "_cache")
+    __slots__ = ("_loader", "_layers", "_cache", "_contributions")
 
     def __init__(self, loader: DraconLoader, layers: list[LayerSpec] | None = None):
         self._loader = loader
         self._layers: list[LayerSpec] = layers or []
         self._cache: list[CompositionResult] = []
+        # parallel to _cache: pre-merge composition of each layer; lets
+        # layer_info() avoid recomposing a layer that the main pass
+        # already produced.
+        self._contributions: list[CompositionResult] = []
 
     # -- mutations --
 
@@ -71,6 +155,7 @@ class CompositionStack:
             index = len(self._layers) + index
         layer = self._layers.pop(index)
         self._cache = self._cache[:index]
+        self._contributions = self._contributions[:index]
         return layer
 
     def replace(self, index: int, layer: str | LayerSpec, **ctx) -> LayerSpec:
@@ -81,12 +166,85 @@ class CompositionStack:
             layer = layer.model_copy(update={"context": {**layer.context, **ctx}})
         self._layers[index] = layer
         self._cache = self._cache[:index]
+        self._contributions = self._contributions[:index]
         return old
 
     def fork(self) -> CompositionStack:
         new = CompositionStack(self._loader, list(self._layers))
         new._cache = list(self._cache)
+        new._contributions = list(self._contributions)
         return new
+
+    # -- snapshot / restore / transaction --
+
+    def snapshot(self) -> CompositionStackSnapshot:
+        """Capture the layer list and prefix cache without copying node trees."""
+        return CompositionStackSnapshot(
+            layers=tuple(self._layers),
+            cache=tuple(self._cache),
+            contributions=tuple(self._contributions),
+        )
+
+    def restore(self, snapshot: CompositionStackSnapshot) -> None:
+        """Restore both layers and cache from a snapshot.
+
+        Layer objects and cached CompositionResult objects are restored by
+        reference; in-place mutation of a layer's source after pushing is
+        outside the stack contract.
+        """
+        self._layers = list(snapshot.layers)
+        self._cache = list(snapshot.cache)
+        self._contributions = list(snapshot.contributions)
+
+    def transaction(self) -> StackTransaction:
+        """Return a context manager that rolls back unless `commit()` is called."""
+        return StackTransaction(self)
+
+    # -- inspection --
+
+    def layer_info(self, index_or_label: int | str) -> LayerInfo:
+        """Return prefix / contribution / composed for a single layer.
+
+        `index_or_label` is either an int index (negative allowed) or a label
+        match. Forces the stack to fully compose so prefix and composed are
+        always available.
+        """
+        if isinstance(index_or_label, str):
+            idx = self._index_for_label(index_or_label)
+        else:
+            idx = index_or_label
+            if idx < 0:
+                idx += len(self._layers)
+        if idx < 0 or idx >= len(self._layers):
+            raise IndexError(f"layer index {index_or_label} out of range")
+        # ensure full composition so caches are populated through idx
+        _ = self.composed
+        layer = self._layers[idx]
+        prefix = self._cache[idx - 1] if idx > 0 else None
+        return LayerInfo(
+            index=idx,
+            label=layer.label,
+            metadata=dict(layer.metadata),
+            layer=layer,
+            prefix=prefix,
+            contribution=self._contributions[idx],
+            composed=self._cache[idx],
+        )
+
+    def composed_at(self, index: int) -> CompositionResult:
+        """Composed CompositionResult after layer `index`, recomposing if needed."""
+        if index < 0:
+            index = len(self._layers) + index
+        if index < 0 or index >= len(self._layers):
+            raise IndexError(f"layer index {index} out of range")
+        _ = self.composed
+        return self._cache[index]
+
+    def _index_for_label(self, label: str) -> int:
+        for i, layer in enumerate(self._layers):
+            if layer.label == label:
+                return i
+        raise KeyError(f"no layer with label {label!r}")
 
     # -- derived --
 
@@ -133,6 +291,7 @@ class CompositionStack:
                 acc = self._loader.post_process_composed(acc)
 
             self._cache.append(acc)
+            self._contributions.append(comp)
 
             if i < last_export_consumer:
                 exports = exported_context_from(acc)
@@ -192,7 +351,7 @@ def _make_prev_snapshot(comp: CompositionResult, loader: DraconLoader) -> dict:
 def _record_layer_trace(acc: CompositionResult, comp: CompositionResult, index: int, layer: LayerSpec):
     from dracon.loader import _record_file_layer_trace
     label = layer.label or _derive_label(layer)
-    _record_file_layer_trace(acc, comp, index, label)
+    _record_file_layer_trace(acc, comp, index, label, metadata=layer.metadata or None)
 
 
 def _derive_label(layer: LayerSpec) -> str:

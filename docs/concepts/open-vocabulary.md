@@ -44,6 +44,33 @@ The `InterfaceSpec` that each symbol exposes is the single source of truth for:
 - the `--symbols` CLI output
 - the `__scope__` introspection API
 
+`InterfaceSpec` is **typed**: each `ParamSpec` carries an `annotation`
+(the live Python object when known) and `annotation_name` (a stable
+string form for serialization), and the interface itself carries a
+`return_annotation` / `return_annotation_name` pair. Python callables
+contribute these via `inspect.signature`; YAML templates and `!deferred`
+bodies contribute them through the optional typed forms of `!require`,
+`!set_default`, and `!returns` (see
+[instruction tags reference](../reference/instruction-tags.md)). Untyped
+symbols stay valid — annotations default to `MISSING`.
+
+```python
+from dracon import CallableSymbol, SymbolEntry, SymbolTable
+
+def compute_plot(events: list[Event], gate: Gate) -> PlotData: ...
+
+table = SymbolTable()
+table.define(SymbolEntry(name="compute_plot", symbol=CallableSymbol(compute_plot)))
+
+iface = table.interface("compute_plot")
+iface.params[0].annotation         # list[Event]
+iface.params[0].annotation_name    # "list[Event]"
+iface.return_annotation            # PlotData
+```
+
+Downstream tools can read these directly instead of re-inspecting Python
+signatures or template bodies.
+
 ## The same name can be used in different ways
 
 A value can be used in expressions:
