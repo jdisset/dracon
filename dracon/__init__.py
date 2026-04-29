@@ -21,7 +21,8 @@ from dracon.loader import (
 
 from dracon.lazy import resolve_all_lazy, LazyDraconModel
 from dracon.lazy_typed import Lazy
-from dracon.commandline import Arg, ConfigFile, HelpSection, Program, make_program, dracon_program, Subcommand, subcommand
+from dracon.cli_param import CliParam, Arg
+from dracon.commandline import ConfigFile, HelpSection, Program, make_program, dracon_program, Subcommand, subcommand
 from dracon.resolvable import Resolvable
 from dracon.merge import MergeKey
 from dracon.draconstructor import Draconstructor

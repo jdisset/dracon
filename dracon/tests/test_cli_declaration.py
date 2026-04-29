@@ -43,7 +43,9 @@ def test_scalar_require_hint_preserved():
     assert d.kind == "require"
     assert d.help == "bind port"
     assert d.short is None
-    assert d.default is None
+    # !require records the absence of a default as MISSING (no default by definition)
+    from dracon.symbols import MISSING
+    assert d.default is MISSING
     assert d.python_type is None
     assert d.hidden is False
 

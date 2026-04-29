@@ -1963,9 +1963,10 @@ def test_subcommand_produces_annotated_union():
     assert typing.get_origin(union_type) is Union
     union_members = set(typing.get_args(union_type))
     assert union_members == {TrainCmd, EvalCmd}
-    # metadata should contain an Arg with subcommand=True
+    # metadata should contain a CliParam with subcommand=True (Arg is a factory)
+    from dracon import CliParam
     metadata = inner_args[1:]
-    arg_meta = [m for m in metadata if isinstance(m, Arg)]
+    arg_meta = [m for m in metadata if isinstance(m, CliParam)]
     assert len(arg_meta) == 1
     assert arg_meta[0].subcommand is True
     assert arg_meta[0].positional is True

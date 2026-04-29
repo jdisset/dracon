@@ -5,37 +5,21 @@
 
 `!require` and `!set_default` are context contracts. With a mapping body
 they also carry CLI metadata (help, short, default, hidden). This module
-owns the record type and the shared parser. Lives in its own module so
-neither the composer nor argparse drags the other into its import graph.
+owns the shared parser. The record type itself lives in `cli_param.py`
+as the unified `CliParam`; `CliDirective` is a factory back-compat alias.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
+from dracon.cli_param import CliDirective, CliParam, DeclKind
 from dracon.diagnostics import CompositionError
 from dracon.nodes import node_source
-
-DeclKind = Literal["require", "set_default"]
 
 # allowed body keys per kind. SSOT for grammar validation.
 _REQUIRE_KEYS = frozenset({"help", "short", "hidden"})
 _SET_DEFAULT_KEYS = frozenset({"help", "short", "hidden", "default"})
-
-
-@dataclass(frozen=True, slots=True)
-class CliDirective:
-    """One CLI-visible declaration coming from `!require` / `!set_default`."""
-
-    name: str
-    kind: DeclKind
-    help: Optional[str] = None
-    short: Optional[str] = None
-    default: Any = None
-    python_type: Optional[type] = None
-    hidden: bool = False
-    source_context: Any = None
 
 
 def _normalise_short(raw: Any, key_node) -> Optional[str]:
@@ -113,10 +97,10 @@ def parse_directive_body(
     kind: DeclKind,
     python_type: Optional[type],
     key_node=None,
-) -> tuple[CliDirective, Any]:
-    """Parse the body of `!require` / `!set_default` into a `CliDirective`.
+) -> tuple[CliParam, Any]:
+    """Parse the body of `!require` / `!set_default` into a `CliParam`.
 
-    Returns `(directive, scalar_value)` where `scalar_value` carries the
+    Returns `(param, scalar_value)` where `scalar_value` carries the
     legacy scalar semantics for the caller:
 
       - `!require`        -> the hint string (may be ``""``)
@@ -135,7 +119,7 @@ def parse_directive_body(
 
         if kind == "require":
             scalar = help_str or ""
-            directive = CliDirective(
+            param = CliDirective(
                 name=var_name, kind=kind,
                 help=help_str, short=short, hidden=hidden,
                 python_type=python_type, source_context=src,
@@ -143,32 +127,32 @@ def parse_directive_body(
         else:
             default = _coerce_default(body.get("default"), python_type, key_node)
             scalar = default
-            directive = CliDirective(
+            param = CliDirective(
                 name=var_name, kind=kind,
                 help=help_str, short=short, hidden=hidden,
                 default=default, python_type=python_type, source_context=src,
             )
-        return directive, scalar
+        return param, scalar
 
     # scalar body: legacy meaning
     raw = _scalar_value(value_node)
     if kind == "require":
         hint = raw if isinstance(raw, str) else ("" if raw is None else str(raw))
-        directive = CliDirective(
+        param = CliDirective(
             name=var_name, kind=kind,
             help=hint or None, python_type=python_type, source_context=src,
         )
-        return directive, hint
+        return param, hint
 
     # set_default scalar: defer coercion to the caller's existing path so
     # interpolations / nested types keep working. We don't pre-coerce here.
-    directive = CliDirective(
+    param = CliDirective(
         name=var_name, kind=kind,
         help=None,
         default=raw if not hasattr(value_node, "value") else None,
         python_type=python_type, source_context=src,
     )
-    return directive, raw
+    return param, raw
 
 
 def _read_mapping_body(value_node, kind: DeclKind) -> dict[str, Any]:
@@ -199,3 +183,6 @@ def _read_mapping_body(value_node, kind: DeclKind) -> dict[str, Any]:
             )
         out[key] = _scalar_value(v_node)
     return out
+
+
+__all__ = ["CliDirective", "DeclKind", "parse_directive_body"]

@@ -17,6 +17,7 @@ import logging
 from typing import Any, Callable, Mapping, Optional
 
 from dracon.cli_declaration import CliDirective, parse_directive_body
+from dracon.cli_param import CliParam
 from dracon.composer import CompositionResult
 from dracon.diagnostics import CompositionError, DraconError
 from dracon.loader import DraconLoader, compose_config_from_str
@@ -30,7 +31,7 @@ def discover_cli_directives(
     *,
     loader_factory: Callable[..., DraconLoader] = DraconLoader,
     soft: bool = False,
-) -> list[CliDirective]:
+) -> list[CliParam]:
     """Compose layered configs only far enough to collect declarations.
 
     Args:
@@ -68,7 +69,7 @@ def discover_cli_directives(
     # has not been parsed yet, so a missing name is not (yet) an error.
     loader._skip_require_check = True
 
-    aggregate: list[CliDirective] = []
+    aggregate: list[CliParam] = []
     for source in conf_sources:
         try:
             comp = loader.compose(source)
@@ -94,7 +95,7 @@ def discover_cli_directives(
     return _dedupe_last_wins(aggregate)
 
 
-def _static_scan(source: str, loader: DraconLoader) -> list[CliDirective]:
+def _static_scan(source: str, loader: DraconLoader) -> list[CliParam]:
     """Fallback used when full composition fails (typically because an
     interpolation or include needs argv-supplied context that isn't yet
     set). Re-uses the existing instruction matchers and the shared
@@ -114,7 +115,7 @@ def _static_scan(source: str, loader: DraconLoader) -> list[CliDirective]:
     if root is None or not hasattr(root, 'value'):
         return []
 
-    out: list[CliDirective] = []
+    out: list[CliParam] = []
     for key_node, value_node in root.value:
         tag = getattr(key_node, 'tag', None) or ''
         var_name = getattr(key_node, 'value', None)
@@ -158,20 +159,20 @@ def _read_source_text(source: str, loader: DraconLoader) -> Optional[str]:
     return result if isinstance(result, str) else None
 
 
-def _collect_directives(comp: CompositionResult) -> list[CliDirective]:
+def _collect_directives(comp: CompositionResult) -> list[CliParam]:
     return list(comp.cli_directives)
 
 
-def _dedupe_last_wins(directives: list[CliDirective]) -> list[CliDirective]:
+def _dedupe_last_wins(params: list[CliParam]) -> list[CliParam]:
     """Stable dedup by name, last occurrence wins.
 
     Preserves the source order of first appearance for stable iteration
     so help output mirrors the order the user wrote the layers in.
     """
-    by_name: dict[str, CliDirective] = {}
+    by_name: dict[str, CliParam] = {}
     order: list[str] = []
-    for d in directives:
-        if d.name not in by_name:
-            order.append(d.name)
-        by_name[d.name] = d
+    for p in params:
+        if p.real_name not in by_name:
+            order.append(p.real_name)
+        by_name[p.real_name] = p
     return [by_name[n] for n in order]

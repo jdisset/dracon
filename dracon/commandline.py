@@ -36,11 +36,13 @@ from rich.panel import Panel
 from rich.text import Text
 
 from dracon import DraconLoader
+from dracon.cli_param import CliParam, Arg
 from dracon.deferred import DeferredNode
 from dracon.keypath import KeyPath
 from dracon.lazy import resolve_all_lazy
 from dracon.merge import MergeKey
 from dracon.resolvable import Resolvable, get_inner_type
+from dracon.symbols import MISSING
 from dracon.utils import build_nested_dict, list_like, dict_like
 
 COLOR_RED = "#EC7D76"
@@ -77,31 +79,6 @@ class HelpSection:
 
 
 @dataclass(frozen=True)
-class Arg:
-    """maps a pydantic field to cli arguments."""
-
-    real_name: Optional[str] = None
-    short: Optional[str] = None
-    long: Optional[str] = None
-    help: Optional[str] = None
-    arg_type: Optional[Type[Any]] = None
-    action: Optional[Callable[[ProgramType, Any], Any]] = None
-    default_str: Optional[str] = None
-    positional: bool = False
-    resolvable: bool = False
-    is_file: bool = False
-    is_flag: Optional[bool] = None  # none means auto-detect
-    raw: bool = False  # skip YAML composition, pass value as-is
-    auto_dash_alias: Optional[bool] = None  # none means overridden by the program
-    subcommand: bool = False
-    # routing target: "model" -> raw_args/nested_args (default, pydantic-validated);
-    # "context" -> defined_vars (same bucket as ++name=value). YAML-discovered
-    # directives use "context".
-    target: Literal["model", "context"] = "model"
-    hidden: bool = False
-
-
-@dataclass(frozen=True)
 class ConfigFile:
     """declares a config file for auto-discovery by @dracon_program.
 
@@ -115,26 +92,22 @@ class ConfigFile:
     selector: Optional[str] = None
 
 
-def _directive_to_arg(decl, auto_dash_alias: bool = True) -> Arg:
-    """Adapt a YAML-declared `CliDirective` into an `Arg` whose target is the
-    loader context (same bucket `++name=value` writes to). SSOT shim: every
-    flag — model-side or YAML-side — flows through one Arg-shaped record.
-
-    `real_name` stays as the declared identifier (snake_case) so the loader
-    context key matches `${name}` interpolations. `long` is dash-aliased
-    when the program enables it, so `--api-key` matches the model-side
-    convention."""
+def _finalize_yaml_param(decl: CliParam, auto_dash_alias: bool = True) -> CliParam:
+    """Stamp the argparse-side projection onto a YAML-sourced `CliParam`:
+    bare short char (parser stores `'p'`, not `'-p'`), dash-aliased long,
+    explicit `is_flag=False`, fall-back `arg_type=str`. Idempotent."""
     short_char = decl.short[1:] if decl.short and decl.short.startswith('-') else decl.short
-    long = decl.name.replace('_', '-') if auto_dash_alias and '_' in decl.name else decl.name
-    return Arg(
-        real_name=decl.name,
-        long=long,
+    long = decl.real_name
+    if long and auto_dash_alias and '_' in long:
+        long = long.replace('_', '-')
+    from dataclasses import replace
+    return replace(
+        decl,
         short=short_char,
+        long=long,
         help=decl.help or "",
-        arg_type=decl.python_type or str,
+        arg_type=decl.arg_type or str,
         is_flag=False,
-        target="context",
-        hidden=decl.hidden,
     )
 
 
@@ -275,20 +248,32 @@ def _detect_collection_type(tp) -> Optional[str]:
     return None
 
 
-def getArg(program: "Program", name: str, pydantic_field) -> Arg:
-    """creates the final Arg object based on model field and program defaults."""
+def _cliparam_field_dict(p: CliParam) -> Dict[str, Any]:
+    """slot-aware vars(): returns the dataclass field dict (no MISSING filter)."""
+    from dataclasses import fields
+    return {f.name: getattr(p, f.name) for f in fields(p)}
+
+
+def getArg(program: "Program", name: str, pydantic_field) -> CliParam:
+    """build the final CliParam for a model field, layering user-supplied
+    `Arg(...)` metadata over the program defaults."""
     base_arg = Arg(
         real_name=name,
         arg_type=pydantic_field.annotation,
         auto_dash_alias=program.default_auto_dash_alias,
     )
-    user_settings = next((m for m in pydantic_field.metadata if isinstance(m, Arg)), None)
+    user_settings = next(
+        (m for m in pydantic_field.metadata if isinstance(m, CliParam)), None
+    )
     user_arg_settings = (
-        {k: v for k, v in vars(user_settings).items() if v is not None and k != 'real_name'}
+        {
+            k: v for k, v in _cliparam_field_dict(user_settings).items()
+            if v is not None and v is not MISSING and k != 'real_name'
+        }
         if user_settings
         else {}
     )
-    final_settings = {**vars(base_arg), **user_arg_settings}
+    final_settings = {**_cliparam_field_dict(base_arg), **user_arg_settings}
 
     # use field description as fallback help text
     if final_settings.get('help') is None and pydantic_field.description:
@@ -303,7 +288,7 @@ def getArg(program: "Program", name: str, pydantic_field) -> Arg:
     )
     final_settings['resolvable'] = _get_arg_resolvable_status(final_settings.get('arg_type'))
     logger.debug(f"field {name}: resolvable={final_settings['resolvable']}")
-    return Arg(**final_settings)
+    return CliParam(**final_settings)
 
 
 T = TypeVar("T")
@@ -704,7 +689,7 @@ class Program(BaseModel, Generic[T]):
 
         for field_name, field_info in self.conf_type.model_fields.items():
             meta = field_info.metadata or []
-            arg_meta = next((m for m in meta if isinstance(m, Arg) and m.subcommand), None)
+            arg_meta = next((m for m in meta if isinstance(m, CliParam) and m.subcommand), None)
             if arg_meta:
                 self._subcommand_field_name = field_name
                 # find the discriminator from Field metadata
@@ -868,21 +853,22 @@ class Program(BaseModel, Generic[T]):
         warned_short = False
         import warnings as _warnings
 
+        from dataclasses import replace
         for d in directives:
             # model-side wins on name collision
-            if any(a.real_name == d.name for a in self._args):
+            if any(a.real_name == d.real_name for a in self._args):
                 continue
-            arg = _directive_to_arg(d, auto_dash_alias=self.default_auto_dash_alias)
+            arg = _finalize_yaml_param(d, auto_dash_alias=self.default_auto_dash_alias)
             # drop short alias if it collides
             if arg.short and arg.short in used_short:
                 if not warned_short:
                     _warnings.warn(
-                        f"short flag -{arg.short} declared by `{d.name}` "
+                        f"short flag -{arg.short} declared by `{d.real_name}` "
                         f"collides with an earlier flag; dropping the short alias",
                         stacklevel=2,
                     )
                     warned_short = True
-                arg = Arg(**{**vars(arg), 'short': None})
+                arg = replace(arg, short=None)
             elif arg.short:
                 used_short.add(arg.short)
 
