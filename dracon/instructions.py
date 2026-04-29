@@ -260,7 +260,14 @@ def process_assertions(comp_res: CompositionResult, loader) -> CompositionResult
 
 
 def check_pending_requirements(comp_res: CompositionResult, loader) -> None:
-    """Raise CompositionError for any unsatisfied !require vars."""
+    """Raise CompositionError for any unsatisfied !require vars.
+
+    Honors ``loader._skip_require_check`` so the CLI discovery pre-pass can
+    walk the instruction tree without aborting on names that argv will
+    supply later.
+    """
+    if getattr(loader, '_skip_require_check', False):
+        return
     from dracon.diagnostics import CompositionError
     unsatisfied = [
         (var, hint, ctx)

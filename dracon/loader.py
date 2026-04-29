@@ -320,6 +320,10 @@ class DraconLoader:
         new_loader.yaml.constructor.yaml_constructors = (
             self.yaml.constructor.yaml_constructors.copy()
         )
+        # propagate the discovery-pre-pass flag so nested includes also skip
+        # the !require check when the parent loader is in discovery mode
+        if getattr(self, '_skip_require_check', False):
+            new_loader._skip_require_check = True
         return new_loader
 
     def __deepcopy__(self, memo):
