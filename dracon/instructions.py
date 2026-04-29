@@ -1223,6 +1223,14 @@ class Require(Instruction):
         comp_res.cli_directives.append(directive)
 
         if var_name in loader.context or var_name in comp_res.defined_vars:
+            # mark as accessed: a satisfied !require is a real read of the
+            # variable contract, even if no ${var} interpolation reads it.
+            # this prevents the unused-var warning from firing on values
+            # supplied solely to satisfy the require (--port, ++port, ...).
+            try:
+                _ = loader.context[var_name]
+            except Exception:
+                pass
             return comp_res
 
         ctx = node_source(key_node)

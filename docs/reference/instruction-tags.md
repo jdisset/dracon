@@ -79,17 +79,62 @@ without coercing the value:
 The `Gate` annotation surfaces in `mk.interface().params[0].annotation_name`
 (and as the resolved type in `.annotation` when `Gate` is in scope).
 
+### Mapping body (CLI metadata)
+
+A top-level `!set_default` can carry CLI metadata via a mapping body. When the
+config is loaded by a `@dracon_program` CLI, these directives surface as real
+argparse flags — `--name value`, `--help`-visible, with optional short alias.
+
+```yaml
+!set_default:int workers:
+  default: 4
+  help: "worker count"
+  short: -w
+```
+
+Allowed body keys for `!set_default`: `default`, `help`, `short`, `hidden`.
+
+| key       | type            | meaning                                                  |
+|-----------|-----------------|----------------------------------------------------------|
+| `default` | any             | the default value (coerced to `:Type` if typed)          |
+| `help`    | str             | help text shown in `--help`                              |
+| `short`   | str (`-x`)      | short alias (single char, must not collide with model)   |
+| `hidden`  | bool            | omit from `--help`                                       |
+
+The scalar form (`!set_default workers: 4`) is still valid: it is sugar for
+`{default: 4}` with no CLI metadata. Inner-scope directives (inside `!fn`,
+`!deferred`, or `!if` branches) are not exposed as CLI flags — they remain
+contracts of the template they belong to.
+
+See [CLI flags from config layers](cli-api.md#cli-flags-from-config-layers)
+for the precedence rules and the `++` fallback.
+
 ---
 
 ## !require
 
-Declares that a variable must be provided by some outer scope (a `!define`, a `!set_default`, CLI `++`, or programmatic context). Checked after all instructions have run.
+Declares that a variable must be provided by some outer scope (a `!define`, a `!set_default`, CLI `++`, CLI `--flag`, or programmatic context). Checked after all instructions have run.
 
 ```yaml
-!require api_key: "API key needed. Set via ++api_key=..."
+!require api_key: "API key needed. Set via ++api_key=... or --api-key"
 ```
 
 If the variable is not satisfied by end of composition, raises `CompositionError` with the hint message. Removed from the tree (pure validation).
+
+### Mapping body (CLI metadata)
+
+A top-level `!require` can carry CLI metadata to surface as a real argparse
+flag in `@dracon_program` CLIs. The same grammar as `!set_default`, minus
+`default` (a required variable has no default by definition):
+
+```yaml
+!require port:
+  help: "bind port"
+  short: -p
+```
+
+Allowed body keys for `!require`: `help`, `short`, `hidden`. Passing
+`default` raises a `CompositionError`.
 
 ### Typed `!require:Type`
 

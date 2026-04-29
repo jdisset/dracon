@@ -777,6 +777,9 @@ class Program(BaseModel, Generic[T]):
 
         raw_args, defined_vars, actions, confs_to_merge = {}, {}, [], []
         nested_args = {}
+        # source label per defined-var name, for --show-vars and warnings.
+        # SSOT: every write to defined_vars stamps its origin here.
+        self._defined_var_sources: Dict[str, str] = {}
 
         # we parse each argument in argv, updating the raw_args and nested_args dicts
         try:
@@ -1290,6 +1293,20 @@ class Program(BaseModel, Generic[T]):
         console.print(error_panel)
         print_help(self, None)
 
+    def _record_var_source(self, name: str, label: str) -> None:
+        """stamp the origin of a defined-var, lazily creating the map.
+
+        SSOT for `--show-vars` labels and the unused-var warning. Lazy so
+        child programs in the subcommand parser pick it up automatically
+        without an explicit init step.
+        """
+        try:
+            sources = self._defined_var_sources
+        except AttributeError:
+            sources = {}
+            object.__setattr__(self, '_defined_var_sources', sources)
+        sources[name] = label
+
     def _parse_single_arg(
         self,
         argv: List[str],
@@ -1318,6 +1335,7 @@ class Program(BaseModel, Generic[T]):
                 var_name = var_part
                 var_value, i = self._read_value(argv, i)
             defined_vars[var_name] = var_value
+            self._record_var_source(var_name, "CLI (++/--define)")
 
         elif argstr.startswith('++'):  # shorthand for --define
             var_part = argstr[2:]
@@ -1330,6 +1348,7 @@ class Program(BaseModel, Generic[T]):
                 var_name = var_part
                 var_value, i = self._read_value(argv, i)
             defined_vars[var_name] = var_value
+            self._record_var_source(var_name, "CLI (++/--define)")
 
         elif argstr.startswith('+') and not _force_positional:  # it's an include
             confs_to_merge.append(argstr[1:])
@@ -1378,6 +1397,8 @@ class Program(BaseModel, Generic[T]):
 
             elif arg_obj and arg_obj.is_flag:  # flag option, no need for value
                 target_dict[real_name] = True
+                if target_dict is defined_vars:
+                    self._record_var_source(real_name, f"CLI (--{arg_obj.long or real_name})")
 
             else:  # option requires a value
                 if provided_value is not None:
@@ -1399,6 +1420,8 @@ class Program(BaseModel, Generic[T]):
                     v = _RawStr(v)
 
                 target_dict[real_name] = v
+                if target_dict is defined_vars:
+                    self._record_var_source(real_name, f"CLI (--{arg_obj.long or real_name})")
                 logger.debug(f"setting {real_name} to {target_dict[real_name]}")
         return i + 1
 
@@ -1707,7 +1730,7 @@ class Program(BaseModel, Generic[T]):
         unused_vars = tracked_context.get_unused_defined_vars()
         if unused_vars:
             console.print(
-                f"[yellow]Warning:[/yellow] The following --define/++ variables were not used: {', '.join(sorted(unused_vars))}",
+                f"[yellow]Warning:[/yellow] The following CLI variables were not used: {', '.join(sorted(unused_vars))}",
                 style="yellow",
             )
 
@@ -1732,10 +1755,12 @@ class Program(BaseModel, Generic[T]):
         table.add_column("Value", style=COLOR_WHITE)
         table.add_column("Source", style=COLOR_DIM)
 
-        # first, show CLI defined vars
+        # first, show CLI defined vars (label by source: ++ vs --flag)
+        sources = getattr(self, '_defined_var_sources', {}) or {}
         for name, value in sorted(cli_defined_vars.items()):
             val_repr = repr(value)[:50] + ('...' if len(repr(value)) > 50 else '')
-            table.add_row(name, val_repr, "CLI (++/--define)")
+            label = sources.get(name, "CLI (++/--define)")
+            table.add_row(name, val_repr, label)
 
         # then show context vars from includes/!define
         for name, value in sorted(loader_context.items()):

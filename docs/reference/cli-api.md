@@ -148,6 +148,79 @@ Every `@dracon_program` includes:
 
 ---
 
+## CLI flags from config layers
+
+Top-level `!require` and `!set_default` directives in any `+`-layered config
+become real argparse flags at runtime. Adding a new flag for an experiment
+becomes a config edit, not a code edit.
+
+```yaml
+# plugins/analytics.yaml
+!require api_key:
+  help: "API key for the analytics service"
+
+!set_default:int batch_size:
+  default: 32
+  help: "batch size"
+  short: -b
+```
+
+```bash
+mycli +plugins/analytics.yaml --api-key $SECRET -b 64
+mycli +plugins/analytics.yaml --help    # shows --api-key and --batch-size
+```
+
+### What makes a directive CLI-visible
+
+- It is at the **top level** of a layered config (a `+file.yaml` argument).
+- It is `!require` or `!set_default` (typed variants like
+  `!set_default:int` count too, with `int` becoming the argparse `type=`).
+- It is **not** nested inside `!fn`, `!deferred`, or `!if` branches —
+  those are inner scopes by construction.
+
+### Precedence
+
+When the same name is declared in multiple places, the resolution order is:
+
+```
+model field (Pydantic)  >  YAML directive  >  context seed  >  default
+```
+
+Specifically:
+
+- A model field shadows a YAML directive of the same name. `--port`
+  routes to the model field; the YAML variable is still reachable via
+  `++port=...` or `--define.port=...`.
+- Multiple layers declaring the same name: last layer wins for the
+  argparse metadata (help/short/default).
+- A short alias that collides with an existing model-side `Arg` is
+  dropped with one warning; the long flag still works.
+
+### Why `++` still exists
+
+`++name=value` (and its long form `--define.name=value`) bypass all flag
+discovery. Reach for them when:
+
+- A model field shadows a YAML variable of the same name and you need
+  to write the YAML variable explicitly.
+- A name has no declaration anywhere — `++` is the generic, ad-hoc
+  context injection rail.
+- A discovered flag's argparse coercion gets in the way and you want
+  to feed a raw YAML literal instead (e.g. `++weights="[0.1, 0.2]"`).
+
+### Inspecting at runtime
+
+Set `DRACON_SHOW_VARS=1` to print a table of every defined variable at the
+end of a CLI run. The `Source` column distinguishes `CLI (++/--define)`
+from `CLI (--flag)` (a discovered flag) and `config (!define)` (a value
+that came from the composed YAML itself).
+
+The unused-variable warning fires when a variable was set on the CLI
+(via any of the above) but no `${...}` interpolation, no `!set_default`,
+and no `!require` ever read it.
+
+---
+
 ## ConfigFile
 
 Declares a config file for auto-discovery.

@@ -97,6 +97,67 @@ ml train --help     # shows train-specific options
 
 The docstring on each subcommand model appears as the command description.
 
+## Layered configs as CLI plug-ins
+
+Use this when you want a layered config file to *grow* the flag set of your
+CLI. Top-level `!require` and `!set_default` directives in a `+file.yaml`
+become real argparse flags — `--help`-visible, with optional short alias.
+
+A small CLI:
+
+```python
+from typing import Annotated
+from pydantic import BaseModel
+from dracon import Arg, dracon_program
+
+@dracon_program(name="mycli")
+class Config(BaseModel):
+    name: Annotated[str, Arg(help="report name")] = "anon"
+```
+
+A plugin layer that declares its own knobs:
+
+```yaml
+# plugins/analytics.yaml
+!require api_key:
+  help: "API key for the analytics service"
+
+!set_default:int batch_size:
+  default: 32
+  help: "batch size"
+  short: -b
+
+# the plugin uses what it declared
+analytics:
+  endpoint: https://api.example.com/${api_key}
+  batch:    ${batch_size}
+```
+
+A plain user invocation:
+
+```bash
+mycli +plugins/analytics.yaml --api-key $SECRET -b 64
+```
+
+`--help` shows `--api-key` and `--batch-size` with their hint text. The
+plugin file *is* the flag declaration; no Python edit was needed to add
+those flags.
+
+A few things to keep in mind:
+
+- The directive must be at the **top level** of the layered file. Directives
+  inside `!fn` / `!deferred` / `!if` are inner-scope contracts, not CLI flags.
+- A model field with the same name shadows a YAML directive. `++port=8080`
+  still targets the YAML variable when you need to disambiguate.
+- Short aliases (`short: -b`) are best-effort: if `-b` is already taken by
+  a model-side `Arg`, the long flag still works and a one-shot warning is
+  emitted.
+- `!set_default:int` wires `int` as the argparse `type=`, so `--batch-size 64`
+  produces an int, not a string.
+
+For the precedence rules and the `++` fallback, see
+[CLI flags from config layers](../reference/cli-api.md#cli-flags-from-config-layers).
+
 ## ConfigFile for auto-discovered configs
 
 Use this when you want your tool to automatically pick up config files from known locations.
