@@ -926,10 +926,17 @@ class Each(Instruction):
                     temp_comp = inner_inst.process(temp_comp, temp_path, loader)
                     all_results.append(temp_comp.root)
 
-                if all_results and isinstance(all_results[0], DraconSequenceNode):
+                # decide expansion shape from any non-empty result; iterations
+                # whose inner !if was false produce empty mappings that don't
+                # carry a kind signal
+                produces_sequence = any(
+                    isinstance(r, DraconSequenceNode) for r in all_results
+                )
+                if produces_sequence:
                     expanded = []
                     for result in all_results:
-                        expanded.extend(result.value)
+                        if isinstance(result, DraconSequenceNode):
+                            expanded.extend(result.value)
                     # Check for auto-splice (parent is single-key mapping inside sequence)
                     if in_sequence and len(parent_node) == 1:
                         new_value = (
@@ -955,8 +962,9 @@ class Each(Instruction):
                     new_parent = parent_node.copy()
                     new_parent.value = []
                     for result in all_results:
-                        for k, v in result.items():
-                            new_parent.append((k, v))
+                        if isinstance(result, DraconMappingNode):
+                            for k, v in result.items():
+                                new_parent.append((k, v))
             else:
                 for item in list_like:
                     item_ctx = merged(key_node.context, {self.var_name: item}, cached_merge_key('{<~}'))
