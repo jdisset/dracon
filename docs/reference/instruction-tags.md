@@ -35,8 +35,8 @@ The value can be:
 - A scalar (string, number, bool)
 - An interpolation expression (`${...}`) -- evaluated at composition time
 - A mapping or sequence -- constructed immediately
-- A `!fn` callable -- stored as a `DraconCallable`
-- A `!pipe` pipeline -- stored as a `DraconPipe`
+- A `!fn` callable -- stored as a `CallableSymbol` of kind `'template'`
+- A `!pipe` pipeline -- stored as a `CallableSymbol` of kind `'pipe'`
 - A tagged mapping (e.g. `!MyModel`) -- lazily constructed as `LazyConstructable`
 
 Variable names must be valid Python identifiers.
@@ -303,7 +303,7 @@ Callables defined by `!fn` are invoked via `${fn_name(key=value)}` in expression
 
 ## !fn:path (Partial Application)
 
-Creates a `DraconPartial` -- a partial application of a Python callable with pre-filled kwargs.
+Creates a `CallableSymbol` of kind `'partial'` -- a partial application of a Python callable with pre-filled kwargs.
 
 ```yaml
 !define my_loader: !fn:mymodule.load_data
@@ -343,7 +343,7 @@ Function composition. Chains a sequence of callables where each stage's output f
 - If a stage returns a mapping, it is unpacked as `**kwargs` into the next stage
 - If a stage returns a non-mapping, it is passed as the single unfilled `!require` parameter of the next stage
 
-Nested `DraconPipe` instances are flattened automatically.
+Nested pipe instances are flattened automatically.
 
 ---
 

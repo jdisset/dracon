@@ -205,6 +205,27 @@ The Pydantic type `Resolvable[str]` tells Pydantic to accept `Resolvable` instan
 
 For most cases, `!deferred` is simpler. Use `Resolvable` when you want the parent model fully constructed and validated, with only one field deferred.
 
+## `Lazy[T]`: typed lazy interpolation
+
+When the deferred bit is just a single `${...}` value (not a whole subtree), `Lazy[T]` is lighter than `Resolvable[T]`. It mirrors `Resolvable[T]`'s shape but resolves *automatically on attribute access* from a `LazyDraconModel`:
+
+```python
+from dracon import Lazy, LazyDraconModel, DraconLoader
+
+class Server(LazyDraconModel):
+    port: Lazy[int]
+    host: Lazy[str] = "localhost"
+
+cfg = DraconLoader().loads(
+    "port: ${env_port}\nhost: ${env_host}",
+    context={"env_port": 9000, "env_host": "api.local"},
+)
+cfg.port  # -> 9000   (typed as int, resolved on access)
+cfg.host  # -> "api.local"
+```
+
+Use `Lazy[T]` when "the value will be available by the time something reads this field" is acceptable. Use `Resolvable[T]` when you need to control *when* a field resolves (e.g. for audit, runtime mutation, or pausing until a transaction begins).
+
 ## Worked example: webmon with deferred report paths
 
 Putting it together. The webmon app generates a run ID at startup and uses it in output paths:
@@ -270,9 +291,10 @@ The non-deferred parts of the config (sites, database, check_interval) load norm
 | :-- | :-- |
 | Object depends on other `!define`d variables | Lazy `!define x: !Type { ... }` |
 | Value depends on runtime context | `!deferred` + `.construct(context=...)` |
-| Single field in a Pydantic model needs late binding | `Resolvable[T]` + `.resolve(context=...)` |
+| Single field in a Pydantic model needs user-driven late binding | `Resolvable[T]` + `.resolve(context=...)` |
+| Single typed `${...}` value should resolve on attribute access | `Lazy[T]` on a `LazyDraconModel` field |
 
-Start with lazy `!define`. If you find yourself needing to pass in values that don't exist at load time, switch to `!deferred`. If it's just one field in a model, consider `Resolvable[T]`.
+Start with lazy `!define`. If you find yourself needing to pass in values that don't exist at load time, switch to `!deferred`. If it's just one field in a model, choose between `Resolvable[T]` (explicit user-driven) and `Lazy[T]` (auto-on-access).
 
 ## What you've learned
 

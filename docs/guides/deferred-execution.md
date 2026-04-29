@@ -10,8 +10,30 @@ If what you want is a clean declarative runtime boundary, start with [Runtime Co
 |---|---|---|
 | All info is available at composition time, you just need forward references | `!define x: !Type` (lazy) | Construction is deferred, but everything is known |
 | Need runtime context not available during composition | `!deferred` | Pauses the entire composition subtree |
-| Single Pydantic field needing late binding | `Resolvable[T]` | Field-level pause; resolve when ready |
+| Single Pydantic field needing user-driven late binding | `Resolvable[T]` | Field-level pause; resolve when ready |
+| Single typed `${...}` value that should resolve on access | `Lazy[T]` | Typed wrapper around one interpolation |
 | Model with `${...}` defaults that depend on not-yet-available context | `LazyDraconModel` | Defers interpolation to attribute access time |
+
+The three typed wrappers — `Lazy[T]`, `Resolvable[T]`, `DeferredNode[T]` — round-trip through the same parametric mechanism (see [The Primitives](../concepts/primitives.md#typed-deferred-wrappers)). Pick by what you're pausing:
+
+- **`Lazy[T]`** wraps a single `${...}` value. It resolves automatically on attribute access from a `LazyDraconModel`. Use for typed config values where late interpolation is fine and you don't need to control *when* it happens.
+- **`Resolvable[T]`** snapshots a node + the constructor needed to build it. It resolves only when you call `.resolve(context)`. Use when the consumer must control the moment of resolution: runtime-sensitive subtrees, graph mutations, audit-sensitive proposals.
+- **`DeferredNode[T]`** is a typed Node subclass that lives in the composition tree and implements the Symbol protocol. Use when the deferred branch must itself be a Symbol (passed around, bound, invoked from another template). `Resolvable[T]` is a value; `DeferredNode[T]` is a tree node.
+
+```python
+from pydantic import BaseModel
+from dracon import Lazy, LazyDraconModel, Resolvable, DraconLoader
+
+class Cfg(LazyDraconModel):
+    port: Lazy[int]                 # ${...} that's typed as int
+    host: Lazy[str] = "localhost"   # default + lazy
+
+cfg = DraconLoader().loads("port: ${env_port}\nhost: ${env_host}",
+                            context={"env_port": 9000, "env_host": "api.local"})
+cfg.port  # -> 9000  (resolved on attribute access, returns int)
+```
+
+`Lazy[T]` is the right choice when "the value will exist by the time something reads this field" is acceptable. Reach for `Resolvable[T]` when *when* the value resolves matters for correctness or audit.
 
 Pick the lightest tool that fits. `!define` handles most cases. Reach for `!deferred` only when you truly need runtime injection.
 

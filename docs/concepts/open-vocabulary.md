@@ -25,6 +25,27 @@ From the caller's point of view, these often feel close enough that you can:
 
 That is a big part of where Dracon's composability comes from.
 
+## Lookup sources and trust zones
+
+The loader's `SymbolTable` is the single source of truth for both directions of tag resolution: `tag_name → Symbol` (for `!MyType` construction) and `value → tag_name` (for `dump`'s reverse lookup). When a name isn't in the local table, the lookup walks an ordered chain of `SymbolSource` records the loader is built with. By default that chain ends with `make_dynamic_import_source()` — the `importlib.import_module` fallback that has always been there, just now lifted into a first-class extension point.
+
+```python
+from dracon import DraconLoader, make_dynamic_import_source, SymbolSource
+
+# default loader: builtin + user vocab + dynamic_import (importlib fallback)
+loader = DraconLoader()
+
+# sandboxed loader: only the explicit vocab is consulted; unknown tags error
+loader = DraconLoader(symbol_sources=[my_explicit_vocab])
+
+# replace dynamic_import with a stricter audited variant
+loader = DraconLoader(symbol_sources=[my_vocab, my_audited_import_source])
+```
+
+Reverse `identify()` walks only sources where `canonical_for_identify=True`. The default `dynamic_import` source defaults to `False` and has no reverse callback, so ad-hoc imports never pollute round-trip identity — `loads(dump(x, V), V) ≅ x` stays mechanical, not aspirational. Parametric tags like `!Resolvable[Foo]` and `!Lazy[int]` flow through the same machinery via a `parametric_apply` hook on the base symbol. Custom parametric wrappers (`Promise[T]`, `Validated[T]`) register the same way.
+
+See [Loader API → Trust zones](../reference/loader-api.md#trust-zones-via-symbol_sources) and [Extending Dracon → Custom resolution sources](../guides/extending-dracon.md#custom-resolution-sources) for worked examples.
+
 ## The runtime model
 
 Under the hood, every name in scope is backed by a **symbol** with a consistent interface:

@@ -31,6 +31,18 @@ defaults: !include pkg:mypackage:data/defaults.yaml
 
 Format: `pkg:PACKAGE_NAME:RESOURCE_PATH`
 
+The `pkg:` scheme also works through `!fn:` for binding a YAML template stored inside a package, with optional `@selector` to pick one template out of a multi-template file:
+
+```yaml
+# bare include of a package-resource template
+greet: !fn pkg:mypackage:templates/greet.yaml { name: world }
+
+# select one template out of a multi-template file
+config_block: !fn:pkg:mypackage:templates/blocks.yaml@base { mode: prod }
+```
+
+`!fn:scheme:` and `!include scheme:` dispatch through the same `custom_loaders` registry, so disabling or replacing a scheme affects both in lockstep.
+
 ---
 
 ## env:VAR_NAME

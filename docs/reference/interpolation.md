@@ -161,6 +161,26 @@ Partially resolvable expressions are simplified: if some variables are known, th
 
 ---
 
+## Typed lazy fields
+
+A typed Pydantic field can wrap a `${...}` value in `Lazy[T]` to defer interpolation while preserving the static type. On a `LazyDraconModel`, attribute access triggers resolution and returns `T`:
+
+```python
+from dracon import Lazy, LazyDraconModel, DraconLoader
+
+class Cfg(LazyDraconModel):
+    port: Lazy[int]
+    host: Lazy[str] = "localhost"
+
+cfg = DraconLoader().loads("port: ${env_port}\nhost: ${env_host}",
+                            context={"env_port": 9000, "env_host": "api.local"})
+cfg.port  # -> 9000   (resolved on access, returns int)
+```
+
+`Lazy[T]` is the `${...}`-side parallel to `Resolvable[T]`. See [Deferred Execution](../guides/deferred-execution.md) for the full comparison.
+
+---
+
 ## Two-Phase Resolution
 
 During construction, interpolations are evaluated twice with a growing context. The first pass resolves what it can; the second pass picks up values that depended on results from the first pass. This handles most forward-reference scenarios without explicit ordering.

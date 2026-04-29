@@ -23,6 +23,7 @@ DraconLoader(
     enable_shorthand_vars: bool = True,
     use_cache: bool = True,
     trace: bool = True,
+    symbol_sources: Sequence[SymbolSource] | None = None,
 )
 ```
 
@@ -39,6 +40,26 @@ DraconLoader(
 | `enable_shorthand_vars` | When `True`, bare `$VAR` tokens are converted to `${VAR}` before interpolation. |
 | `use_cache` | LRU cache (128 items) for parsed YAML strings. Disable for mutation-heavy workflows. |
 | `trace` | Enable composition tracing. Also enabled when `DRACON_TRACE=1` is set. |
+| `symbol_sources` | Ordered chain of `SymbolSource` records the loader's `SymbolTable` consults on tag-resolution miss. Default chain ends with `make_dynamic_import_source()` (the `importlib.import_module` fallback). Pass an explicit list (without the dynamic-import source) for sandboxed runtimes -- the loader then refuses unknown tags instead of importing them. |
+
+### Trust zones via `symbol_sources`
+
+The default loader has a `dynamic_import` source on its `SymbolTable` that calls `importlib.import_module` when a tag isn't in the explicit vocabulary. For sandboxed runtimes (Pyodide previews, untrusted-agent vocabularies, browser previews) you usually want the opposite: refuse anything that isn't pre-registered.
+
+```python
+from dracon import DraconLoader, SymbolSource, SymbolEntry, SymbolTable, CallableSymbol
+
+# trusted, explicit vocabulary
+explicit = SymbolTable()
+explicit.define(SymbolEntry(name="Foo", symbol=CallableSymbol(Foo, name="Foo")))
+src = SymbolSource(name="user_vocab", lookup=explicit.__getitem__,
+                   identify=explicit.identify, canonical_for_identify=True)
+
+# sandboxed loader: only `!Foo` is resolvable, `!some.unknown.thing` errors
+loader = DraconLoader(symbol_sources=[src])
+```
+
+Reverse `identify()` walks only sources where `canonical_for_identify=True`; the dynamic-import source defaults to `False`, so ad-hoc imports never pollute round-trip identity.
 
 ### Methods
 

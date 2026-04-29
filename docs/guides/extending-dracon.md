@@ -194,3 +194,35 @@ def my_loader(path, node=None, draconloader=None):
 ```
 
 The built-in loaders all follow this same interface, so you can look at `dracon/loaders/` for more examples.
+
+## Custom resolution sources
+
+Tag resolution (`!MyType`) and reverse identification (`identify(value) -> tag_name`) both flow through one `SymbolTable` on the loader. The table consults an ordered chain of `SymbolSource` records on miss — by default `[builtin, user_vocab, dynamic_import]`, where `dynamic_import` is the `importlib.import_module` fallback that has always been there. Registering a custom source is the supported way to add a *new* tag-resolution behavior without subclassing `Draconstructor`.
+
+A plugin registry is a typical use case:
+
+```python
+from dracon import (
+    DraconLoader, SymbolSource, SymbolEntry, SymbolTable,
+    CallableSymbol, make_dynamic_import_source,
+)
+
+# build an explicit registry of plugin types
+plugin_table = SymbolTable()
+for name, cls in my_plugin_registry.items():
+    plugin_table.define(SymbolEntry(name=name, symbol=CallableSymbol(cls, name=name)))
+
+plugin_source = SymbolSource(
+    name="plugin_registry",
+    lookup=plugin_table.__getitem__,
+    identify=plugin_table.identify,
+    canonical_for_identify=True,  # this source can answer reverse identify()
+)
+
+# put plugins ahead of dynamic-import fallback
+loader = DraconLoader(symbol_sources=[plugin_source, make_dynamic_import_source()])
+
+cfg = loader.loads("worker: !MyPlugin { mode: fast }")  # !MyPlugin resolved by source
+```
+
+Sources can be reordered, replaced, or *omitted* entirely. For a sandboxed runtime (Pyodide preview, untrusted-agent vocabulary) leave out `make_dynamic_import_source()` — the loader then refuses any tag that isn't in the explicit chain instead of silently importing it. See [Loader API → Trust zones](../reference/loader-api.md#trust-zones-via-symbol_sources) for the full pattern.

@@ -146,8 +146,10 @@ The first three live entirely in YAML-land. `!fn:path` bridges to Python. `!pipe
 
 These look similar but work differently:
 
-- **`!fn`** creates a `DraconCallable`. Each call deep-copies the template node, injects kwargs as context, and runs the full composition + construction pipeline. The template is YAML.
-- **`!fn:path`** creates a `DraconPartial`. It resolves `path` to a Python function and stores the provided kwargs. Each call merges runtime kwargs with stored kwargs and calls the function directly. No YAML involved at call time.
+- **`!fn`** creates a `CallableSymbol` of kind `'template'`. Each call deep-copies the template node, injects kwargs as context, and runs the full composition + construction pipeline. The template is YAML.
+- **`!fn:path`** creates a `CallableSymbol` of kind `'partial'`. It resolves `path` to a Python function and stores the provided kwargs. Each call merges runtime kwargs with stored kwargs and calls the function directly. No YAML involved at call time.
+
+`!pipe` produces a `CallableSymbol` of kind `'pipe'`. All three share the same Symbol protocol (`interface()`, `bind()`, `invoke()`, `materialize()`) and round-trip through `!fn` / `!fn:target` / `!pipe` tags. The legacy names `DraconCallable`, `DraconPartial`, `DraconPipe` remain importable as factory aliases for backward compatibility.
 
 ```yaml
 # YAML template callable
@@ -162,6 +164,18 @@ These look similar but work differently:
 ```
 
 ---
+
+## Typed-deferred wrappers
+
+For typed Pydantic fields that should pause resolution until later, dracon ships three parametric wrappers. They differ in *what kind of pause* they represent and *where they live*:
+
+| Wrapper | Pauses | Resolves on | Lives in |
+|---|---|---|---|
+| `Lazy[T]` | a single `${...}` interpolation | attribute access from a `LazyDraconModel` | a Pydantic field value |
+| `Resolvable[T]` | a node + constructor | explicit `.resolve(context)` | a Pydantic field value |
+| `DeferredNode[T]` | a subtree | explicit `.construct(context=...)` | the composition tree (it *is* a Node) |
+
+All three round-trip through `SymbolTable`'s `parametric_apply` hook, so `!Lazy[int]`, `!Resolvable[Foo]`, and `!Deferred[Bar]` are emitted and parsed uniformly. Custom parametric vocabularies (e.g. `Promise[T]`, `Validated[T]`) register the same way — no new draconstructor branch required. See [Deferred Execution](../guides/deferred-execution.md) for worked examples.
 
 ## How primitives interact with phases
 

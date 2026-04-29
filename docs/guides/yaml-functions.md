@@ -215,7 +215,7 @@ The template node is deep-copied before each invocation, so there's no shared mu
 
 ## !fn:path -- partial application of Python functions
 
-`!fn:path` wraps a Python function (identified by its dotted import path) with optional pre-filled keyword arguments. The result is a `DraconPartial`: a callable that's serializable via both pickle and YAML.
+`!fn:path` wraps a Python function (identified by its dotted import path) with optional pre-filled keyword arguments. The result is a `CallableSymbol` of kind `'partial'` (the legacy name `DraconPartial` is still importable as a factory alias): a callable that's serializable via both pickle and YAML.
 
 ```yaml
 !define sqrt: !fn:math.sqrt
@@ -247,7 +247,7 @@ This means you can override an importable function with a context variable of th
 
 ### Serialization
 
-`DraconPartial` is pickle-safe and round-trips through YAML. When dumped to YAML, it produces `!fn:dotted.path { kwargs }`. When pickled, it stores the path and kwargs, then re-imports the function on unpickle.
+A partial `CallableSymbol` is pickle-safe and round-trips through YAML. When dumped to YAML, it produces `!fn:dotted.path { kwargs }`. When pickled, it stores the path and kwargs, then re-imports the function on unpickle.
 
 Context-only names (no dots) can't be pickled since there's no import path to reconstruct from.
 
@@ -309,7 +309,7 @@ Pipe stages can be any callable: `!fn` templates, `!fn:path` partials, context v
 
 ### Pipes compose with pipes
 
-If a pipe stage is itself a `DraconPipe`, its stages are flattened into the parent. No nesting overhead:
+If a pipe stage is itself a pipe (a `CallableSymbol` of kind `'pipe'`), its stages are flattened into the parent. No nesting overhead:
 
 ```yaml
 !define preprocess: !pipe

@@ -10,7 +10,7 @@ from dracon import Arg, Subcommand, subcommand, dracon_program, ConfigFile, Help
 
 ## Arg
 
-Dataclass that maps a Pydantic field to CLI arguments. Applied via `Annotated`:
+Factory function that builds a `CliParam(source='model', ...)` record — the unified record type for CLI parameters. (`CliParam` also backs YAML-declared flags via `!require` / `!set_default` mapping bodies, where it's built with `source='yaml'`.) `Arg` is the ergonomic way to attach CLI metadata to a Pydantic field via `Annotated`:
 
 ```python
 class Config(BaseModel):
