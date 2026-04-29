@@ -835,6 +835,10 @@ class LazyDraconModel(BaseModel):
 
     def __getattribute__(self, name):
         attr = super().__getattribute__(name)
+        # typed Lazy[T] wrapper: resolve to T on access
+        from dracon.lazy_typed import Lazy as TypedLazy
+        if isinstance(attr, TypedLazy):
+            return attr.resolve()
         if isinstance(attr, Lazy):
             attr.__set_name__(self, name)
             if isinstance(attr, LazyInterpolable):

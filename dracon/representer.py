@@ -271,10 +271,13 @@ class DraconRepresenter(RoundTripRepresenter):
     def represent_pydantic_model(self, data: BaseModel) -> Node:
         # hybrid quoter: pydantic supplies field metadata, values come straight
         # from the live object so nested dracon-native types flow back through
-        # represent_data and keep their identities.
+        # represent_data and keep their identities. read via __dict__ so wrapper
+        # types (Lazy, LazyInterpolable, ...) on LazyDraconModel survive dump.
         tag = f'!{self._name_for(data)}'
+        raw = object.__getattribute__(data, '__dict__')
         pairs = [
-            (self.represent_data(emit_key), self.represent_data(getattr(data, attr)))
+            (self.represent_data(emit_key),
+             self.represent_data(raw[attr] if attr in raw else getattr(data, attr)))
             for attr, emit_key in _emit_pydantic_fields(
                 data, exclude_defaults=self.exclude_defaults
             )
