@@ -94,6 +94,11 @@ class Arg:
     raw: bool = False  # skip YAML composition, pass value as-is
     auto_dash_alias: Optional[bool] = None  # none means overridden by the program
     subcommand: bool = False
+    # routing target: "model" -> raw_args/nested_args (default, pydantic-validated);
+    # "context" -> defined_vars (same bucket as ++name=value). YAML-discovered
+    # directives use "context".
+    target: Literal["model", "context"] = "model"
+    hidden: bool = False
 
 
 @dataclass(frozen=True)
@@ -108,6 +113,23 @@ class ConfigFile:
     search_parents: bool = False
     required: bool = False
     selector: Optional[str] = None
+
+
+def _directive_to_arg(decl) -> Arg:
+    """Adapt a YAML-declared `CliDirective` into an `Arg` whose target is the
+    loader context (same bucket `++name=value` writes to). SSOT shim: every
+    flag — model-side or YAML-side — flows through one Arg-shaped record."""
+    short_char = decl.short[1:] if decl.short and decl.short.startswith('-') else decl.short
+    return Arg(
+        real_name=decl.name,
+        long=decl.name,
+        short=short_char,
+        help=decl.help or "",
+        arg_type=decl.python_type or str,
+        is_flag=False,
+        target="context",
+        hidden=decl.hidden,
+    )
 
 
 def _discover_config_files(config_files: List[ConfigFile]) -> List[str]:
@@ -745,6 +767,11 @@ class Program(BaseModel, Generic[T]):
         if self._subcommand_map:
             return self._parse_with_subcommands(argv, **kwargs)
 
+        # YAML-discovery pre-pass: surface !require / !set_default declared in
+        # +layer files as real CLI flags. Reuses the same loader factory the
+        # final run will use so schemes / context types resolve identically.
+        self._discover_yaml_args(argv, kwargs.get('context'))
+
         self._positionals = [arg for arg in self._args if arg.positional][::-1]  # reverse for pop()
         logger.debug(f"positional args: {self._positionals}, arg map: {self._arg_map}")
 
@@ -791,6 +818,110 @@ class Program(BaseModel, Generic[T]):
             }
         )
         return conf, final_raw_args
+
+    def _discover_yaml_args(self, argv: List[str], program_context: Optional[Dict[str, Any]]) -> None:
+        """Compose +layer files just enough to harvest YAML-declared CLI flags.
+
+        Idempotent across repeated `parse_args` calls: rebuilds `_args`/
+        `_arg_map` from the pristine model-side baseline each time.
+        """
+        from dracon.cli_discovery import discover_cli_directives
+
+        # restore baseline so a previous run's discovered flags do not leak
+        if not hasattr(self, '_baseline_args'):
+            self._baseline_args = list(self._args)
+            self._baseline_arg_map = dict(self._arg_map)
+        else:
+            self._args = list(self._baseline_args)
+            self._arg_map = dict(self._baseline_arg_map)
+
+        sources, seed = self._extract_layer_sources_and_seed(argv)
+        if not sources:
+            return
+
+        seed_context: Dict[str, Any] = {}
+        if program_context:
+            seed_context.update(program_context)
+        seed_context.update(seed)
+
+        soft = ('--help' in argv) or ('-h' in argv)
+        try:
+            directives = discover_cli_directives(
+                sources, seed_context=seed_context, soft=soft
+            )
+        except Exception as e:
+            if soft:
+                logger.debug("yaml discovery failed (soft): %s", e)
+                return
+            raise
+
+        used_short = {a.short for a in self._args if a.short}
+        warned_short = False
+        import warnings as _warnings
+
+        for d in directives:
+            # model-side wins on name collision
+            if any(a.real_name == d.name for a in self._args):
+                continue
+            arg = _directive_to_arg(d)
+            # drop short alias if it collides
+            if arg.short and arg.short in used_short:
+                if not warned_short:
+                    _warnings.warn(
+                        f"short flag -{arg.short} declared by `{d.name}` "
+                        f"collides with an earlier flag; dropping the short alias",
+                        stacklevel=2,
+                    )
+                    warned_short = True
+                arg = Arg(**{**vars(arg), 'short': None})
+            elif arg.short:
+                used_short.add(arg.short)
+
+            self._args.append(arg)
+            if arg.short:
+                self._arg_map[f'-{arg.short}'] = arg
+            self._arg_map[f'--{arg.long}'] = arg
+
+    def _extract_layer_sources_and_seed(
+        self, argv: List[str]
+    ) -> tuple[List[str], Dict[str, Any]]:
+        """Pre-scan argv for `+layer` sources and `++name=value` / `--define.x`
+        seeds (for require-satisfaction). Does not consume tokens."""
+        sources: List[str] = []
+        seed: Dict[str, Any] = {}
+        i = 0
+        while i < len(argv):
+            tok = argv[i]
+            if tok.startswith('++'):
+                rest = tok[2:]
+                if '=' in rest:
+                    k, v = rest.split('=', 1)
+                    seed[k] = v
+                    i += 1
+                else:
+                    if i + 1 < len(argv):
+                        seed[rest] = argv[i + 1]
+                        i += 2
+                    else:
+                        i += 1
+            elif tok.startswith('--define.'):
+                rest = tok[len('--define.'):]
+                if '=' in rest:
+                    k, v = rest.split('=', 1)
+                    seed[k] = v
+                    i += 1
+                else:
+                    if i + 1 < len(argv):
+                        seed[rest] = argv[i + 1]
+                        i += 2
+                    else:
+                        i += 1
+            elif tok.startswith('+') and not tok.startswith('++'):
+                sources.append(tok[1:])
+                i += 1
+            else:
+                i += 1
+        return sources, seed
 
     def _parse_with_subcommands(self, argv: List[str], **kwargs) -> tuple[Optional[T], Dict[str, Any]]:
         """two-phase parsing: split argv at subcommand boundary, parse each side."""
@@ -1233,6 +1364,9 @@ class Program(BaseModel, Generic[T]):
             if arg_obj:  # known top-level option
                 logger.debug(f"arg_obj: {arg_obj}")
                 real_name = arg_obj.real_name
+                # YAML-declared flags route to the same bucket as ++name=value
+                if getattr(arg_obj, 'target', 'model') == 'context':
+                    target_dict = defined_vars
             elif argstr.startswith('--') and '.' in argstr:
                 real_name = argstr[2:]  # use full dotted name as key for nested_args
                 target_dict = nested_args
@@ -1257,8 +1391,11 @@ class Program(BaseModel, Generic[T]):
                 # raw=True: full bypass of all composition
                 if arg_obj and arg_obj.raw:
                     v = _FullRawStr(v)
-                # str-typed fields skip YAML composition — pass through raw
-                elif arg_obj and _is_str_field(arg_obj.arg_type):
+                # str-typed fields skip YAML composition — pass through raw.
+                # Skip this for context-target args: defined_vars goes through
+                # the YAML scalar parser already (so "9000" → int 9000).
+                elif arg_obj and getattr(arg_obj, 'target', 'model') == 'model' \
+                        and _is_str_field(arg_obj.arg_type):
                     v = _RawStr(v)
 
                 target_dict[real_name] = v
