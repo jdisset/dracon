@@ -812,13 +812,16 @@ class Program(BaseModel, Generic[T]):
     def parse_args(self, argv: List[str], **kwargs) -> tuple[Optional[T], Dict[str, Any]]:
         """parses command line arguments and generates configuration."""
 
+        # YAML-discovery pre-pass: surface !require / !set_default declared in
+        # +layer files as real CLI flags. Must run before any branch — both
+        # flat and subcommand parsers consult `self._arg_map` to dispatch
+        # tokens, so the registration has to happen up-front. Reuses the same
+        # loader factory the final run will use so schemes / context types
+        # resolve identically.
+        self._discover_yaml_args(argv, kwargs.get('context'))
+
         if self._subcommand_map:
             return self._parse_with_subcommands(argv, **kwargs)
-
-        # YAML-discovery pre-pass: surface !require / !set_default declared in
-        # +layer files as real CLI flags. Reuses the same loader factory the
-        # final run will use so schemes / context types resolve identically.
-        self._discover_yaml_args(argv, kwargs.get('context'))
 
         self._positionals = [arg for arg in self._args if arg.positional][::-1]  # reverse for pop()
         logger.debug(f"positional args: {self._positionals}, arg map: {self._arg_map}")
@@ -895,16 +898,17 @@ class Program(BaseModel, Generic[T]):
             seed_context.update(program_context)
         seed_context.update(seed)
 
-        soft = ('--help' in argv) or ('-h' in argv)
+        # discovery is purely opportunistic: surface yaml-declared flags so
+        # argv parsing accepts them. The real loader will run later and raise
+        # any genuine composition errors with full diagnostics — discovery
+        # failures here would just be noise, so swallow them all.
         try:
             directives = discover_cli_directives(
-                sources, seed_context=seed_context, soft=soft
+                sources, seed_context=seed_context, soft=True,
             )
         except Exception as e:
-            if soft:
-                logger.debug("yaml discovery failed (soft): %s", e)
-                return
-            raise
+            logger.debug("yaml discovery failed: %s", e)
+            return
 
         used_short = {a.short for a in self._args if a.short}
         warned_short = False
