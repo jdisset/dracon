@@ -109,29 +109,39 @@ class NodeRewriter:
 
     def run(self) -> RewriteOutcome:
         outcome = RewriteOutcome()
-        seen_ids: set[int] = set()
+        # skipped tracks (path-key, id) pairs that returned DEFERRED / NO_CHANGE.
+        # we re-clear it after every MUTATED because mutation can recycle ids
+        # (freed nodes' ids get reused for newly inserted nodes) and may also
+        # unblock previously deferred work.
+        skipped: set[tuple] = set()
+        deferred_pending: dict[tuple, tuple[KeyPath, Node]] = {}
 
         for _ in range(self.max_passes):
             outcome.iterations += 1
             self.comp.make_map()
             candidates = self._ordered_candidates()
-            # filter visited & deferred
-            candidates = [(p, n) for p, n in candidates if id(n) not in seen_ids]
+            candidates = [
+                (p, n) for p, n in candidates if (str(p), id(n)) not in skipped
+            ]
             if not candidates:
                 break
 
             path, node = candidates[0]
-            seen_ids.add(id(node))
             result = self.handler.apply(self.comp, path.copy(), node)
             if result is RewriteResult.MUTATED:
                 outcome.mutated = True
-                # re-discovery happens at top of loop via make_map()
+                skipped.clear()
+                deferred_pending.clear()
             elif result is RewriteResult.DEFERRED:
-                outcome.deferred.append((path.copy(), node))
-            # NO_CHANGE: just keep moving (already in seen_ids)
+                key = (str(path), id(node))
+                deferred_pending[key] = (path.copy(), node)
+                skipped.add(key)
+            else:  # NO_CHANGE
+                skipped.add((str(path), id(node)))
         else:
             raise RuntimeError(
                 f"NodeRewriter[{self.handler.name}] exceeded max_passes={self.max_passes}"
             )
 
+        outcome.deferred = list(deferred_pending.values())
         return outcome

@@ -596,27 +596,22 @@ class DraconLoader:
     @ftrace(watch=[])
     def process_includes(self, comp_res: CompositionResult) -> CompositionResult:
         from dracon.diagnostics import SourceLocation
-        from dracon.instructions import deferred_instruction_value_paths, path_is_under_any
-        comp_res.find_special_nodes('include', lambda n: isinstance(n, IncludeNode))
+        from dracon.instructions import deferred_instruction_value_paths
+        from dracon.rewriter import (
+            NodeRewriter,
+            RewriteHandler,
+            RewriteResult,
+            MutationKind,
+        )
 
-        if not comp_res.special_nodes['include']:
-            return comp_res
+        def discover(node, path):
+            return isinstance(node, IncludeNode)
 
-        skip_paths = deferred_instruction_value_paths(comp_res)
-        include_paths = [
-            path for path in comp_res.special_nodes['include']
-            if not path_is_under_any(path, skip_paths)
-        ]
-        if not include_paths:
-            return comp_res
+        def skip_under(comp):
+            return deferred_instruction_value_paths(comp)
 
-        comp_res.special_nodes['include'] = include_paths
-        comp_res.sort_special_nodes('include')
-        for inode_path in comp_res.pop_all_special('include'):
-            inode = inode_path.get_obj(comp_res.root)
-            assert isinstance(inode, IncludeNode), f"Invalid node type: {type(inode)}"
-
-            # capture include location for trace - use file path from context if available
+        def apply(comp, inode_path, inode):
+            # capture include source location for trace
             include_loc = None
             if inode.start_mark:
                 include_file = None
@@ -624,7 +619,10 @@ class DraconLoader:
                     include_file = inode.context.get('FILE_PATH') or inode.context.get('FILE')
                 loc = SourceLocation.from_mark(inode.start_mark, keypath=str(inode_path))
                 if include_file and loc.file_path in ('<unicode string>', '<unknown>'):
-                    include_loc = SourceLocation(file_path=include_file, line=loc.line, column=loc.column, keypath=loc.keypath)
+                    include_loc = SourceLocation(
+                        file_path=include_file, line=loc.line, column=loc.column,
+                        keypath=loc.keypath,
+                    )
                 else:
                     include_loc = loc
 
@@ -634,43 +632,57 @@ class DraconLoader:
                     new_loader,
                     include_str=inode.value,
                     include_node_path=inode_path,
-                    composition_result=comp_res,
+                    composition_result=comp,
                     custom_loaders=self.custom_loaders,
                     node=inode,
                 )
             except FileNotFoundError:
                 if not inode.optional:
                     raise
+                # optional include missing: drop the node from its parent
                 if inode_path == ROOTPATH:
-                    comp_res.root = DraconMappingNode.make_empty()
+                    comp.root = DraconMappingNode.make_empty()
                 else:
-                    parent = inode_path.parent.get_obj(comp_res.root)
+                    parent = inode_path.parent.get_obj(comp.root)
                     if isinstance(parent, DraconSequenceNode):
                         del parent[int(inode_path[-1])]
                     else:
                         del parent[inode_path[-1]]
-                comp_res.make_map()
-                continue
+                return RewriteResult.MUTATED
 
             # propagate include trace to all nodes from the included file
             if include_loc is not None:
-                # get file path from the root node's context if available
                 file_path = None
                 if hasattr(include_composed.root, 'context'):
-                    file_path = include_composed.root.context.get('FILE_PATH') or include_composed.root.context.get('FILE')
-                self._propagate_include_trace(include_composed.root, include_loc, file_path=file_path)
+                    file_path = (
+                        include_composed.root.context.get('FILE_PATH')
+                        or include_composed.root.context.get('FILE')
+                    )
+                self._propagate_include_trace(
+                    include_composed.root, include_loc, file_path=file_path
+                )
 
-            comp_res.set_composition_at(inode_path, include_composed)
+            comp.set_composition_at(inode_path, include_composed)
 
-            # record include trace
-            if comp_res.trace is not None:
+            if comp.trace is not None:
                 _record_subtree_trace(
-                    comp_res, inode_path,
+                    comp, inode_path,
                     via="include",
                     detail=f"!include {inode.value}",
                 )
+            return RewriteResult.MUTATED
 
-        return self.process_includes(comp_res)
+        handler = RewriteHandler(
+            name='process_includes',
+            discover=discover,
+            apply=apply,
+            trace_label='include',
+            mutation_kind=MutationKind.REPLACE,
+            restart_other_passes=True,
+            skip_under=skip_under,
+        )
+        NodeRewriter(comp_res, handler, order='longest_first').run()
+        return comp_res
 
     def _propagate_include_trace(self, node, include_loc, file_path=None):
         from dracon.composer import CompositionResult
