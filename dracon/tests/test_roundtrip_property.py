@@ -593,6 +593,25 @@ class TestHybridQuoterRegressions:
         assert isinstance(reloaded.events[0], CatEvent)
         assert isinstance(reloaded.events[1], DogEvent)
 
+    def test_scalar_value_starting_with_merge_marker_round_trips(self):
+        """A scalar VALUE that happens to start with ``<<`` must not be
+        promoted to a MergeNode. The ``<<`` syntax is only meaningful as a
+        mapping KEY -- when it appears in value position (or as a sequence
+        item) it's just a string. Falsifying example originally surfaced by
+        the discriminated-union property test.
+        """
+        bus = EventBus(events=[CatEvent(name="<<0")])
+        reloaded = _round_trip(bus)
+        assert reloaded == bus
+
+    def test_scalar_value_starting_with_merge_marker_in_mapping(self):
+        """Same contract under a plain mapping value, no pydantic."""
+        l = make_loader()
+        text = l.dump({"key": "<<0", "list": ["<<1", "<<2"]})
+        reloaded = l.loads(text)
+        assert reloaded["key"] == "<<0"
+        assert list(reloaded["list"]) == ["<<1", "<<2"]
+
 
 # ── dump_to_node wiring ─────────────────────────────────────────────────────
 

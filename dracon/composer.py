@@ -405,10 +405,21 @@ class DraconComposer(Composer):
             event = self.parser.peek_event()
 
             self.resolver.descend_resolver(parent, index)
+            # ``<<...`` is only a merge directive in mapping-key position --
+            # ruamel calls compose_node(parent, None) for keys and
+            # compose_node(parent, item_key) for values. A scalar starting
+            # with ``<<`` in any other slot (mapping value, sequence item,
+            # document root) is just a string.
+            in_key_slot = isinstance(parent, MappingNode) and index is None
             if self.parser.check_event(ScalarEvent):
                 if event.ctag in (INCLUDE_TAG, OPTIONAL_INCLUDE_TAG):
                     node = self.compose_include_node(optional=(event.ctag == OPTIONAL_INCLUDE_TAG))
-                elif event.style is None and MergeKey.is_merge_key(event.value) and self.merging_enabled:
+                elif (
+                    in_key_slot
+                    and event.style is None
+                    and MergeKey.is_merge_key(event.value)
+                    and self.merging_enabled
+                ):
                     node = self.compose_merge_node()
                 else:
                     node = self.compose_scalar_node()
