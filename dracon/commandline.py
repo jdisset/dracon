@@ -495,6 +495,78 @@ def _append_help_arg(content: Text, args: List[Arg]) -> None:
         _append_arg_details(content, help_arg, None, is_positional=False)
 
 
+# keep yaml-side flags in their own panel(s) below the model-side options
+# unless the count is small (then flat layout reads cleaner)
+_GROUPED_HELP_THRESHOLD = 2
+
+
+def _yaml_group_key(arg: "Arg") -> Optional[str]:
+    """yaml-sourced flags group by their source file; absolute paths collapse
+    to basename so the panel title fits. Returns None for model-side flags."""
+    if getattr(arg, 'source', None) != 'yaml':
+        return None
+    src = getattr(arg, 'source_context', None)
+    fp = getattr(src, 'file_path', None) if src is not None else None
+    if not fp or fp == '<unknown>':
+        return ''  # bucket: layered configs without resolvable origin
+    return os.path.basename(fp)
+
+
+def _render_one_arg(content: Text, prg: "Program", arg: "Arg") -> None:
+    field, model = None, prg.conf_type
+    try:
+        for part in arg.real_name.split('.'):
+            field = getattr(model, 'model_fields', {}).get(part)
+            annotation = get_inner_type(field.annotation) if field else None
+            if field and isinstance(annotation, type) and issubclass(annotation, BaseModel):
+                model = annotation
+            elif not field:
+                break
+    except (AttributeError, TypeError):
+        field = None
+    _append_arg_details(content, arg, field, is_positional=False)
+
+
+def _render_options_grouped(
+    content: Text, prg: "Program", all_options_flags: List["Arg"], help_arg: Optional["Arg"],
+) -> None:
+    """Render Options panel(s). Yaml-sourced flags get their own subsection
+    per source file when there are more than _GROUPED_HELP_THRESHOLD of them."""
+    by_group: dict[Optional[str], List["Arg"]] = {}
+    for arg in all_options_flags:
+        by_group.setdefault(_yaml_group_key(arg), []).append(arg)
+
+    yaml_count = sum(len(v) for k, v in by_group.items() if k is not None)
+    model_args = by_group.get(None, [])
+
+    if yaml_count <= _GROUPED_HELP_THRESHOLD:
+        # flat layout: keep every flag in one panel for small layered surfaces
+        content.append("Options:\n", style=COLOR_BOLD_CYAN)
+        for arg in all_options_flags:
+            _render_one_arg(content, prg, arg)
+        if help_arg:
+            _append_arg_details(content, help_arg, None, is_positional=False)
+        return
+
+    if model_args or help_arg:
+        content.append("Options:\n", style=COLOR_BOLD_CYAN)
+        for arg in model_args:
+            _render_one_arg(content, prg, arg)
+        if help_arg:
+            _append_arg_details(content, help_arg, None, is_positional=False)
+
+    # yaml groups: stable order — empty bucket last, named buckets in source order
+    yaml_keys = [k for k in by_group if k is not None and k != '']
+    if '' in by_group:
+        yaml_keys.append('')
+    for key in yaml_keys:
+        title = f"Options from {key}" if key else "Options from layered configs"
+        content.append("\n", style=COLOR_BOLD_CYAN)
+        content.append(f"{title}:\n", style=COLOR_BOLD_CYAN)
+        for arg in by_group[key]:
+            _render_one_arg(content, prg, arg)
+
+
 def print_help(prg: "Program", _) -> None:
     """prints the help message and exits."""
 
@@ -525,22 +597,7 @@ def print_help(prg: "Program", _) -> None:
             _append_arg_details(content, arg, field, is_positional=True)
 
     if all_options_flags or help_arg:
-        content.append("Options:\n", style=COLOR_BOLD_CYAN)
-        for arg in all_options_flags:
-            field, model = None, prg.conf_type
-            try:
-                for part in arg.real_name.split('.'):
-                    field = getattr(model, 'model_fields', {}).get(part)
-                    annotation = get_inner_type(field.annotation) if field else None
-                    if field and isinstance(annotation, type) and issubclass(annotation, BaseModel):
-                        model = annotation
-                    elif not field:
-                        break
-            except (AttributeError, TypeError):
-                field = None
-            _append_arg_details(content, arg, field, is_positional=False)
-        if help_arg:
-            _append_arg_details(content, help_arg, None, is_positional=False)
+        _render_options_grouped(content, prg, all_options_flags, help_arg)
 
     if prg.sections:
         for section in prg.sections:

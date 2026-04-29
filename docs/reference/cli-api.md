@@ -219,6 +219,33 @@ stay because they cover three cases the unified flag rail cannot:
 - A discovered flag's argparse coercion gets in the way; `++` accepts a
   raw YAML literal instead (e.g. `++weights="[0.1, 0.2]"`).
 
+### `--help` rendering
+
+When more than two YAML-declared flags are discovered, `--help` splits them
+into per-source-file subsections under the model-side `Options:` panel:
+
+```
+Usage: myapp [OPTIONS]
+
+Options:
+  -e, --env <env>            environment name
+  --workers <workers>        worker count [default: 4]
+  -h, --help                 Print this help message
+
+Options from analytics.yaml:
+  --api-key <api_key>        API key for the analytics service
+  -b, --batch-size <int>     events per upload batch
+
+Options from db.yaml:
+  --db-host <db_host>        database host [default: localhost]
+  --db-port <int>            database port [default: 5432]
+```
+
+With two or fewer YAML flags total, the help stays flat (one `Options:`
+panel) so small layered surfaces don't get visually noisy. Layered files
+whose source path can't be resolved (rare — only when the static-scan
+fallback fires) bucket under "Options from layered configs:".
+
 ### Inspecting at runtime
 
 Set `DRACON_SHOW_VARS=1` to print a table of every defined variable at the

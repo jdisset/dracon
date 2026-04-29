@@ -14,8 +14,26 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from dracon.cli_param import CliDirective, CliParam, DeclKind
-from dracon.diagnostics import CompositionError
+from dracon.diagnostics import CompositionError, SourceContext
 from dracon.nodes import node_source
+
+
+def _node_source_with_file(node) -> Optional[SourceContext]:
+    """Like ``node_source``, but enriches ``<unicode string>`` source paths
+    with the node's ``FILE_PATH`` / ``FILE`` context — the actual layered file
+    is what we want to surface in help output, not the in-memory stream."""
+    src = node_source(node) if node is not None else None
+    if src is None or src.file_path not in ('<unicode string>', '<unknown>'):
+        return src
+    fp = (getattr(node, 'context', None) or {}).get('FILE_PATH') \
+        or (getattr(node, 'context', None) or {}).get('FILE')
+    if not fp:
+        return src
+    return SourceContext(
+        file_path=fp, line=src.line, column=src.column,
+        keypath=src.keypath, include_trace=src.include_trace,
+        operation_context=src.operation_context,
+    )
 
 # allowed body keys per kind. SSOT for grammar validation.
 _REQUIRE_KEYS = frozenset({"help", "short", "hidden"})
@@ -109,7 +127,7 @@ def parse_directive_body(
     `scalar_value` is also derived from the mapping body when present
     (`body['help']` for `!require`, `body['default']` for `!set_default`).
     """
-    src = node_source(key_node) if key_node is not None else None
+    src = _node_source_with_file(key_node)
 
     if _is_mapping_body(value_node):
         body = _read_mapping_body(value_node, kind)
