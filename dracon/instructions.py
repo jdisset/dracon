@@ -159,54 +159,58 @@ def process_instructions(comp_res: CompositionResult, loader) -> CompositionResu
     Instructions whose evaluation depends on symbols still arriving via
     includes/merges (e.g. `!each(x) ${D}` where D is a LazyConstructable on
     a merge-included vocab tag) raise LazyResolutionPending from deep inside
-    .resolve(). We collect those here and retry after the composition pass
-    finishes, via retry_deferred_instructions.
+    .resolve(). The handler catches that, stashes the instruction in
+    `comp_res._deferred_instructions`, and reports NO_CHANGE so the rewriter
+    moves on. retry_deferred_instructions runs them after merges populate
+    the vocab.
     """
     from dracon.interpolation import LazyResolutionPending
-    # Track processed instructions by node identity, not by path. Sibling
-    # mutations (e.g. pruning a false !if from a sequence) shift siblings
-    # into lower indices — if we keyed on paths, the shifted sibling's
-    # new path would collide with the just-consumed path and be skipped.
-    seen_node_ids: set[int] = set()
+    from dracon.rewriter import (
+        NodeRewriter,
+        RewriteHandler,
+        RewriteResult,
+        MutationKind,
+    )
+
     deferred: list = []
 
-    def _find_instructions():
-        """Scan node_map for instruction nodes, return sorted list."""
-        result = []
-        skip_paths = deferred_instruction_value_paths(comp_res)
-        assert comp_res.node_map is not None
-        for path, node in comp_res.node_map.items():
-            if path_is_under_any(path, skip_paths):
-                continue
-            if id(node) in seen_node_ids:
-                continue
-            tag = getattr(node, 'tag', None)
-            if tag:
-                inst = match_instruct(tag)
-                if inst is not None and not getattr(inst, 'deferred', False):
-                    result.append((inst, path, node))
-        result.sort(key=lambda x: len(x[1]))
-        return result
+    def discover(node, path):
+        tag = getattr(node, 'tag', None)
+        if not tag:
+            return False
+        inst = match_instruct(tag)
+        return inst is not None and not getattr(inst, 'deferred', False)
 
-    comp_res.make_map()
-    instruction_nodes = _find_instructions()
+    def skip_under(comp):
+        return deferred_instruction_value_paths(comp)
 
-    while instruction_nodes:
-        inst, path, node = instruction_nodes.pop(0)
-        assert id(node) not in seen_node_ids, (
-            f"Instruction {inst} at {path} already processed"
-        )
-        seen_node_ids.add(id(node))
+    def apply(comp, path, node):
+        # rediscover the instruction kind from the node's current tag
+        inst = match_instruct(node.tag)
+        if inst is None:
+            return RewriteResult.NO_CHANGE
         try:
-            comp_res = inst.process(comp_res, path.copy(), loader)
+            inst.process(comp, path, loader)
+            return RewriteResult.MUTATED
         except LazyResolutionPending:
-            # an expression referenced a LazyConstructable that can't resolve
-            # yet; retry after includes/merges populate the vocab
-            deferred.append(DeferredInstruction(inst, path.copy(), node))
-            comp_res._deferred_instructions = deferred  # type: ignore[attr-defined]
-        comp_res.make_map()
-        instruction_nodes = _find_instructions()
+            # vocab not yet populated by includes/merges; retry later
+            deferred.append(DeferredInstruction(inst, path, node))
+            comp._deferred_instructions = deferred  # type: ignore[attr-defined]
+            return RewriteResult.NO_CHANGE
 
+    handler = RewriteHandler(
+        name='process_instructions',
+        discover=discover,
+        apply=apply,
+        trace_label='instruction',
+        mutation_kind=MutationKind.REPLACE,
+        restart_other_passes=True,
+        skip_under=skip_under,
+    )
+    # shortest_first matches the previous len-ascending sort: outer
+    # instructions resolve before nested ones in the same scope, which
+    # matters for !define propagation.
+    NodeRewriter(comp_res, handler, order='shortest_first').run()
     comp_res._deferred_instructions = deferred  # type: ignore[attr-defined]
     return comp_res
 
