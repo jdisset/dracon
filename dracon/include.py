@@ -24,6 +24,7 @@ from dracon.loaders.env import read_from_env
 from dracon.loaders.var import read_from_var
 from dracon.loaders.raw import read_raw, read_rawpkg
 from dracon.loaders.cascade import read_cascade
+from dracon.loaders.py import read_from_py
 
 
 DEFAULT_LOADERS: Dict[str, Callable] = {
@@ -34,6 +35,7 @@ DEFAULT_LOADERS: Dict[str, Callable] = {
     'raw': read_raw,
     'rawpkg': read_rawpkg,
     'cascade': read_cascade,
+    'py': read_from_py,
 }
 
 

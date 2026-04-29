@@ -1,0 +1,7 @@
+!set_default target_file: "$DIR/test_setdefault_override_default.yaml"
+
+!define wrapper: !TestWrapper
+  content: !include file:${target_file}
+
+selected_path: ${target_file}
+wrapper_content: ${wrapper}

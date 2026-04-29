@@ -143,6 +143,7 @@ class TestTemplateAnnotations:
         iface = cfg["tmpl"].interface()
         assert iface.kind == SymbolKind.TEMPLATE
         params = {p.name: p for p in iface.params}
+        assert params["events"].annotation == list[Event]
         assert params["events"].annotation_name == "list[Event]"
         assert params["events"].docs == "events to plot"
         # bare type name resolves through scope
@@ -150,6 +151,24 @@ class TestTemplateAnnotations:
         assert params["gate"].annotation_name == "Gate"
         assert iface.return_annotation_name == "PlotData"
         assert iface.return_annotation is PlotData
+
+    def test_typed_require_can_share_name_with_output_key(self):
+        loader = DraconLoader(context={"Event": Event})
+        cfg = loader.loads(
+            """
+            !define Echo: !fn
+              !require:list[Event] events: "events"
+              !require:Event event: "event"
+              event: ${event}
+            tmpl: ${Echo}
+            """
+        )
+        cfg.resolve_all_lazy()
+        params = {p.name: p for p in cfg["tmpl"].interface().params}
+        assert params["events"].annotation == list[Event]
+        assert params["event"].annotation is Event
+        event = Event("clicked")
+        assert cfg["tmpl"](events=[], event=event)["event"] is event
 
     def test_typed_set_default(self):
         loader = DraconLoader(context={"Gate": Gate})

@@ -65,10 +65,38 @@ Inside YAML, `!include` pulls in content from various sources. The part before t
 | `env:` | Environment variable value | `!include env:MY_CONFIG_VAR` |
 | `var:` | In-memory context variable | `!include var:injected_config` |
 | `cascade:` | Walk up directories, merge all matches | `!include cascade:.myapp.yaml` |
+| `py:` | Python symbol (dotted module or file path) | `!include py:torch@Tensor` |
 
 `$DIR` always resolves to the directory of the file containing the `!include`. This means relative paths work regardless of where you run from.
 
 For full details on each scheme, see the reference.
+
+### Python symbols via `py:`
+
+The `py:` scheme pulls a Python symbol (class, function, module attribute) into dracon's symbol table the same way other schemes pull YAML content. It replaces the need for `sys.path` hacks and unifies symbol resolution under the same grammar as the rest of `!include`:
+
+```yaml
+# dotted path — uses normal Python import
+!define Tensor: !include py:torch@Tensor
+!define sqrt:   !include py:math.sqrt         # no selector needed for a single attr
+
+# file path — loaded via importlib.util, no sys.path mutation
+!define Helper: !include py:$DIR/helpers.py@Helper
+
+# the bound symbol is a first-class tag like any other
+thing: !Helper { cfg: 1 }
+```
+
+The same scheme URI grammar works inside `!fn:` for partial application:
+
+```yaml
+loss: !fn:py:torch.nn.CrossEntropyLoss { weight: 0.7 }
+fh:   !fn:py:$DIR/helpers.py@Helper { cfg: 1 }
+```
+
+The bare `!fn:dotted.path` form (no explicit scheme) is shorthand for `!fn:py:dotted.path`, so existing `!fn:math.sqrt` style stays unchanged.
+
+**Public-name filter.** `!include py:mod` with no selector returns the module's public names as a namespace mapping (honouring `__all__` when present, otherwise filtering underscore-prefixed names). `!include py:mod@_private` therefore fails for private names; use `!fn:py:mod._private` when you need explicit access.
 
 ## Cascade includes
 

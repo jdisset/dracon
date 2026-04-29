@@ -498,7 +498,10 @@ class DraconLoader:
             check_pending_requirements(comp, self)
             comp = process_assertions(comp, self)
             comp.make_map()
-            comp, merge_changed = process_merges(comp, loader=self)
+            from dracon.instructions import deferred_instruction_value_paths
+            comp, merge_changed = process_merges(
+                comp, loader=self, skip_paths=deferred_instruction_value_paths(comp)
+            )
             if merge_changed:
                 comp.make_map()
         finally:
@@ -506,7 +509,16 @@ class DraconLoader:
         # retry pass runs with real-error semantics: any remaining
         # unresolved tags surface as genuine CompositionErrors now.
         from dracon.instructions import retry_deferred_instructions
+        had_deferred = bool(getattr(comp, '_deferred_instructions', None))
         comp = retry_deferred_instructions(comp, self)
+        if had_deferred:
+            comp = process_instructions(comp, self)
+            comp = self.process_includes(comp)
+            check_pending_requirements(comp, self)
+            comp = process_assertions(comp, self)
+            comp.make_map()
+            comp, retry_merge_changed = process_merges(comp, loader=self)
+            merge_changed = merge_changed or retry_merge_changed
         comp, delete_changed = delete_unset_nodes(comp)
         if merge_changed or delete_changed:
             comp.make_map()
@@ -572,11 +584,21 @@ class DraconLoader:
     @ftrace(watch=[])
     def process_includes(self, comp_res: CompositionResult) -> CompositionResult:
         from dracon.diagnostics import SourceLocation
+        from dracon.instructions import deferred_instruction_value_paths, path_is_under_any
         comp_res.find_special_nodes('include', lambda n: isinstance(n, IncludeNode))
 
         if not comp_res.special_nodes['include']:
             return comp_res
 
+        skip_paths = deferred_instruction_value_paths(comp_res)
+        include_paths = [
+            path for path in comp_res.special_nodes['include']
+            if not path_is_under_any(path, skip_paths)
+        ]
+        if not include_paths:
+            return comp_res
+
+        comp_res.special_nodes['include'] = include_paths
         comp_res.sort_special_nodes('include')
         for inode_path in comp_res.pop_all_special('include'):
             inode = inode_path.get_obj(comp_res.root)

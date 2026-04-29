@@ -17,14 +17,16 @@ MERGE_TAG = Tag(suffix='tag:yaml.org,2002:merge')
 STR_TAG = Tag(suffix='tag:yaml.org,2002:str')
 
 DRACON_UNSET_VALUE = '__!DRACON_UNSET_VALUE!__'
-DIRECTIVE_TAGS = frozenset({'!set_default', '!define', '!define?', '!require', '!assert'})
-# Tag.suffix stores without '!' prefix; str tags include it
-_DIRECTIVE_SUFFIXES = frozenset({
-    '!set_default', '!define', '!define?', '!require', '!assert',
-    'set_default', 'define', 'define?', 'require', 'assert',
+DIRECTIVE_TAGS = frozenset({
+    '!set_default', '!define', '!define?', '!require', '!returns', '!assert',
 })
-# prefixes that indicate a typed directive variant (e.g. !define:float, !set_default:int)
-_DIRECTIVE_TYPED_PREFIXES = ('!define:', '!define?:', '!set_default:')
+# Tag.suffix stores without '!' prefix; str tags include it.
+_DIRECTIVE_SUFFIXES = frozenset(DIRECTIVE_TAGS) | frozenset(
+    tag[1:] for tag in DIRECTIVE_TAGS
+)
+_DIRECTIVE_TYPED_PREFIXES = (
+    '!define:', '!define?:', '!set_default:', '!require:', '!returns:',
+)
 
 
 _directive_str_cache: dict[str, bool] = {}
@@ -47,7 +49,7 @@ def _is_directive_key(key_node):
     if cached is not None:
         return cached
     result = False
-    if tag_str in DIRECTIVE_TAGS:
+    if tag_str in _DIRECTIVE_SUFFIXES:
         result = True
     else:
         for p in _DIRECTIVE_TYPED_PREFIXES:

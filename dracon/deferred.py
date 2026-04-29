@@ -213,6 +213,22 @@ class DeferredNode(ContextNode, Generic[T]):
 
         composition.set_at(self.path, value)
 
+        if self._clear_ctx:
+            for key in self._clear_ctx:
+                composition.defined_vars.pop(key, None)
+                composition.default_vars.discard(key)
+
+            def _clear_stale_context(node):
+                ctx = getattr(node, 'context', None)
+                if ctx is not None:
+                    for key in self._clear_ctx:
+                        ctx.pop(key, None)
+
+            walk_node(self.path.get_obj(composition.root), _clear_stale_context)
+
+        for key in self._clear_ctx:
+            self._loader.context.pop(key, None)
+
         # update loader context with runtime values so !require checks see them
         if context:
             self._loader.update_context(context)

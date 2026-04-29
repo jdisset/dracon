@@ -1,0 +1,10 @@
+!set_default target_file: "$DIR/test_setdefault_override_default.yaml"
+
+!define inner: !TestWrapper
+  content: !include file:${target_file}
+
+!define outer: !TestWrapper
+  content:
+    nested: ${inner.content.label}
+
+wrapper_content: ${outer}

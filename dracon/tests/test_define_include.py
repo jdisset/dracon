@@ -66,3 +66,19 @@ def test_vocab_greet_nested_define_chain():
     config = get_config("dracon:tests/test_vocab_define_propagation_nested.yaml")
     assert config["result"]["a"] == "Hello, alice!"
     assert config["result"]["b"] == "Hello, alice!"
+
+
+def test_vocab_greet_used_inside_each():
+    """`!each(x) ${[D, D]}` where D = !define'd vocab callable. The !each
+    composition-time evaluation must see D's resolved value, which requires
+    the vocab to be available when the LazyConstructable resolves."""
+    config = get_config("dracon:tests/test_vocab_define_propagation_each.yaml")
+    assert len(config["items"]) == 2
+    assert config["items"][0]["val"] == "Hello, world!"
+    assert config["items"][1]["val"] == "Hello, world!"
+
+
+def test_vocab_greet_used_inside_if():
+    """`!if ${len(D)}` where D = !define'd vocab callable."""
+    config = get_config("dracon:tests/test_vocab_define_propagation_if.yaml")
+    assert config["enabled"] is True

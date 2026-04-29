@@ -115,6 +115,43 @@ Default merge strategy: `<<{<+}[<~]` (recursive append, new wins).
 
 ---
 
+## py:reference
+
+Load a Python symbol (class, function, module attribute) into dracon's symbol table. Unifies Python-side resolution with the rest of `!include` — same grammar, same selector, same layering.
+
+```yaml
+# dotted module path — uses normal Python import
+!define Tensor: !include py:torch@Tensor
+
+# the module itself as a namespace; the @selector picks the attribute
+!define sqrt: !include py:math@sqrt
+
+# attribute shorthand: when the dotted path is not importable as a module,
+# the last segment is treated as a name on the prefix
+!define sqrt: !include py:math.sqrt
+
+# file path — loaded via importlib.util, no sys.path mutation
+!define Helper: !include py:$DIR/helpers.py@Helper
+
+# the bound symbol is a first-class tag like any other
+h: !Helper { cfg: 1 }
+```
+
+**Forms**
+
+| Path | Behaviour |
+|------|-----------|
+| `module.path` | Imports the module. Returns a namespace mapping of public names. |
+| `module.path@Name` | Imports the module; `@Name` picks that attribute. |
+| `module.attr` (not importable as module) | Falls back to `module` + `getattr(..., attr)`. Single symbol. |
+| `/abs/path.py` or `$DIR/path.py` | Loads the file directly with `importlib.util.spec_from_file_location`. |
+
+**Public-name filter.** Namespace-form includes (no `@selector`) only expose names in `__all__`, or — when `__all__` is absent — names that don't start with an underscore. Use `!fn:py:mod._name` for explicit access to private attributes.
+
+**Use inside `!fn:`.** Any scheme URI can be used as the `!fn:` target, so `!fn:py:torch.nn.Linear { in: 10 }` is the scheme-qualified equivalent of `!fn:torch.nn.Linear { in: 10 }`. The bare dotted form `!fn:torch.nn.Linear` stays as shorthand for `!fn:py:torch.nn.Linear`.
+
+---
+
 ## Selectors
 
 Any scheme can include a `@keypath` selector to extract a subtree from the loaded content:

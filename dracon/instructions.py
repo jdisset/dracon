@@ -2,6 +2,7 @@
 # MIT License - see LICENSE file for details.
 
 ## {{{                          --     imports     --
+from dataclasses import dataclass
 from typing import Any, Optional
 import re
 from dracon.utils import ftrace, deepcopy
@@ -11,7 +12,7 @@ from dracon.composer import (
     DraconMappingNode,
     DraconSequenceNode,
 )
-from dracon.utils import ShallowDict, values_equal
+from dracon.utils import ShallowDict
 from ruamel.yaml.nodes import Node
 from dracon.keypath import KeyPath, KeyPathToken, MAPPING_KEY
 from dracon.nodes import node_source
@@ -80,6 +81,52 @@ class Instruction:
         raise NotImplementedError
 
 
+@dataclass
+class DeferredInstruction:
+    inst: Instruction
+    path: KeyPath
+    node: Node
+
+
+def _path_has_prefix(path: KeyPath, prefix: KeyPath) -> bool:
+    path_parts = tuple(path.simplified().parts)
+    prefix_parts = tuple(prefix.simplified().parts)
+    return len(path_parts) >= len(prefix_parts) and path_parts[:len(prefix_parts)] == prefix_parts
+
+
+def path_is_under_any(path: KeyPath, prefixes: tuple[KeyPath, ...]) -> bool:
+    return any(_path_has_prefix(path, prefix) for prefix in prefixes)
+
+
+def _current_deferred_instruction_path(
+    comp_res: CompositionResult, deferred: DeferredInstruction
+) -> KeyPath | None:
+    assert comp_res.node_map is not None
+    for path, node in comp_res.node_map.items():
+        if node is deferred.node:
+            return path
+    try:
+        if deferred.path.get_obj(comp_res.root) is deferred.node:
+            return deferred.path
+    except Exception:
+        return None
+    return None
+
+
+def deferred_instruction_value_paths(comp_res: CompositionResult) -> tuple[KeyPath, ...]:
+    """Return value subtrees owned by deferred parent instructions."""
+    pending = getattr(comp_res, '_deferred_instructions', None) or []
+    if not pending:
+        return ()
+    comp_res.make_map()
+    paths = []
+    for deferred in pending:
+        path = _current_deferred_instruction_path(comp_res, deferred)
+        if path is not None:
+            paths.append(path.removed_mapping_key())
+    return tuple(paths)
+
+
 
 
 @ftrace()
@@ -103,8 +150,11 @@ def process_instructions(comp_res: CompositionResult, loader) -> CompositionResu
     def _find_instructions():
         """Scan node_map for instruction nodes, return sorted list."""
         result = []
+        skip_paths = deferred_instruction_value_paths(comp_res)
         assert comp_res.node_map is not None
         for path, node in comp_res.node_map.items():
+            if path_is_under_any(path, skip_paths):
+                continue
             if id(node) in seen_node_ids:
                 continue
             tag = getattr(node, 'tag', None)
@@ -129,7 +179,8 @@ def process_instructions(comp_res: CompositionResult, loader) -> CompositionResu
         except LazyResolutionPending:
             # an expression referenced a LazyConstructable that can't resolve
             # yet; retry after includes/merges populate the vocab
-            deferred.append((inst, path))
+            deferred.append(DeferredInstruction(inst, path.copy(), node))
+            comp_res._deferred_instructions = deferred  # type: ignore[attr-defined]
         comp_res.make_map()
         instruction_nodes = _find_instructions()
 
@@ -151,8 +202,11 @@ def retry_deferred_instructions(
         return comp_res
     comp_res._deferred_instructions = []  # type: ignore[attr-defined]
     comp_res.make_map()
-    for inst, path in pending:
-        comp_res = inst.process(comp_res, path.copy(), loader)
+    for deferred in pending:
+        path = _current_deferred_instruction_path(comp_res, deferred)
+        if path is None:
+            continue
+        comp_res = deferred.inst.process(comp_res, path.copy(), loader)
         comp_res.make_map()
     return comp_res
 
@@ -163,6 +217,8 @@ def process_assertions(comp_res: CompositionResult, loader) -> CompositionResult
     assert_nodes = []
 
     def find_assert_nodes(node: Node, path: KeyPath):
+        if path_is_under_any(path, skip_paths):
+            return
         tag = getattr(node, 'tag', None)
         if tag:
             inst = match_instruct(tag)
@@ -170,6 +226,7 @@ def process_assertions(comp_res: CompositionResult, loader) -> CompositionResult
                 assert_nodes.append((inst, path))
 
     comp_res.make_map()
+    skip_paths = deferred_instruction_value_paths(comp_res)
     comp_res.walk(find_assert_nodes)
     assert_nodes = sorted(assert_nodes, key=lambda x: len(x[1]))
 
@@ -227,17 +284,39 @@ def _rewrite_fn_return_key(template_node):
     return found
 
 
-def _fn_from_loader_str(include_str, loader, source, name):
-    """Create a DraconCallable from a loader reference string (e.g. 'file:/path/foo.yaml')."""
+def fn_template_from_loader_content(raw_content, file_ctx, components, loader, source, name):
+    """Create a DraconCallable from raw loader content without post-processing it."""
     from dracon.callable import DraconCallable
     from dracon.diagnostics import CompositionError
+
+    if not isinstance(raw_content, str):
+        loader_name = components.main_path.split(':', 1)[0]
+        raise CompositionError(
+            f"!fn: loader '{loader_name}' returned {type(raw_content).__name__}, expected str",
+            context=source,
+        )
+    from dracon.loader import compose_config_from_str as raw_compose
+    raw_comp = raw_compose(loader.yaml, raw_content)
+    if components.key_path:
+        raw_comp = raw_comp.rerooted(KeyPath(components.key_path))
+    return DraconCallable(
+        template_node=raw_comp.root, loader=loader, source=source,
+        file_context=file_ctx, name=name,
+    )
+
+
+def _fn_from_loader_str(include_str, loader, source, name):
+    """Create a DraconCallable from a loader reference string (e.g. 'file:/path/foo.yaml')."""
+    from dracon.diagnostics import CompositionError
+    from dracon.include import parse_include_str
 
     if ':' not in include_str:
         raise CompositionError(
             f"!fn scalar must be a loader reference (file:..., pkg:...), got '{include_str}'",
             context=source,
         )
-    loader_name, path = include_str.split(':', 1)
+    components = parse_include_str(include_str)
+    loader_name, path = components.main_path.split(':', 1)
     if loader_name not in loader.custom_loaders:
         available = ', '.join(sorted(loader.custom_loaders.keys()))
         raise CompositionError(
@@ -245,17 +324,7 @@ def _fn_from_loader_str(include_str, loader, source, name):
             context=source,
         )
     raw_content, file_ctx = loader.custom_loaders[loader_name](path, draconloader=loader)
-    if not isinstance(raw_content, str):
-        raise CompositionError(
-            f"!fn: loader '{loader_name}' returned {type(raw_content).__name__}, expected str",
-            context=source,
-        )
-    from dracon.loader import compose_config_from_str as raw_compose
-    raw_comp = raw_compose(loader.yaml, raw_content)
-    return DraconCallable(
-        template_node=raw_comp.root, loader=loader, source=source,
-        file_context=file_ctx, name=name,
-    )
+    return fn_template_from_loader_content(raw_content, file_ctx, components, loader, source, name)
 
 
 def _has_loader_scheme(value_str, loaders):
@@ -547,25 +616,51 @@ class SetDefault(Define):
     def process(self, comp_res: CompositionResult, path: KeyPath, loader):
         var_name, value, parent_node = self.get_name_and_value(comp_res, path, loader)
 
-        # if an authoritative binding already exists upstream (loader.context,
-        # e.g. CLI ++var or context= kwarg), keep it in defined_vars too.
-        # otherwise downstream consumers that re-propagate defined_vars
-        # (LazyConstructable.resolve) would reinject the default and clobber
-        # the real value in sub-composition node contexts.
-        effective = loader.context[var_name] if var_name in loader.context else value
+        parent_context = getattr(parent_node, 'context', None) or {}
+        parent_soft_keys = getattr(parent_context, '_soft_keys', set()) or set()
+        context_has_value = var_name in loader.context and var_name in parent_context
+        defined_has_value = var_name in comp_res.defined_vars
+        existing_is_default = var_name in comp_res.default_vars
+        if context_has_value:
+            effective = loader.context[var_name]
+            is_soft_default = False
+        elif var_name in parent_context:
+            effective = parent_context[var_name]
+            is_soft_default = var_name in parent_soft_keys
+        elif defined_has_value and not existing_is_default:
+            effective = comp_res.defined_vars[var_name]
+            is_soft_default = False
+        elif defined_has_value:
+            effective = value
+            is_soft_default = True
+        else:
+            effective = value
+            is_soft_default = True
 
-        def _add_and_soften(node):
+        def _add_effective(node):
             add_to_context({var_name: effective}, node, merge_key=cached_merge_key('<<{>~}[>~]'))
             ctx = getattr(node, 'context', None)
             sk = getattr(ctx, '_soft_keys', None)
             if sk is not None and var_name in ctx:
-                sk.add(var_name)
+                if is_soft_default:
+                    sk.add(var_name)
+                else:
+                    sk.discard(var_name)
 
-        walk_node(node=parent_node, callback=_add_and_soften)
+        walk_node(node=parent_node, callback=_add_effective)
 
-        comp_res.defined_vars.setdefault(var_name, effective)
-        if var_name not in comp_res.defined_vars or values_equal(comp_res.defined_vars[var_name], effective):
+        if context_has_value or (
+            var_name in parent_context and var_name not in parent_soft_keys
+        ):
+            comp_res.defined_vars[var_name] = effective
+            comp_res.default_vars.discard(var_name)
+        elif not defined_has_value:
+            comp_res.defined_vars[var_name] = effective
             comp_res.default_vars.add(var_name)
+        elif existing_is_default:
+            comp_res.default_vars.add(var_name)
+        else:
+            comp_res.default_vars.discard(var_name)
 
         return comp_res
 

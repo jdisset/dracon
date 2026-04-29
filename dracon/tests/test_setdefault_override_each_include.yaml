@@ -1,0 +1,8 @@
+!set_default target_file: "$DIR/test_setdefault_override_default.yaml"
+
+!define group: !TestWrapper
+  content:
+    !each(i) ${[1]}:
+      item_${i}: !include file:${target_file}
+
+wrapper_content: ${group}

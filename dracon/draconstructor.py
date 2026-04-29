@@ -317,6 +317,10 @@ class Draconstructor(Constructor):
                 from dracon.raw import RawExpression
                 return RawExpression(node.value)
 
+            # !__py__: node carries a direct Python object from the py: loader
+            if tag == '!__py__':
+                return getattr(node, 'py_value', None)
+
             # !fn:path universal binding
             if tag and isinstance(tag, str) and tag.startswith('!fn:') and target_type is None:
                 return self._construct_fn_target(tag[4:], node, current_loader_context)
@@ -417,6 +421,16 @@ class Draconstructor(Constructor):
         Unlike the old _resolve_fn_target, accepts any symbol kind (types, pipes, etc).
         Returns the resolved value or raises ConstructorError.
         """
+        # scheme URI first — keeps symbol resolution and !include on the same rail
+        if self._is_scheme_uri(name):
+            try:
+                return self._resolve_via_scheme(name, node)
+            except (ImportError, FileNotFoundError, AttributeError, KeyError) as e:
+                raise ConstructorError(
+                    None, None,
+                    f"!fn:{name} -- scheme resolution failed: {e}",
+                    getattr(node, 'start_mark', None),
+                ) from e
         # context/symbol table lookup
         val = loader_context.get(name)
         if val is not None:
@@ -445,6 +459,67 @@ class Draconstructor(Constructor):
             f"!fn:{name} -- cannot resolve '{name}' as context name or import path{hint}",
             node.start_mark,
         )
+
+    def _is_scheme_uri(self, target: str) -> bool:
+        """True iff target starts with a registered loader scheme (py:, pkg:, file:, ...)."""
+        if ':' not in target:
+            return False
+        loader = self.dracon_loader
+        if loader is None:
+            return False
+        scheme = target.split(':', 1)[0]
+        return scheme in getattr(loader, 'custom_loaders', {})
+
+    def _resolve_via_scheme(self, target: str, node):
+        """Resolve a scheme URI (py:..., pkg:...@sel, etc.) to a Python value.
+
+        Single source of truth for !fn:scheme:... — delegates to the same loader
+        registry used by !include, applies the @selector, and extracts the
+        underlying Python value when the loader returned a PyValueNode.
+        """
+        from dracon.loaders.py import PyValueNode
+        from dracon.include import parse_include_str
+        from dracon.composer import CompositionResult
+        from dracon.keypath import KeyPath
+        from dracon.nodes import node_source
+
+        components = parse_include_str(target)
+        scheme, path = components.main_path.split(':', 1)
+        loader = self.dracon_loader
+        raw, _ctx = loader.custom_loaders[scheme](
+            path, node=node, draconloader=loader
+        )
+
+        # unwrap a direct symbol result
+        if isinstance(raw, PyValueNode) and not components.key_path:
+            return raw.py_value
+
+        if isinstance(raw, str):
+            from dracon.instructions import fn_template_from_loader_content
+            return fn_template_from_loader_content(
+                raw, _ctx, components, loader, node_source(node), target
+            )
+
+        # normalise to a CompositionResult so selector rerooting works uniformly
+        if isinstance(raw, CompositionResult):
+            comp = raw
+        elif hasattr(raw, 'tag'):
+            comp = CompositionResult(root=raw)
+        else:
+            raise ConstructorError(
+                None, None,
+                f"!fn:{target} -- loader '{scheme}' returned unsupported type {type(raw).__name__}",
+                getattr(node, 'start_mark', None),
+            )
+
+        if components.key_path:
+            comp = comp.rerooted(KeyPath(components.key_path))
+
+        root = comp.root
+        if isinstance(root, PyValueNode):
+            return root.py_value
+        # fallback: construct the node and let its tag handling apply
+        return self.dracon_loader.load_composition_result(comp)
 
     def _construct_kwargs(self, node):
         """Extract kwargs dict from a mapping node, or empty dict."""

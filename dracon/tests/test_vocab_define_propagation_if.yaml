@@ -1,0 +1,7 @@
+<<(<): !include pkg:dracon:tests/test_vocab_define_propagation_vocab.yaml
+
+!define D: !greet
+  name: world
+
+!if ${len(D) > 0}:
+  enabled: true

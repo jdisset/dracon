@@ -217,6 +217,18 @@ class LazyProtocol(Protocol):
 _LC_SENTINEL = object()
 
 
+class LazyResolutionPending(Exception):
+    """Signal that a LazyConstructable could not resolve *yet*: a subsequent
+    composition step (process_includes, process_merges) may make resolution
+    succeed. Propagates unchanged through evaluate_expression; caught by
+    process_instructions, which defers the triggering instruction for retry.
+
+    The loader's `_composition_phase` flag gates this behavior: while True,
+    LazyConstructable raises Pending on failure; once False (after retry),
+    failures propagate as normal CompositionError.
+    """
+
+
 class LazyConstructable:
     """Deferred construction marker for !define with type tags.
     NOT a proxy; resolved by the interpolation engine before user code sees it."""
@@ -238,7 +250,7 @@ class LazyConstructable:
 
         from dracon.composer import CompositionResult, walk_node
         from dracon.diagnostics import CompositionError
-        from dracon.merge import add_to_context
+        from dracon.merge import add_to_context, cached_merge_key
         from functools import partial
 
         if self._resolving:
@@ -250,12 +262,29 @@ class LazyConstructable:
         try:
             comp = CompositionResult(root=self._node)
             if self._defined_vars:
-                walk_node(comp.root, partial(add_to_context, self._defined_vars))
+                # existing-wins: node contexts already carry authoritative
+                # bindings (from outer !define / loader.context / CLI);
+                # defined_vars is only here to RESTORE siblings that were not
+                # present in the original node context, not to CLOBBER them.
+                walk_node(
+                    comp.root,
+                    partial(
+                        add_to_context,
+                        self._defined_vars,
+                        merge_key=cached_merge_key('<<{>~}[>~]'),
+                    ),
+                )
             self._result = self._loader.load_composition_result(comp)
             if self._post_process is not None:
                 self._result = self._post_process(self._result)
             return self._result
         except Exception as e:
+            # during composition, a failure may be transient: an unresolved
+            # tag could become available after includes/merges run. Signal
+            # "retry later" instead of burning the call stack with a real
+            # error. Outside the composition phase, fail loud.
+            if getattr(self._loader, '_composition_phase', False):
+                raise LazyResolutionPending(e) from e
             tag = getattr(self._node, 'tag', '?')
             raise CompositionError(
                 f"error constructing {tag} "

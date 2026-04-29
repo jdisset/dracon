@@ -1,0 +1,8 @@
+<<(<): !include pkg:dracon:tests/test_vocab_define_propagation_vocab.yaml
+
+!define D: !greet
+  name: world
+
+items:
+  !each(x) ${[D, D]}:
+    - val: ${x}

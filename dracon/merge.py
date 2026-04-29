@@ -114,7 +114,7 @@ def _realize_tagged_merge_source(merge_node, loader):
 
 
 @ftrace(watch=[])
-def process_merges(comp_res, loader=None):
+def process_merges(comp_res, loader=None, skip_paths=()):
     """
     Process all merge nodes in the composition result recursively until there are no more merges to process.
     Returns the modified composition result and whether any merges were performed.
@@ -127,6 +127,12 @@ def process_merges(comp_res, loader=None):
         # find all merge nodes (re-discover each iteration so paths are fresh
         # after deletions that may renumber internal __merge_N_ keys)
         comp_res.find_special_nodes('merge', lambda n: isinstance(n, MergeNode))
+        if skip_paths:
+            from dracon.instructions import path_is_under_any
+            comp_res.special_nodes['merge'] = [
+                path for path in comp_res.special_nodes['merge']
+                if not path_is_under_any(path, tuple(skip_paths))
+            ]
         comp_res.sort_special_nodes('merge')
 
         if not comp_res.special_nodes['merge']:

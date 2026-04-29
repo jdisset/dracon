@@ -93,6 +93,22 @@ def _reconstruct_partial(func_path, kwargs):
     """Pickle reconstruction: re-imports the function from its dotted path."""
     from typing import Any
     from dracon.draconstructor import resolve_type
+    if func_path.startswith('py:'):
+        from dracon.composer import CompositionResult
+        from dracon.include import parse_include_str
+        from dracon.keypath import KeyPath
+        from dracon.loaders.py import PyValueNode, read_from_py
+
+        components = parse_include_str(func_path)
+        _scheme, path = components.main_path.split(':', 1)
+        raw, _ctx = read_from_py(path)
+        comp = CompositionResult(root=raw)
+        if components.key_path:
+            comp = comp.rerooted(KeyPath(components.key_path))
+        root = comp.root
+        if not isinstance(root, PyValueNode):
+            raise ValueError(f"cannot unpickle DraconPartial: '{func_path}' is not a Python symbol")
+        return DraconPartial(func_path, root.py_value, kwargs)
     if '.' not in func_path:
         raise ValueError(
             f"cannot unpickle DraconPartial with context-only name '{func_path}' "

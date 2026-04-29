@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import inspect
 import typing
+import ast
+import builtins
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol, TypeVar, runtime_checkable
@@ -300,14 +302,91 @@ def resolve_annotation(name: str | None, scope: Any) -> Any:
     `Event`. Returns `MISSING` when nothing matches; callers keep the
     string form on `annotation_name`.
     """
-    if not name or scope is None:
+    if not name:
         return _MISSING
-    for candidate in (name, name.rstrip("'\""), name.split('[', 1)[0].strip()):
-        if candidate and candidate in scope:
+    name = name.strip()
+    if not name:
+        return _MISSING
+    for candidate in (name, name.rstrip("'\"")):
+        if scope is not None and candidate and candidate in scope:
             try:
                 return scope[candidate]
             except Exception:
                 pass
+    resolved = _resolve_annotation_expr(name, scope)
+    if resolved is not _MISSING:
+        return resolved
+    base_name = name.split('[', 1)[0].strip()
+    if base_name and scope is not None and base_name in scope:
+        try:
+            return scope[base_name]
+        except Exception:
+            pass
+    return _MISSING
+
+
+def _resolve_annotation_expr(expr: str, scope: Any) -> Any:
+    try:
+        parsed = ast.parse(expr, mode='eval')
+    except SyntaxError:
+        return _MISSING
+    return _resolve_annotation_ast(parsed.body, scope)
+
+
+def _lookup_annotation_name(name: str, scope: Any) -> Any:
+    if name == 'None':
+        return type(None)
+    if name == 'typing':
+        return typing
+    if scope is not None and name in scope:
+        try:
+            return scope[name]
+        except Exception:
+            pass
+    if hasattr(builtins, name):
+        return getattr(builtins, name)
+    if hasattr(typing, name):
+        return getattr(typing, name)
+    return _MISSING
+
+
+def _resolve_annotation_ast(node: ast.AST, scope: Any) -> Any:
+    if isinstance(node, ast.Name):
+        return _lookup_annotation_name(node.id, scope)
+    if isinstance(node, ast.Constant):
+        if node.value is None:
+            return type(None)
+        if isinstance(node.value, str):
+            return _lookup_annotation_name(node.value, scope)
+        return _MISSING
+    if isinstance(node, ast.Attribute):
+        base = _resolve_annotation_ast(node.value, scope)
+        if base is _MISSING:
+            return _MISSING
+        return getattr(base, node.attr, _MISSING)
+    if isinstance(node, ast.Tuple):
+        values = tuple(_resolve_annotation_ast(elt, scope) for elt in node.elts)
+        if any(value is _MISSING for value in values):
+            return _MISSING
+        return values
+    if isinstance(node, ast.Subscript):
+        origin = _resolve_annotation_ast(node.value, scope)
+        args = _resolve_annotation_ast(node.slice, scope)
+        if origin is _MISSING or args is _MISSING:
+            return _MISSING
+        try:
+            return origin[args]
+        except Exception:
+            return _MISSING
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        left = _resolve_annotation_ast(node.left, scope)
+        right = _resolve_annotation_ast(node.right, scope)
+        if left is _MISSING or right is _MISSING:
+            return _MISSING
+        try:
+            return left | right
+        except Exception:
+            return _MISSING
     return _MISSING
 
 
