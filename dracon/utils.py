@@ -50,6 +50,7 @@ class SoftPriorityDict(dict):
     values act as true defaults that any !define can override, even across
     merge/include boundaries where instruction ordering can't guarantee it.
     """
+
     __slots__ = ('_soft_keys',)
 
     def __init__(self, *args, **kwargs):
@@ -148,6 +149,8 @@ _dict_like_cache: dict[type, bool] = {}
 
 
 def dict_like(obj) -> bool:
+    if isinstance(obj, type):
+        return False
     cls = type(obj)
     cached = _dict_like_cache.get(cls)
     if cached is not None:
@@ -209,6 +212,8 @@ _list_like_cache: dict[type, bool] = {}
 
 
 def list_like(obj) -> bool:
+    if isinstance(obj, type):
+        return False
     cls = type(obj)
     cached = _list_like_cache.get(cls)
     if cached is not None:
@@ -219,10 +224,7 @@ def list_like(obj) -> bool:
     if isinstance(obj, (list, tuple)):
         _list_like_cache[cls] = True
         return True
-    result = (
-        all(callable(getattr(obj, m, None)) for m in _LIST_METHODS)
-        and not dict_like(obj)
-    )
+    result = all(callable(getattr(obj, m, None)) for m in _LIST_METHODS) and not dict_like(obj)
     _list_like_cache[cls] = result
     return result
 
@@ -232,7 +234,7 @@ def values_equal(a: object, b: object) -> bool:
     if a is b:
         return True
     try:
-        result = (a == b)
+        result = a == b
     except Exception:
         return False
     try:
