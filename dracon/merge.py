@@ -113,123 +113,129 @@ def _realize_tagged_merge_source(merge_node, loader):
         return merge_node
 
 
-@ftrace(watch=[])
-def process_merges(comp_res, loader=None, skip_paths=()):
-    """
-    Process all merge nodes in the composition result recursively until there are no more merges to process.
-    Returns the modified composition result and whether any merges were performed.
-    """
+def _apply_one_merge(comp_res, merge_key_path: KeyPath, loader):
+    """apply a single merge: delete the merge-key, splice the value into parent
+    via merged(), record trace, propagate defined_vars."""
     from dracon.composer import walk_node
     from functools import partial
-    any_merges = False
 
-    while True:
-        # find all merge nodes (re-discover each iteration so paths are fresh
-        # after deletions that may renumber internal __merge_N_ keys)
-        comp_res.find_special_nodes('merge', lambda n: isinstance(n, MergeNode))
-        if skip_paths:
-            from dracon.instructions import path_is_under_any
-            comp_res.special_nodes['merge'] = [
-                path for path in comp_res.special_nodes['merge']
-                if not path_is_under_any(path, tuple(skip_paths))
-            ]
-        comp_res.sort_special_nodes('merge')
+    merge_path = merge_key_path.removed_mapping_key()
+    merge_node = merge_path.get_obj(comp_res.root)
+    parent_path = merge_path.copy().up()
+    node_key = merge_path[-1]
+    parent_node = parent_path.get_obj(comp_res.root)
 
-        if not comp_res.special_nodes['merge']:
-            break
+    if not dict_like(parent_node):
+        raise CompositionError(
+            f"Parent of merge node must be a dictionary, got {type(parent_node).__name__}",
+            context=node_source(merge_node),
+        )
 
-        any_merges = True
+    if node_key not in parent_node:
+        raise CompositionError(
+            f"Merge key '{node_key}' not found in parent node",
+            context=node_source(merge_node),
+        )
+    key_node = parent_node.get_key(node_key)
+    if not isinstance(key_node, MergeNode):
+        raise CompositionError(
+            f"Expected merge node, got {type(key_node).__name__} at key '{node_key}'",
+            context=node_source(key_node),
+        )
 
-        # process one merge at a time then re-discover, matching the pattern
-        # used by process_instructions -- this avoids stale paths when bare
-        # duplicate merge keys (e.g. two `<<:`) share the same raw value and
-        # deleting one causes renumbering in _recompute_map()
-        merge_path = next(comp_res.pop_all_special('merge'))
+    try:
+        merge_key = cached_merge_key(key_node.merge_key_raw)
+    except Exception as e:
+        raise CompositionError(
+            f"Invalid merge key '{key_node.merge_key_raw}': {e}",
+            context=node_source(merge_node),
+        ) from e
 
-        # get value path (remove mapping key)
-        merge_path = merge_path.removed_mapping_key()
-        merge_node = merge_path.get_obj(comp_res.root)
-        parent_path = merge_path.copy().up()
-        node_key = merge_path[-1]
-        parent_node = parent_path.get_obj(comp_res.root)
+    del parent_node[node_key]
 
-        if not dict_like(parent_node):
-            raise CompositionError(
-                f"Parent of merge node must be a dictionary, got {type(parent_node).__name__}",
-                context=node_source(merge_node),
-            )
+    if merge_key.keypath:
+        parent_path = parent_path + KeyPath(merge_key.keypath)
 
-        if node_key not in parent_node:
-            raise CompositionError(f"Merge key '{node_key}' not found in parent node", context=node_source(merge_node))
-        key_node = parent_node.get_key(node_key)
-        if not isinstance(key_node, MergeNode):
-            raise CompositionError(
-                f"Expected merge node, got {type(key_node).__name__} at key '{node_key}'",
-                context=node_source(key_node),
-            )
+    new_parent = parent_path.get_obj(comp_res.root)
+    # realise tagged merge source (!Pool, !Thing) *now* so its output is what gets merged
+    merge_node = _realize_tagged_merge_source(merge_node, loader)
+    # propagate parent context into merge source so !define beats !set_default,
+    # existing-wins preserves the include's own !define values
+    parent_ctx = getattr(new_parent, 'context', None)
+    if parent_ctx and any(not k.startswith('__') for k in parent_ctx):
+        merge_node = deepcopy(merge_node)
+        from dracon.composer import walk_node as _walk
+        _walk(merge_node, partial(add_to_context, parent_ctx, merge_key=cached_merge_key('<<{>~}[>~]')))
+    new_parent = merged(new_parent, merge_node, merge_key)
+    if not isinstance(new_parent, Node):
+        raise CompositionError(
+            f"Merge produced {type(new_parent).__name__} instead of a Node"
+        )
 
-        try:
-            merge_key = cached_merge_key(key_node.merge_key_raw)
-        except Exception as e:
-            raise CompositionError(
-                f"Invalid merge key '{key_node.merge_key_raw}': {e}",
-                context=node_source(merge_node),
-            ) from e
+    comp_res.set_at(parent_path, new_parent)
 
-        del parent_node[node_key]
+    if comp_res.trace is not None:
+        from dracon.composition_trace import TraceEntry, keypath_to_dotted
+        priority_str = "new wins" if merge_key.dict_priority == MergePriority.NEW else "existing wins"
+        _detail = f"{merge_key.raw}: {priority_str}"
+        from dracon.loader import _get_node_source
 
-        if merge_key.keypath:
-            parent_path = parent_path + KeyPath(merge_key.keypath)
+        def _record_merge(node, path):
+            if isinstance(node, (DraconMappingNode, DraconSequenceNode)):
+                return
+            path_str = keypath_to_dotted(path)
+            if path_str:
+                comp_res.trace.record(path_str, TraceEntry(
+                    value=getattr(node, 'value', None),
+                    source=_get_node_source(node),
+                    via="merge",
+                    detail=_detail,
+                ))
 
-        new_parent = parent_path.get_obj(comp_res.root)
-        # if the source has a constructible tag (e.g. !Pool, !Thing),
-        # realise it *now* so its output -- not its arguments -- is what
-        # gets merged into the parent.
-        merge_node = _realize_tagged_merge_source(merge_node, loader)
-        # propagate parent context into merge source so hard values
-        # (!define) override soft values (!set_default) in the source.
-        # existing-wins preserves the include's own !define values;
-        # soft_keys logic in merged() still lets hard parent values beat soft ones.
-        parent_ctx = getattr(new_parent, 'context', None)
-        if parent_ctx and any(not k.startswith('__') for k in parent_ctx):
-            merge_node = deepcopy(merge_node)
-            from dracon.composer import walk_node as _walk
-            _walk(merge_node, partial(add_to_context, parent_ctx, merge_key=cached_merge_key('<<{>~}[>~]')))
-        new_parent = merged(new_parent, merge_node, merge_key)
-        if not isinstance(new_parent, Node):
-            raise CompositionError(f"Merge produced {type(new_parent).__name__} instead of a Node")
+        walk_node(new_parent, _record_merge, start_path=parent_path)
 
-        comp_res.set_at(parent_path, new_parent)
+    if merge_key.context_propagation and comp_res.defined_vars:
+        walk_node(new_parent, partial(add_to_context, comp_res.defined_vars))
 
-        # record merge trace
-        if comp_res.trace is not None:
-            from dracon.composition_trace import TraceEntry, keypath_to_dotted
-            priority_str = "new wins" if merge_key.dict_priority == MergePriority.NEW else "existing wins"
-            _detail = f"{merge_key.raw}: {priority_str}"
 
-            from dracon.loader import _get_node_source
+@ftrace(watch=[])
+def process_merges(comp_res, loader=None, skip_paths=()):
+    """Apply all merge nodes (`<<:` keys) in the tree until quiescent.
 
-            def _record_merge(node, path):
-                if isinstance(node, (DraconMappingNode, DraconSequenceNode)):
-                    return
-                path_str = keypath_to_dotted(path)
-                if path_str:
-                    comp_res.trace.record(path_str, TraceEntry(
-                        value=getattr(node, 'value', None),
-                        source=_get_node_source(node),
-                        via="merge",
-                        detail=_detail,
-                    ))
+    Returns (comp_res, mutated_bool). One merge is applied at a time then the
+    rewriter re-discovers — this keeps paths fresh when bare duplicate merge
+    keys (e.g. two `<<:`) share the same raw value and deleting one renumbers
+    the internal `__merge_N_` keys.
+    """
+    from dracon.rewriter import (
+        NodeRewriter,
+        RewriteHandler,
+        RewriteResult,
+        MutationKind,
+    )
 
-            walk_node(new_parent, _record_merge, start_path=parent_path)
+    skip_tuple = tuple(skip_paths) if skip_paths else ()
 
-        # propagate defined_vars to all nodes in new_parent if context propagation enabled
-        if merge_key.context_propagation and comp_res.defined_vars:
-            walk_node(new_parent, partial(add_to_context, comp_res.defined_vars))
+    def discover(node, path):
+        return isinstance(node, MergeNode)
 
+    def apply(comp, path, node):
+        _apply_one_merge(comp, path, loader)
+        return RewriteResult.MUTATED
+
+    handler = RewriteHandler(
+        name='process_merges',
+        discover=discover,
+        apply=apply,
+        trace_label='merge',
+        mutation_kind=MutationKind.MERGE,
+        restart_other_passes=False,
+        skip_under=(lambda c: skip_tuple) if skip_tuple else None,
+    )
+    outcome = NodeRewriter(comp_res, handler, order='longest_first').run()
+    if outcome.mutated:
         comp_res.make_map()
-
-    return comp_res, any_merges
+    return comp_res, outcome.mutated
 
 
 class MergeMode(Enum):
