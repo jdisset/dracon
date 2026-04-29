@@ -293,6 +293,9 @@ class Draconstructor(Constructor):
         node_ctx = getattr(node, 'context', None)
         if node_ctx:
             self.localns.update(get_all_types(node_ctx))
+        # localns is a fallback to resolve_type's importlib path. when the loader
+        # was constructed without dynamic_import, gate resolve_type accordingly.
+        sandboxed = self._is_sandboxed(current_loader_context)
 
         is_root = False
         if self._depth == 0:
@@ -332,7 +335,7 @@ class Draconstructor(Constructor):
                     return result
 
             if target_type is None:
-                tag_type = resolve_type(tag, localns=self.localns)
+                tag_type = self._resolve_tag_type(tag, current_loader_context, sandboxed)
             else:
                 tag_type = target_type
 
@@ -549,6 +552,70 @@ class Draconstructor(Constructor):
             return DraconPartial(target_name, target, kwargs)
         # pipes, templates, deferred: bound symbol
         return sym.bind(**kwargs) if kwargs else target
+
+    def _is_sandboxed(self, loader_context) -> bool:
+        """True iff the active loader was built without dynamic_import.
+
+        Sandboxed loaders (Pyodide, untrusted-agent vocabularies) build the
+        DraconLoader with symbol_sources=[]. In that mode, resolve_type's
+        importlib fallback must not run -- otherwise unregistered tags
+        silently leak through. The check reads from the loader's stored
+        sources rather than the live SymbolTable so tests that swap
+        `loader.context` for a custom table still inherit the trust zone.
+        """
+        loader = self.dracon_loader
+        if loader is None:
+            return False
+        sources = getattr(loader, '_symbol_sources', None)
+        if sources is None:
+            return False
+        return all(s.name != 'dynamic_import' for s in sources)
+
+    def _resolve_tag_type(self, tag, loader_context, sandboxed: bool):
+        """Resolve a tag to a Python type/callable.
+
+        Single source of truth: ask the SymbolTable first (walks user vocabulary
+        and registered sources, including dynamic_import when present), fall
+        back to resolve_type for parametric forms (Resolvable[T]) and the
+        existing localns/import path. In sandbox mode, the import fallback is
+        suppressed so unregistered tags surface a clean failure.
+        """
+        from dracon.symbol_table import SymbolTable, _split_parametric
+
+        tag_str = tag[1:] if isinstance(tag, str) and tag.startswith('!') else tag
+        is_parametric = isinstance(tag_str, str) and '[' in tag_str and tag_str.endswith(']')
+
+        # parametric forms (Resolvable[Foo], Lazy[Foo]) need the typing._GenericAlias
+        # form -- delegate to resolve_type which knows how to build it. resolve_type
+        # may still consult localns; gate it under sandbox mode to keep the trust zone.
+        if is_parametric and not sandboxed:
+            return resolve_type(tag, localns=self.localns)
+
+        if isinstance(loader_context, SymbolTable):
+            sym = loader_context.resolve_tag(tag)
+            if sym is not None:
+                rep = sym.represented_type()
+                if rep is not None:
+                    return rep
+                mat = sym.materialize()
+                if isinstance(mat, type) or callable(mat):
+                    return mat
+
+        if sandboxed:
+            # in-memory only: localns + parametric Resolvable as fallback
+            if is_parametric and tag_str.startswith('Resolvable['):
+                return Resolvable
+            if isinstance(tag_str, str) and tag_str in self.localns:
+                return self.localns[tag_str]
+            # non-builtin tags in sandbox mode must be explicitly registered
+            if isinstance(tag_str, str) and not tag_str.startswith('tag:'):
+                raise ValueError(
+                    f"tag '!{tag_str}' is not in this loader's vocabulary "
+                    f"(sandboxed: dynamic_import source is disabled)"
+                )
+            return Any
+
+        return resolve_type(tag, localns=self.localns)
 
     def _try_symbol_invocation(self, tag_name, node, loader_context):
         """Try to invoke a symbol from context via tag syntax.

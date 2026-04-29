@@ -1,0 +1,10 @@
+# test fixtures used by !fn:pkg: coverage
+# selecting @greet/@double picks the subtree as the template body
+greet:
+  !require name: "name"
+  !set_default greeting: hello
+  message: ${greeting}, ${name}
+
+double:
+  !require x: "x"
+  val: ${x * 2}

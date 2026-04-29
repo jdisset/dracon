@@ -6,8 +6,8 @@
 from __future__ import annotations
 
 from collections.abc import MutableMapping, Iterator, Iterable
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Callable, Sequence
 
 from dracon.diagnostics import DraconError
 from dracon.symbols import (
@@ -35,6 +35,68 @@ class SymbolEntry:
     canonical: bool = True  # False = consume-only alias, invisible to identify()
 
 
+@dataclass(frozen=True)
+class SymbolSource:
+    """A named lookup source on a SymbolTable.
+
+    Forward direction: `lookup(name)` resolves a tag name to a Symbol.
+    Reverse direction: `identify(value)` returns a canonical name, but
+    only when `canonical_for_identify=True` -- ad-hoc imports (the
+    `dynamic_import` source) default to False so they don't pollute
+    round-trip identity.
+    """
+    name: str
+    lookup: Callable[[str], Symbol[Any] | None]
+    identify: Callable[[Any], str | None] | None = None
+    canonical_for_identify: bool = False
+
+
+_PARAMETRIC_OPEN = '['
+_PARAMETRIC_CLOSE = ']'
+
+
+def _split_parametric(tag: str) -> tuple[str, tuple[str, ...]]:
+    """Split a tag like 'Resolvable[Foo, Bar]' into ('Resolvable', ('Foo', 'Bar')).
+
+    Returns (tag, ()) when the tag has no bracketed type args.
+    """
+    if _PARAMETRIC_OPEN not in tag or not tag.endswith(_PARAMETRIC_CLOSE):
+        return tag, ()
+    base, _, rest = tag.partition(_PARAMETRIC_OPEN)
+    inner = rest[:-1]  # strip trailing ]
+    args = tuple(part.strip() for part in inner.split(',') if part.strip())
+    return base, args
+
+
+def _dynamic_import_lookup(tag_name: str) -> Symbol[Any] | None:
+    """Resolve a tag name through resolve_type (importlib + module scan)."""
+    # local import: draconstructor -> symbols/symbol_table at import time;
+    # importing here keeps symbol_table.py free of construction deps.
+    from dracon.draconstructor import resolve_type
+    from typing import Any as _Any
+
+    try:
+        resolved = resolve_type(f'!{tag_name}', localns={})
+    except Exception:
+        return None
+    if resolved is None or resolved is _Any:
+        return None
+    return auto_symbol(resolved, name=tag_name)
+
+
+def make_dynamic_import_source(*, name: str = 'dynamic_import') -> SymbolSource:
+    """Build a SymbolSource that imports module-qualified tag names on miss.
+
+    Wraps `resolve_type` so the existing reactive importlib path becomes a
+    first-class extension point: omit this source when building a sandboxed
+    DraconLoader to disable ad-hoc resolution. Defaults to non-canonical for
+    identify() so imported types don't pollute reverse round-trip naming.
+    """
+    return SymbolSource(
+        name=name, lookup=_dynamic_import_lookup, canonical_for_identify=False,
+    )
+
+
 class SymbolTable(MutableMapping):
     """Named scope of symbols, compatible with Mapping[str, Any].
 
@@ -47,11 +109,16 @@ class SymbolTable(MutableMapping):
     __slots__ = (
         '_entries', '_soft_keys', '_parent',
         '_accessed_keys', '_defined_var_keys', '_suspend_tracking',
-        '_identify_cache',
+        '_identify_cache', '_sources',
     )
     __dracon_no_merge__ = True
 
-    def __init__(self, parent: SymbolTable | None = None):
+    def __init__(
+        self,
+        parent: SymbolTable | None = None,
+        *,
+        sources: Sequence[SymbolSource] = (),
+    ):
         self._entries: dict[str, SymbolEntry] = {}
         self._soft_keys: set[str] = set()
         self._parent: SymbolTable | None = parent
@@ -59,6 +126,7 @@ class SymbolTable(MutableMapping):
         self._defined_var_keys: set[str] | None = None
         self._suspend_tracking: bool = False
         self._identify_cache: dict[type, str] | None = None
+        self._sources: list[SymbolSource] = list(sources)
 
     # ── access tracking (for CLI unused-var warnings) ────────────────────
 
@@ -80,7 +148,14 @@ class SymbolTable(MutableMapping):
                 self._accessed_keys.add(key)
             return entry.symbol.materialize()
         if self._parent is not None:
-            return self._parent[key]
+            try:
+                return self._parent[key]
+            except KeyError:
+                pass
+        for src in self._sources:
+            sym = src.lookup(key)
+            if sym is not None:
+                return sym.materialize()
         raise KeyError(key)
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -115,8 +190,12 @@ class SymbolTable(MutableMapping):
     def __contains__(self, key: object) -> bool:
         if key in self._entries:
             return True
-        if self._parent is not None:
-            return key in self._parent
+        if self._parent is not None and key in self._parent:
+            return True
+        if isinstance(key, str):
+            for src in self._sources:
+                if src.lookup(key) is not None:
+                    return True
         return False
 
     def __iter__(self) -> Iterator[str]:
@@ -185,8 +264,53 @@ class SymbolTable(MutableMapping):
         if entry is not None:
             return entry.symbol
         if self._parent is not None:
-            return self._parent.lookup_symbol(name)
+            sym = self._parent.lookup_symbol(name)
+            if sym is not None:
+                return sym
+        for src in self._sources:
+            sym = src.lookup(name)
+            if sym is not None:
+                return sym
         return None
+
+    # ── source chain ─────────────────────────────────────────────────────
+
+    def add_source(self, source: SymbolSource, *, position: int | None = None) -> None:
+        """Register a SymbolSource. Default appends to the end."""
+        if position is None:
+            self._sources.append(source)
+        else:
+            self._sources.insert(position, source)
+
+    def remove_source(self, name: str) -> bool:
+        """Remove a source by name. Returns True if removed."""
+        for i, src in enumerate(self._sources):
+            if src.name == name:
+                del self._sources[i]
+                return True
+        return False
+
+    def sources(self) -> tuple[SymbolSource, ...]:
+        return tuple(self._sources)
+
+    def resolve_tag(self, tag: str) -> Symbol[Any] | None:
+        """Resolve a (possibly parametric) tag to a Symbol.
+
+        Strips the leading '!' and dispatches parametric forms like
+        'Resolvable[Foo]' to the base symbol's `parametric_apply` hook
+        when it exposes one.
+        """
+        if not tag:
+            return None
+        if tag.startswith('!'):
+            tag = tag[1:]
+        base_name, type_args = _split_parametric(tag)
+        base_sym = self.lookup_symbol(base_name)
+        if base_sym is None:
+            return None
+        if type_args and hasattr(base_sym, 'parametric_apply'):
+            return base_sym.parametric_apply(type_args)
+        return base_sym
 
     def lookup_entry(self, name: str) -> SymbolEntry | None:
         entry = self._entries.get(name)
@@ -208,8 +332,9 @@ class SymbolTable(MutableMapping):
 
         Walks type(value).__mro__ in order against the canonical map; the
         first class whose canonical entry matches wins. Falls through to
-        the parent chain if no local match is found. Non-canonical entries
-        (aliases, captured globals) are invisible to this lookup.
+        the parent chain, then to sources flagged `canonical_for_identify`.
+        Non-canonical entries (aliases, captured globals) and ad-hoc
+        import sources are invisible to this lookup.
         """
         if value is None:
             return None
@@ -220,7 +345,15 @@ class SymbolTable(MutableMapping):
             if name is not None:
                 return name
         if self._parent is not None:
-            return self._parent.identify(value)
+            name = self._parent.identify(value)
+            if name is not None:
+                return name
+        for src in self._sources:
+            if not src.canonical_for_identify or src.identify is None:
+                continue
+            name = src.identify(value)
+            if name is not None:
+                return name
         return None
 
     def _canonical_type_cache(self) -> dict[type, str]:
@@ -283,7 +416,7 @@ class SymbolTable(MutableMapping):
     # ── MutableMapping extras for backwards compat ───────────────────────
 
     def _clone(self, parent: SymbolTable | None = None) -> SymbolTable:
-        tbl = SymbolTable(parent=parent)
+        tbl = SymbolTable(parent=parent, sources=self._sources)
         tbl._entries = dict(self._entries)
         tbl._soft_keys = set(self._soft_keys)
         # share tracking state (like TrackedContext) so accesses in copies propagate back

@@ -37,7 +37,7 @@ from dracon.utils import (
     ser_debug,
     DEFAULT_EVAL_ENGINE,
 )
-from dracon.symbol_table import SymbolTable
+from dracon.symbol_table import SymbolTable, SymbolSource, make_dynamic_import_source
 
 from dracon.interpolation import InterpolableNode, preprocess_references
 from dracon.merge import process_merges, add_to_context, merged, MergeKey, cached_merge_key
@@ -218,6 +218,7 @@ class DraconLoader:
         enable_shorthand_vars: bool = True,
         use_cache: bool = True,
         trace: bool = True,
+        symbol_sources: Optional[List[SymbolSource]] = None,
     ):
         self.custom_loaders = DEFAULT_LOADERS.copy()
         self.custom_loaders.update(custom_loaders or {})
@@ -244,7 +245,13 @@ class DraconLoader:
 
         self._init_yaml()
 
-        self.context = SymbolTable()
+        # default chain installs the dynamic_import source; pass [] to omit it (sandbox style).
+        if symbol_sources is None:
+            sources = [make_dynamic_import_source()]
+        else:
+            sources = list(symbol_sources)
+        self._symbol_sources = sources
+        self.context = SymbolTable(sources=sources)
         if self._context_arg:
             self.context.update(self._context_arg)
         self.reset_context()
@@ -312,6 +319,7 @@ class DraconLoader:
             enable_shorthand_vars=self.enable_shorthand_vars,
             context=None,  # set context separately to preserve type
             trace=self._trace_enabled,
+            symbol_sources=list(self._symbol_sources),
         )
         # preserve context type (e.g. TrackedContext) instead of wrapping in ShallowDict
         if self.context is not None:

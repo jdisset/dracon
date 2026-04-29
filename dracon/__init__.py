@@ -79,5 +79,10 @@ from dracon.symbols import (
     CallableSymbol,
     auto_symbol,
 )
-from dracon.symbol_table import SymbolEntry, SymbolTable
+from dracon.symbol_table import (
+    SymbolEntry,
+    SymbolTable,
+    SymbolSource,
+    make_dynamic_import_source,
+)
 from dracon.resolution import resolve_symbol, resolve_tag_target, is_type_symbol, is_callable_symbol
