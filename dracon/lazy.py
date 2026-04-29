@@ -99,7 +99,15 @@ class LazyInterpolable(Lazy[T]):
     ):
         super().__init__(value, validator, name)
 
-        self.context = context
+        # snapshot the authoring scope. a LazyInterpolable is a closure
+        # over the context where it was written, not the context that
+        # happens to be live when it's forced. aliasing a caller's
+        # mutable dict here lets downstream mutations leak in -- most
+        # visibly, template kwarg binding poisoning a kwarg's own
+        # expression by shadowing the names it depends on. shallow copy
+        # is enough: the dict must not alias, but its values (including
+        # any nested lazies) already own their own snapshots.
+        self.context = dict(context) if context is not None else {}
         self.current_path = current_path
         self.root_obj = root_obj
         self.init_outermost_interpolations = init_outermost_interpolations
