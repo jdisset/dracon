@@ -1656,12 +1656,25 @@ class Program(BaseModel, Generic[T]):
         # compose initial structure from defaults
         current_composition = loader.compose_config_from_str(pdump_str)
 
+        def _compose_layer(conf: str) -> CompositionResult:
+            """Compose a layer file and propagate its top-level !define / !set_default
+            symbols into loader.context so subsequent layers' compose passes can
+            resolve tags introduced by the earlier layer (matches the user's
+            mental model: a leading config_file is a `<<(<):` layer)."""
+            this_conf = loader.compose(conf)
+            if not isinstance(this_conf, CompositionResult):
+                raise ArgParseError(f"invalid include file: {conf}")
+            if this_conf.defined_vars:
+                # soft update: existing context (incl. CLI ++) wins
+                for k, v in this_conf.defined_vars.items():
+                    if k not in loader.context:
+                        loader.context[k] = v
+            return this_conf
+
         # merge included config files (root-scoped)
         if confs_to_merge:
             for conf in confs_to_merge:
-                this_conf = loader.compose(conf)
-                if not isinstance(this_conf, CompositionResult):
-                    raise ArgParseError(f"invalid include file: {conf}")
+                this_conf = _compose_layer(conf)
                 current_composition = loader.merge(
                     current_composition, this_conf, merge_key=MergeKey(raw="<<{<~}[<~]")
                 )
@@ -1670,9 +1683,7 @@ class Program(BaseModel, Generic[T]):
         # Strategy: recurse + new wins — later files overlay fields, not replace
         if subcmd_confs and subcmd_field_name:
             for conf_path in subcmd_confs:
-                this_conf = loader.compose(conf_path)
-                if not isinstance(this_conf, CompositionResult):
-                    raise ArgParseError(f"invalid include file: {conf_path}")
+                this_conf = _compose_layer(conf_path)
                 # wrap under the subcommand field: {command: <loaded content>}
                 from dracon.nodes import DraconScalarNode, DraconMappingNode as DMN
                 key_node = loader.yaml.representer.represent_data(subcmd_field_name)
