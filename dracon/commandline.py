@@ -115,14 +115,20 @@ class ConfigFile:
     selector: Optional[str] = None
 
 
-def _directive_to_arg(decl) -> Arg:
+def _directive_to_arg(decl, auto_dash_alias: bool = True) -> Arg:
     """Adapt a YAML-declared `CliDirective` into an `Arg` whose target is the
     loader context (same bucket `++name=value` writes to). SSOT shim: every
-    flag — model-side or YAML-side — flows through one Arg-shaped record."""
+    flag — model-side or YAML-side — flows through one Arg-shaped record.
+
+    `real_name` stays as the declared identifier (snake_case) so the loader
+    context key matches `${name}` interpolations. `long` is dash-aliased
+    when the program enables it, so `--api-key` matches the model-side
+    convention."""
     short_char = decl.short[1:] if decl.short and decl.short.startswith('-') else decl.short
+    long = decl.name.replace('_', '-') if auto_dash_alias and '_' in decl.name else decl.name
     return Arg(
         real_name=decl.name,
-        long=decl.name,
+        long=long,
         short=short_char,
         help=decl.help or "",
         arg_type=decl.python_type or str,
@@ -866,7 +872,7 @@ class Program(BaseModel, Generic[T]):
             # model-side wins on name collision
             if any(a.real_name == d.name for a in self._args):
                 continue
-            arg = _directive_to_arg(d)
+            arg = _directive_to_arg(d, auto_dash_alias=self.default_auto_dash_alias)
             # drop short alias if it collides
             if arg.short and arg.short in used_short:
                 if not warned_short:

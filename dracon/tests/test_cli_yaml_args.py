@@ -44,6 +44,29 @@ def _prog(model: type[BaseModel] = _Cfg) -> object:
 # basic flag wiring
 
 
+def test_underscore_directive_dash_aliased_in_help_and_argv(tmp_path, capsys):
+    """A `!require api_key:` should surface as `--api-key` in help and accept
+    `--api-key VAL` on argv, matching the model-side `auto_dash_alias` rule."""
+    src = _write(
+        tmp_path,
+        "layer.yaml",
+        """
+        !require api_key:
+          help: "API key"
+        echoed: ${api_key}
+        """,
+    )
+    # help shows the dashed long form
+    with pytest.raises(SystemExit):
+        _prog().parse_args([f"+{src.as_posix()}", "--help"])
+    out = capsys.readouterr().out
+    assert "--api-key" in out
+    assert "--api_key" not in out
+    # the dashed form actually parses; the underscore form is unknown
+    cfg, _ = _prog().parse_args([f"+{src.as_posix()}", "--api-key", "sk-abc"])
+    assert cfg is not None
+
+
 def test_layered_require_appears_in_help(tmp_path, capsys):
     src = _write(
         tmp_path,
