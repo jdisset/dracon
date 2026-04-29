@@ -35,6 +35,7 @@ from dracon.nodes import DraconScalarNode  # Added for type checking
 from dracon.callable import DraconCallable
 from dracon.pipe import DraconPipe
 from dracon.partial import DraconPartial
+from dracon.symbols import CallableSymbol
 import logging
 
 logger = logging.getLogger("dracon")
@@ -392,7 +393,7 @@ class Draconstructor(Constructor):
     def _invoke_callable(self, callable_obj, kwargs, loader_context, node):
         """Invoke a callable via the Symbol protocol when available, else direct call."""
         try:
-            if isinstance(callable_obj, DraconCallable):
+            if isinstance(callable_obj, CallableSymbol) and callable_obj._kind == 'template':
                 inv_ctx = dict(loader_context)
                 node_ctx = getattr(node, 'context', None)
                 if node_ctx:

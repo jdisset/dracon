@@ -94,12 +94,12 @@ class TestInterpolatedTags:
 class TestFnPathResolution:
     def test_fn_path_creates_partial(self):
         result = DraconLoader().loads("f: !fn:os.path.join\n  a: /tmp")
-        assert isinstance(result["f"], DraconPartial)
+        assert isinstance(result["f"], CallableSymbol) and result["f"]._kind == 'partial'
 
     def test_fn_path_from_context(self):
         loader = DraconLoader(context={"add_xy": add_xy})
         result = loader.loads("f: !fn:add_xy\n  x: 1.0")
-        assert isinstance(result["f"], DraconPartial)
+        assert isinstance(result["f"], CallableSymbol) and result["f"]._kind == 'partial'
         assert result["f"](y=2.0) == 3.0
 
 
@@ -193,7 +193,7 @@ class TestDraconPartialDirectUsage:
     def test_partial_roundtrip_yaml(self):
         loader = DraconLoader()
         result = loader.loads("f: !fn:os.path.join\n  a: /tmp")
-        assert isinstance(result["f"], DraconPartial)
+        assert isinstance(result["f"], CallableSymbol) and result["f"]._kind == 'partial'
 
 
 class TestDraconPipeDirectUsage:
@@ -214,13 +214,10 @@ class TestSymbolProtocolRetrofit:
 
     def test_dracon_callable_is_symbol(self):
         """DraconCallable created via context implements Symbol protocol."""
-        from dracon.callable import DraconCallable as DC
         loader = DraconLoader()
-        # create a callable directly and put it in context
         comp = loader.compose_config_from_str("!define f: !fn\n  !require x: 'x'\n  result: ${x}")
-        # get it from defined_vars (where !define stores values)
         f = comp.defined_vars["f"]
-        assert isinstance(f, DC)
+        assert isinstance(f, CallableSymbol) and f._kind == 'template'
         assert isinstance(f, Symbol)
         iface = f.interface()
         assert iface.kind == SymbolKind.TEMPLATE

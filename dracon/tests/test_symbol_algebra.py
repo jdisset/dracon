@@ -321,7 +321,7 @@ class TestRegression:
     def test_fn_path_basic_callable(self):
         """Basic !fn:path still works for plain callables."""
         cfg = _loads("val: !fn:math.sqrt")
-        assert isinstance(cfg['val'], DraconPartial)
+        assert isinstance(cfg['val'], CallableSymbol) and cfg['val']._kind == 'partial'
         assert cfg['val'](4) == 2.0
 
     def test_fn_path_with_kwargs(self):

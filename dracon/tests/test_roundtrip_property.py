@@ -196,7 +196,7 @@ def equivalent(a: Any, b: Any) -> bool:
         if a.node is None or b.node is None:
             return a.node is None and b.node is None
         return _equal_node(a.node, b.node)
-    if isinstance(a, (DraconCallable, DraconPipe, BoundSymbol, DraconPartial)) and type(a) is type(b):
+    if isinstance(a, (CallableSymbol, BoundSymbol)) and isinstance(b, (CallableSymbol, BoundSymbol)):
         return dump(a) == dump(b)
     if isinstance(a, Node) and isinstance(b, Node):
         return _equal_node(a, b)
@@ -494,7 +494,7 @@ class TestWrapperRegressions:
         text = l.dump(bs)
         assert "!fn:Point" in text
         reloaded = l.loads(text)
-        assert isinstance(reloaded, DraconPartial)
+        assert isinstance(reloaded, CallableSymbol) and reloaded._kind == 'partial'
         assert reloaded(y=7) == Point(x=5, y=7)
 
 

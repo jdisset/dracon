@@ -1,13 +1,25 @@
 # Copyright (c) 2025 Jean Disset
 # MIT License - see LICENSE file for details.
 
-"""DraconPipe: composed callable from a sequence of callables, created by !pipe."""
+"""Pipe-kind strategy for the unified CallableSymbol.
+
+A pipe chains a sequence of callables; each stage's output threads into the
+next via the unified Symbol interface.
+
+`DraconPipe` is preserved as a factory alias that returns a `CallableSymbol`
+of kind 'pipe'.
+"""
 
 import collections.abc
 
+from dracon.symbols import (
+    CallableSymbol, InterfaceSpec, SymbolKind, MISSING,
+    auto_symbol, register_callable_strategy,
+)
+
 _SENTINEL = object()
 
-# tags that are dracon builtins, never constructable types (local copy to decouple from instructions.py)
+# tags that are dracon builtins, never constructable types (decoupled from instructions.py)
 _PIPE_BUILTIN_TAGS = frozenset({
     '!include', '!include?', '!noconstruct', '!unset', '!fn', '!pipe',
     '!define', '!define?', '!set_default', '!require', '!assert',
@@ -20,54 +32,31 @@ _PIPE_BUILTIN_TAGS = frozenset({
 
 
 def _has_custom_tag(node):
-    """True if node has a custom YAML tag (not a builtin or default type tag)."""
     tag = getattr(node, 'tag', None)
     return tag and isinstance(tag, str) and tag.startswith('!') and tag not in _PIPE_BUILTIN_TAGS
 
 
 def _stage_interface(stage):
-    """Get InterfaceSpec for a stage, wrapping plain callables via auto_symbol."""
-    from dracon.symbols import auto_symbol
-    sym = auto_symbol(stage)
-    return sym.interface()
+    return auto_symbol(stage).interface()
 
 
 def _stage_name(stage) -> str:
-    """Resolve a stage to its canonical tag-body name for emission."""
     iface_name = _stage_interface(stage).name
     if iface_name:
         return iface_name
     return getattr(stage, '__name__', None) or repr(stage)
 
 
-class DraconPipe:
-    """Composed callable that chains a sequence of callables.
+def _is_pipe(obj) -> bool:
+    return isinstance(obj, CallableSymbol) and obj._kind == 'pipe'
 
-    Each stage's output feeds into the next:
-    - Mapping output: kwarg-unpacked into next stage (wins over all other kwargs)
-    - Typed output: passed as single value to the next stage's unfilled !require
 
-    Implements the Symbol protocol.
-    """
-
-    __slots__ = ('_stages', '_stage_kwargs', '_name', '_cached_interface')
-
-    def __init__(self, stages, stage_kwargs, name=None):
-        self._stages = tuple(stages)            # immutable sequence of callables
-        self._stage_kwargs = tuple(stage_kwargs)  # immutable per-stage pre-filled kwargs
-        self._name = name
-        self._cached_interface = None
-
-    # ── Symbol protocol ──────────────────────────────────────────────────
-
-    def interface(self):
-        if self._cached_interface is not None:
-            return self._cached_interface
-        from dracon.symbols import InterfaceSpec, SymbolKind, MISSING
+class _PipeStrategy:
+    def interface(self, sym):
         seen_required: dict = {}
         seen_optional: dict = {}
         last_iface = None
-        for stage, pre_kwargs in zip(self._stages, self._stage_kwargs):
+        for stage, pre_kwargs in zip(sym._stages, sym._stage_kwargs):
             iface = _stage_interface(stage)
             last_iface = iface
             for p in iface.params:
@@ -82,32 +71,19 @@ class DraconPipe:
         if last_iface is not None:
             ret_anno = last_iface.return_annotation
             ret_anno_name = last_iface.return_annotation_name
-        self._cached_interface = InterfaceSpec(
-            kind=SymbolKind.PIPE, name=self._name, params=params,
+        return InterfaceSpec(
+            kind=SymbolKind.PIPE, name=sym._name, params=params,
             return_annotation=ret_anno, return_annotation_name=ret_anno_name,
         )
-        return self._cached_interface
 
-    def bind(self, **kwargs):
-        from dracon.symbols import BoundSymbol
-        return BoundSymbol(self, **kwargs)
+    def invoke(self, sym, kwargs, *, invocation_context=None):
+        return _run_pipe(sym, kwargs)
 
-    def invoke(self, **kwargs):
-        return self(**kwargs)
-
-    def materialize(self):
-        return self
-
-    def represented_type(self):
-        return None  # pipes compose callables, no type identity
-
-    def dracon_dump_to_node(self, representer):
+    def dump(self, sym, representer):
         items = []
-        for stage, pre_kwargs in zip(self._stages, self._stage_kwargs):
+        for stage, pre_kwargs in zip(sym._stages, sym._stage_kwargs):
             if hasattr(stage, 'dracon_dump_to_node'):
-                # DraconCallable / DraconPartial / BoundSymbol owns its tag.
-                # pre_kwargs merges into kwargs by construction, so stages
-                # that already carry kwargs shouldn't also have pre_kwargs.
+                # pre_kwargs already merged into the wrapped symbol's kwargs
                 items.append(stage)
             elif pre_kwargs:
                 items.append({_stage_name(stage): dict(pre_kwargs)})
@@ -115,34 +91,58 @@ class DraconPipe:
                 items.append(_stage_name(stage))
         return representer.represent_sequence('!pipe', items)
 
-    # ── existing API ─────────────────────────────────────────────────────
+    def represented_type(self, sym):
+        return None  # pipes compose callables, no type identity
 
-    def __call__(self, **kwargs):
-        value = _SENTINEL
-        for stage, pre_kwargs in zip(self._stages, self._stage_kwargs):
-            call_kwargs = {**kwargs, **pre_kwargs}
-            if value is not _SENTINEL:
-                if isinstance(value, collections.abc.Mapping):
-                    call_kwargs.update(value)
-                else:
-                    unfilled = _get_unfilled_require(stage, call_kwargs)
-                    if unfilled is not None:
-                        call_kwargs[unfilled] = value
-                    # else: stage has all params, value passes through
-            value = stage(**call_kwargs)
-        return value
+    def reduce(self, sym):
+        # stages may be context-bound callables; not generally picklable
+        raise TypeError("CallableSymbol of kind 'pipe' is not picklable")
 
-    def __deepcopy__(self, memo):
-        clone = DraconPipe.__new__(DraconPipe)
-        memo[id(self)] = clone
-        clone._stages = self._stages
-        clone._stage_kwargs = self._stage_kwargs
-        clone._name = self._name
+    def deepcopy(self, sym, memo):
+        clone = CallableSymbol.__new__(CallableSymbol)
+        memo[id(sym)] = clone
+        clone._kind = 'pipe'
+        clone._stages = sym._stages
+        clone._stage_kwargs = sym._stage_kwargs
+        clone._name = sym._name
         clone._cached_interface = None
+        clone._source = None
+        clone._callable = None
+        clone._func_path = None
+        clone._kwargs = None
+        clone._template_node = None
+        clone._loader = None
+        clone._file_context = None
+        clone._call_depth = 0
+        clone._has_return = False
+        clone._cached_params = None
         return clone
 
-    def __repr__(self):
-        return f"DraconPipe(name={self._name!r}, stages={len(self._stages)})"
+
+def _run_pipe(sym, kwargs):
+    value = _SENTINEL
+    for stage, pre_kwargs in zip(sym._stages, sym._stage_kwargs):
+        call_kwargs = {**kwargs, **pre_kwargs}
+        if value is not _SENTINEL:
+            if isinstance(value, collections.abc.Mapping):
+                call_kwargs.update(value)
+            else:
+                unfilled = _get_unfilled_require(stage, call_kwargs)
+                if unfilled is not None:
+                    call_kwargs[unfilled] = value
+        value = stage(**call_kwargs)
+    return value
+
+
+register_callable_strategy('pipe', _PipeStrategy())
+
+
+# ── factory alias preserving the legacy import surface ─────────────────────
+
+
+def DraconPipe(stages, stage_kwargs, name=None) -> CallableSymbol:
+    """Factory: build a pipe-kind CallableSymbol. Preserved for back-compat."""
+    return CallableSymbol.from_pipe(stages, stage_kwargs, name=name)
 
 
 # ── interface-based threading helpers ────────────────────────────────────────
@@ -151,7 +151,6 @@ class DraconPipe:
 def _get_unfilled_require(stage, filled_kwargs):
     """Find the single unfilled required param in stage given already-filled kwargs.
 
-    Uses the unified symbol interface instead of bespoke scanning.
     Returns None if zero unfilled (stage runs independently, no threading).
     Raises CompositionError if 2+ unfilled requires (ambiguous).
     """
@@ -160,7 +159,7 @@ def _get_unfilled_require(stage, filled_kwargs):
     required = [p.name for p in iface.params if p.required]
     unfilled = [r for r in required if r not in filled_kwargs]
     if len(unfilled) == 0:
-        return None  # no threading needed, stage runs independently
+        return None
     if len(unfilled) > 1:
         raise CompositionError(
             f"pipe: stage has {len(unfilled)} unfilled !require parameters ({unfilled}), "
@@ -173,10 +172,7 @@ def _get_unfilled_require(stage, filled_kwargs):
 
 
 def create_pipe_callable(value_node, loader, key_node):
-    """Create a DraconPipe from a !pipe sequence node.
-
-    Called from Define.get_name_and_value() when value_node.tag == '!pipe'.
-    """
+    """Create a pipe-kind CallableSymbol from a !pipe sequence node."""
     from dracon.diagnostics import CompositionError
     from dracon.composer import DraconMappingNode, DraconSequenceNode
     from dracon.nodes import DraconScalarNode, node_source
@@ -199,7 +195,6 @@ def create_pipe_callable(value_node, loader, key_node):
 
     for item in value_node.value:
         if isinstance(item, InterpolableNode):
-            # dynamic stage: ${cleaner}
             resolved = evaluate_expression(
                 item.value, engine=loader.interpolation_engine,
                 context=item.context, source_context=getattr(item, 'source_context', None),
@@ -207,18 +202,15 @@ def create_pipe_callable(value_node, loader, key_node):
             _validate_stage(resolved, item.value, source)
             _append_stage(stages, stage_kwargs, resolved, {})
         elif _has_custom_tag(item):
-            # tagged node (e.g. !fn:path { kwargs }) -- construct via loader
             from dracon.composer import CompositionResult
             resolved = loader.load_composition_result(CompositionResult(root=item))
             _validate_stage(resolved, item.tag, source)
             _append_stage(stages, stage_kwargs, resolved, {})
         elif isinstance(item, DraconScalarNode):
-            # bare name: resolve from context
             stage_name = item.value
             resolved = _resolve_stage_name(stage_name, loader, item, source)
             _append_stage(stages, stage_kwargs, resolved, {})
         elif isinstance(item, DraconMappingNode):
-            # name: {kwargs} -- exactly one entry
             if len(item.value) != 1:
                 raise CompositionError(
                     f"!pipe mapping stage must have exactly one key, got {len(item.value)}",
@@ -227,7 +219,6 @@ def create_pipe_callable(value_node, loader, key_node):
             k_node, v_node = item.value[0]
             stage_name = k_node.value
             resolved = _resolve_stage_name(stage_name, loader, k_node, source)
-            # construct the pre-fill kwargs
             from dracon.composer import CompositionResult
             pre = loader.load_composition_result(CompositionResult(root=v_node))
             if not isinstance(pre, dict):
@@ -240,11 +231,10 @@ def create_pipe_callable(value_node, loader, key_node):
                 context=source,
             )
 
-    return DraconPipe(stages=stages, stage_kwargs=stage_kwargs, name=name)
+    return CallableSymbol.from_pipe(stages=stages, stage_kwargs=stage_kwargs, name=name)
 
 
 def _resolve_stage_name(name, loader, node, source):
-    """Look up a stage name in loader context or node context."""
     from dracon.diagnostics import CompositionError
     resolved = loader.context.get(name)
     if resolved is None and hasattr(node, 'context'):
@@ -259,7 +249,6 @@ def _resolve_stage_name(name, loader, node, source):
 
 
 def _validate_stage(obj, name, source):
-    """Validate that a resolved stage is callable."""
     from dracon.diagnostics import CompositionError
     if not callable(obj):
         raise CompositionError(
@@ -269,9 +258,8 @@ def _validate_stage(obj, name, source):
 
 
 def _append_stage(stages, stage_kwargs, resolved, pre):
-    """Append a stage, flattening nested DraconPipe instances."""
-    if isinstance(resolved, DraconPipe):
-        # flatten: inline the sub-pipe's stages
+    """Append a stage, flattening nested pipe-kind CallableSymbol instances."""
+    if _is_pipe(resolved):
         for s, sk in zip(resolved._stages, resolved._stage_kwargs):
             merged = {**sk, **pre} if pre else sk
             stages.append(s)

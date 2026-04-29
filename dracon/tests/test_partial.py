@@ -4,6 +4,7 @@ import pickle
 import pytest
 from dracon.loader import DraconLoader
 from dracon.partial import DraconPartial
+from dracon.symbols import CallableSymbol
 
 
 # --- test helpers ---
@@ -31,7 +32,7 @@ def _loads(yaml_str, **ctx):
 class TestFnPathBasic:
     def test_produces_partial(self):
         cfg = _loads("val: !fn:math.sqrt")
-        assert isinstance(cfg['val'], DraconPartial)
+        assert isinstance(cfg['val'], CallableSymbol) and cfg['val']._kind == 'partial'
 
     def test_zero_kwargs(self):
         cfg = _loads("val: !fn:math.sqrt")
@@ -132,7 +133,7 @@ result: ${my_sqrt(16)}
     greeting: ${greeting}
 greeter: !make_greeter { greeting: yo }
 """)
-        assert isinstance(cfg['greeter'], DraconPartial)
+        assert isinstance(cfg['greeter'], CallableSymbol) and cfg['greeter']._kind == 'partial'
         assert cfg['greeter'](name="world") == "yo world"
 
 

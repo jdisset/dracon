@@ -20,7 +20,7 @@ class TestPipeCoreBasic:
     """!pipe produces a callable that chains stages."""
 
     def test_pipe_produces_callable(self):
-        from dracon.pipe import DraconPipe
+        from dracon.symbols import CallableSymbol
         yaml = """
         !define f: !fn
           !require x: "val"
@@ -29,9 +29,9 @@ class TestPipeCoreBasic:
           !require result: "val"
           doubled: ${result * 2}
         !define p: !pipe [f, g]
-        check: ${isinstance(p, DraconPipe)}
+        check: ${isinstance(p, CallableSymbol) and p._kind == 'pipe'}
         """
-        config = _loads(yaml, DraconPipe=DraconPipe)
+        config = _loads(yaml, CallableSymbol=CallableSymbol)
         assert config['check'] is True
 
     def test_pipe_chains_dict_output(self):
@@ -216,7 +216,8 @@ class TestPipeSignatureIntrospection:
         loader = DraconLoader()
         config = loader.loads(yaml)
         f = config['check']
-        assert isinstance(f, DraconCallable)
+        from dracon.symbols import CallableSymbol
+        assert isinstance(f, CallableSymbol) and f._kind == 'template'
         iface = f.interface()
         req = sorted(p.name for p in iface.params if p.required)
         opt = [p.name for p in iface.params if not p.required]
@@ -364,7 +365,7 @@ class TestPipeComposition:
 
     def test_pipe_flattening(self):
         """Nested pipe stages are flattened -- same result as flat pipe."""
-        from dracon.pipe import DraconPipe
+        from dracon.symbols import CallableSymbol
         yaml = """
         !define a: !fn
           !require x: "val"
@@ -380,9 +381,9 @@ class TestPipeComposition:
         pipe_ref: ${abc}
         out: ${abc(x=4)}
         """
-        config = _loads(yaml, DraconPipe=DraconPipe)
+        config = _loads(yaml, CallableSymbol=CallableSymbol)
         pipe = config['pipe_ref']
-        assert isinstance(pipe, DraconPipe)
+        assert isinstance(pipe, CallableSymbol) and pipe._kind == 'pipe'
         # flattened: 3 stages, not 2
         assert len(pipe._stages) == 3
         assert config['out']['result'] == 110

@@ -352,7 +352,7 @@ val: 1
 """)
         pipeline = cr.defined_vars.get("pipeline")
         assert pipeline is not None
-        assert isinstance(pipeline, DraconPipe)
+        assert isinstance(pipeline, CallableSymbol) and pipeline._kind == 'pipe'
         iface = pipeline.interface()
         assert iface.kind == SymbolKind.PIPE
 

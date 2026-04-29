@@ -26,12 +26,12 @@ class TestFnFileBasic:
     """!fn file: captures a template as a DraconCallable."""
 
     def test_fn_file_stores_callable(self):
-        from dracon.callable import DraconCallable
+        from dracon.symbols import CallableSymbol
         yaml = """
         !define f: !fn pkg:dracon:tests/fn_endpoint.yaml
-        result: ${isinstance(f, DraconCallable)}
+        result: ${isinstance(f, CallableSymbol) and f._kind == 'template'}
         """
-        loader = DraconLoader(context={'DraconCallable': DraconCallable})
+        loader = DraconLoader(context={'CallableSymbol': CallableSymbol})
         config = loader.loads(yaml)
         config.resolve_all_lazy()
         assert config['result'] is True

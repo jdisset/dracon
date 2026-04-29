@@ -283,7 +283,7 @@ class TestTemplatesPipesAndBoundSymbolsInDocument:
         text = loader.dump(bs)
         assert "!fn:Host" in text
         reloaded = make_loader(make_vocab()).loads(text)
-        assert isinstance(reloaded, DraconPartial)
+        assert isinstance(reloaded, CallableSymbol) and reloaded._kind == 'partial'
         h = reloaded(cpus=16)
         assert h == Host(name="h-prebuilt", cpus=16)
 

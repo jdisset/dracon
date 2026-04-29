@@ -11,7 +11,7 @@ import ast
 import builtins
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Protocol, TypeVar, runtime_checkable
+from typing import Any, Literal, Protocol, TypeVar, runtime_checkable
 
 T = TypeVar("T")
 
@@ -102,39 +102,332 @@ class ValueSymbol:
         return self._value if isinstance(self._value, type) else None
 
 
-class CallableSymbol:
-    """Wraps a Python callable (or type) as a Symbol."""
-    __slots__ = ('_callable', '_name', '_source', '_cached_interface')
+# ── strategy registry ────────────────────────────────────────────────────────
 
-    def __init__(self, obj: Any, *, name: str | None = None, source: SymbolSourceInfo | None = None):
-        self._callable = obj
+CallableKind = Literal['plain', 'template', 'partial', 'pipe']
+
+
+class CallableStrategy(Protocol):
+    def interface(self, sym: "CallableSymbol") -> InterfaceSpec: ...
+    def invoke(self, sym: "CallableSymbol", kwargs: dict, *, invocation_context: Any = None) -> Any: ...
+    def dump(self, sym: "CallableSymbol", representer: Any) -> Any: ...
+    def represented_type(self, sym: "CallableSymbol") -> type | None: ...
+    def reduce(self, sym: "CallableSymbol") -> Any: ...
+    def deepcopy(self, sym: "CallableSymbol", memo: dict) -> "CallableSymbol": ...
+
+
+_STRATEGIES: dict[str, CallableStrategy] = {}
+
+
+def register_callable_strategy(kind: str, strategy: CallableStrategy) -> None:
+    _STRATEGIES[kind] = strategy
+
+
+class CallableSymbol:
+    """Unified callable Symbol covering plain / template / partial / pipe.
+
+    Use the bare constructor for a plain Python callable or type. Use the
+    classmethod factories for the other kinds:
+
+    - ``CallableSymbol(fn)`` / ``CallableSymbol(SomeClass)``  -> plain
+    - ``CallableSymbol.from_template(node, loader, ...)``       -> template
+    - ``CallableSymbol.from_partial(path, fn, kwargs)``         -> partial
+    - ``CallableSymbol.from_pipe(stages, stage_kwargs, ...)``   -> pipe
+
+    Per-kind logic lives in a strategy registry; this class is the dispatcher.
+    """
+
+    __slots__ = (
+        '_kind', '_name', '_source', '_cached_interface',
+        # plain / partial
+        '_callable', '_func_path', '_kwargs',
+        # template
+        '_template_node', '_loader', '_file_context', '_call_depth', '_has_return',
+        '_cached_params',
+        # pipe
+        '_stages', '_stage_kwargs',
+    )
+
+    def __init__(
+        self, obj: Any = None, *,
+        name: str | None = None, source: SymbolSourceInfo | None = None,
+        _kind: CallableKind = 'plain',
+    ):
+        self._kind = _kind
         self._name = name
         self._source = source
-        self._cached_interface: InterfaceSpec | None = None
+        self._cached_interface = None
+        self._callable = obj
+        self._func_path = None
+        self._kwargs = None
+        self._template_node = None
+        self._loader = None
+        self._file_context = None
+        self._call_depth = 0
+        self._has_return = False
+        self._cached_params = None
+        self._stages = None
+        self._stage_kwargs = None
+
+    # ── factory methods ─────────────────────────────────────────────────
+
+    @classmethod
+    def from_template(cls, template_node: Any, loader: Any, *,
+                      source: Any = None, file_context: Any = None,
+                      name: str | None = None, has_return: bool = False) -> "CallableSymbol":
+        sym = cls.__new__(cls)
+        sym._kind = 'template'
+        sym._name = name
+        sym._source = source
+        sym._cached_interface = None
+        sym._callable = None
+        sym._func_path = None
+        sym._kwargs = None
+        sym._template_node = template_node
+        sym._loader = loader
+        sym._file_context = file_context
+        sym._call_depth = 0
+        sym._has_return = has_return
+        sym._cached_params = None
+        sym._stages = None
+        sym._stage_kwargs = None
+        return sym
+
+    @classmethod
+    def from_partial(cls, func_path: str, func: Any, kwargs: dict) -> "CallableSymbol":
+        sym = cls.__new__(cls)
+        sym._kind = 'partial'
+        sym._name = func_path
+        sym._source = None
+        sym._cached_interface = None
+        sym._callable = func
+        sym._func_path = func_path
+        sym._kwargs = kwargs
+        sym._template_node = None
+        sym._loader = None
+        sym._file_context = None
+        sym._call_depth = 0
+        sym._has_return = False
+        sym._cached_params = None
+        sym._stages = None
+        sym._stage_kwargs = None
+        return sym
+
+    @classmethod
+    def from_pipe(cls, stages: Any, stage_kwargs: Any, *, name: str | None = None) -> "CallableSymbol":
+        sym = cls.__new__(cls)
+        sym._kind = 'pipe'
+        sym._name = name
+        sym._source = None
+        sym._cached_interface = None
+        sym._callable = None
+        sym._func_path = None
+        sym._kwargs = None
+        sym._template_node = None
+        sym._loader = None
+        sym._file_context = None
+        sym._call_depth = 0
+        sym._has_return = False
+        sym._cached_params = None
+        sym._stages = tuple(stages)
+        sym._stage_kwargs = tuple(stage_kwargs)
+        return sym
+
+    # ── Symbol protocol (dispatched) ────────────────────────────────────
 
     def interface(self) -> InterfaceSpec:
         if self._cached_interface is not None:
             return self._cached_interface
-        kind = SymbolKind.TYPE if isinstance(self._callable, type) else SymbolKind.CALLABLE
-        params = _params_from_callable(self._callable)
-        ret_anno, ret_name = _return_annotation_from_callable(self._callable)
-        self._cached_interface = InterfaceSpec(
-            kind=kind, name=self._name, params=params, source=self._source,
-            return_annotation=ret_anno, return_annotation_name=ret_name,
-        )
+        self._cached_interface = _STRATEGIES[self._kind].interface(self)
         return self._cached_interface
 
     def bind(self, **kwargs: Any) -> Symbol[Any]:
         return BoundSymbol(self, **kwargs)
 
-    def invoke(self, **kwargs: Any) -> Any:
-        return self._callable(**kwargs)
+    def invoke(self, kwargs: dict | None = None, *, invocation_context: Any = None, **kw: Any) -> Any:
+        # accept legacy positional dict (templates) plus **kwargs (Symbol protocol)
+        if kwargs is None:
+            kwargs = kw
+        elif kw:
+            kwargs = {**kwargs, **kw}
+        return _STRATEGIES[self._kind].invoke(self, kwargs, invocation_context=invocation_context)
 
     def materialize(self) -> Any:
-        return self._callable
+        # plain unwraps; everything else is the materialized form
+        if self._kind == 'plain':
+            return self._callable
+        return self
 
     def represented_type(self) -> type | None:
-        return self._callable if isinstance(self._callable, type) else None
+        return _STRATEGIES[self._kind].represented_type(self)
+
+    # ── invocation as plain callable ────────────────────────────────────
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        if self._kind == 'plain':
+            return self._callable(*args, **kwargs)
+        if self._kind == 'partial':
+            merged = {**self._kwargs, **kwargs}
+            return self._callable(*args, **merged)
+        # template / pipe: positional args not supported, kwargs only
+        return self.invoke(**kwargs)
+
+    # ── dump / pickle / deepcopy ────────────────────────────────────────
+
+    def dracon_dump_to_node(self, representer: Any) -> Any:
+        return _STRATEGIES[self._kind].dump(self, representer)
+
+    def __reduce__(self) -> Any:
+        return _STRATEGIES[self._kind].reduce(self)
+
+    def __setstate__(self, state: dict) -> None:
+        # slotted class: pickle/copy default routes state through __dict__; map onto slots
+        for k, v in state.items():
+            object.__setattr__(self, k, v)
+
+    def __deepcopy__(self, memo: dict) -> "CallableSymbol":
+        return _STRATEGIES[self._kind].deepcopy(self, memo)
+
+    def __repr__(self) -> str:
+        if self._kind == 'partial':
+            return f"CallableSymbol.partial({self._func_path!r}, kwargs={list(self._kwargs or [])})"
+        if self._kind == 'template':
+            return f"CallableSymbol.template(name={self._name!r})"
+        if self._kind == 'pipe':
+            return f"CallableSymbol.pipe(name={self._name!r}, stages={len(self._stages or ())})"
+        return f"CallableSymbol({self._callable!r})"
+
+
+# ── built-in plain / partial strategies ──────────────────────────────────────
+
+class _PlainStrategy:
+    def interface(self, sym):
+        kind = SymbolKind.TYPE if isinstance(sym._callable, type) else SymbolKind.CALLABLE
+        params = _params_from_callable(sym._callable)
+        ret_anno, ret_name = _return_annotation_from_callable(sym._callable)
+        return InterfaceSpec(
+            kind=kind, name=sym._name, params=params, source=sym._source,
+            return_annotation=ret_anno, return_annotation_name=ret_name,
+        )
+
+    def invoke(self, sym, kwargs, *, invocation_context=None):
+        return sym._callable(**kwargs)
+
+    def dump(self, sym, representer):
+        # plain symbols are dumped via their underlying value (e.g. a type)
+        return representer.represent_data(sym._callable)
+
+    def represented_type(self, sym):
+        return sym._callable if isinstance(sym._callable, type) else None
+
+    def reduce(self, sym):
+        # plain wraps a callable; pickling round-trips the callable directly
+        return (CallableSymbol, (sym._callable,), {'_name': sym._name})
+
+    def deepcopy(self, sym, memo):
+        from dracon.utils import deepcopy as _dc
+        clone = CallableSymbol.__new__(CallableSymbol)
+        memo[id(sym)] = clone
+        clone._kind = 'plain'
+        clone._callable = sym._callable
+        clone._name = sym._name
+        clone._source = sym._source
+        clone._cached_interface = sym._cached_interface
+        clone._func_path = None
+        clone._kwargs = None
+        clone._template_node = None
+        clone._loader = None
+        clone._file_context = None
+        clone._call_depth = 0
+        clone._has_return = False
+        clone._cached_params = None
+        clone._stages = None
+        clone._stage_kwargs = None
+        return clone
+
+
+class _PartialStrategy:
+    def interface(self, sym):
+        all_params = _params_from_callable(sym._callable)
+        bound_names = frozenset(sym._kwargs)
+        remaining = tuple(p for p in all_params if p.name not in bound_names)
+        ret_anno, ret_name = _return_annotation_from_callable(sym._callable)
+        return InterfaceSpec(
+            kind=SymbolKind.CALLABLE, name=sym._func_path, params=remaining,
+            return_annotation=ret_anno, return_annotation_name=ret_name,
+        )
+
+    def invoke(self, sym, kwargs, *, invocation_context=None):
+        merged = {**sym._kwargs, **kwargs}
+        return sym._callable(**merged)
+
+    def dump(self, sym, representer):
+        tag = f'!fn:{sym._func_path}'
+        if sym._kwargs:
+            return representer.represent_mapping(tag, sym._kwargs)
+        return representer.represent_scalar(tag, '')
+
+    def represented_type(self, sym):
+        return sym._callable if isinstance(sym._callable, type) else None
+
+    def reduce(self, sym):
+        return (_reconstruct_partial, (sym._func_path, sym._kwargs))
+
+    def deepcopy(self, sym, memo):
+        from dracon.utils import deepcopy as _dc
+        clone = CallableSymbol.__new__(CallableSymbol)
+        memo[id(sym)] = clone
+        clone._kind = 'partial'
+        clone._name = sym._name
+        clone._source = None
+        clone._cached_interface = sym._cached_interface
+        clone._callable = sym._callable
+        clone._func_path = sym._func_path
+        clone._kwargs = _dc(sym._kwargs, memo)
+        clone._template_node = None
+        clone._loader = None
+        clone._file_context = None
+        clone._call_depth = 0
+        clone._has_return = False
+        clone._cached_params = None
+        clone._stages = None
+        clone._stage_kwargs = None
+        return clone
+
+
+def _reconstruct_partial(func_path, kwargs):
+    """Pickle reconstruction: re-imports the function from its dotted path."""
+    from typing import Any
+    from dracon.draconstructor import resolve_type
+    if func_path.startswith('py:'):
+        from dracon.composer import CompositionResult
+        from dracon.include import parse_include_str
+        from dracon.keypath import KeyPath
+        from dracon.loaders.py import PyValueNode, read_from_py
+
+        components = parse_include_str(func_path)
+        _scheme, path = components.main_path.split(':', 1)
+        raw, _ctx = read_from_py(path)
+        comp = CompositionResult(root=raw)
+        if components.key_path:
+            comp = comp.rerooted(KeyPath(components.key_path))
+        root = comp.root
+        if not isinstance(root, PyValueNode):
+            raise ValueError(f"cannot unpickle CallableSymbol partial: '{func_path}' is not a Python symbol")
+        return CallableSymbol.from_partial(func_path, root.py_value, kwargs)
+    if '.' not in func_path:
+        raise ValueError(
+            f"cannot unpickle CallableSymbol partial with context-only name '{func_path}' "
+            f"-- function must be importable via dotted path"
+        )
+    func = resolve_type(f'!{func_path}')
+    if func is Any:
+        raise ValueError(f"cannot unpickle CallableSymbol partial: '{func_path}' is not importable")
+    return CallableSymbol.from_partial(func_path, func, kwargs)
+
+
+register_callable_strategy('plain', _PlainStrategy())
+register_callable_strategy('partial', _PartialStrategy())
 
 
 class BoundSymbol:

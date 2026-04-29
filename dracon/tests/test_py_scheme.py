@@ -218,12 +218,12 @@ add_result: ${nm['add'](a=3, b=4)}
 class TestPyIncludeInteractions:
     def test_fn_scheme_with_kwargs_partial(self):
         """!fn:py:... { kwargs } produces a partial like any other !fn:target."""
-        from dracon.partial import DraconPartial
+        from dracon.symbols import CallableSymbol
         cfg = _loads("""
 f: !fn:py:dracon.tests.test_py_scheme_helper.add
   a: 10
 """)
-        assert isinstance(cfg['f'], DraconPartial)
+        assert isinstance(cfg['f'], CallableSymbol) and cfg['f']._kind == 'partial'
         assert cfg['f'](b=5) == 15
 
     def test_py_include_works_inline_without_define(self):
