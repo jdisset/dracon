@@ -289,9 +289,11 @@ def test_error_enrichment_from_loader(tmp_yaml):
 # ── help text ────────────────────────────────────────────────────────────────
 
 def test_help_text_mentions_trace():
-    from dracon.cli import HELP_TEXT
-    assert "--trace" in HELP_TEXT
-    assert "--trace-all" in HELP_TEXT
+    """`dracon show` surfaces both --trace and --trace-all (legacy HELP_TEXT
+    was deleted; the SSOT now lives in `ShowCmd`'s field metadata)."""
+    from dracon.cli import ShowCmd
+    assert "trace" in ShowCmd.model_fields
+    assert "trace_all" in ShowCmd.model_fields
 
 
 # ── @dracon_program trace integration ────────────────────────────────────────

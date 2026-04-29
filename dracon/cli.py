@@ -313,214 +313,6 @@ class DraconPrint:
                 print(f"  {name} = {value!r}  [CLI]", file=sys.stderr)
 
 
-# ── legacy parse_argv (compat with old dracon-print) ────────────────────────
-
-
-HELP_TEXT = """\
-dracon show — Inspect and dry-run Dracon configurations
-
-Usage: dracon show [OPTIONS] CONFIG [CONFIG ...]
-
-  Load one or more Dracon config files, apply composition (merging, includes,
-  instructions), and display the result. Files are layered left-to-right;
-  later files override earlier ones.
-
-Options:
-  -c, --construct       Fully construct into Python objects (default: compose only)
-  -r, --resolve         Resolve all lazy interpolations (implies -c)
-  -p, --permissive      Leave unresolvable ${...} as strings (use with -r)
-  -s, --select PATH     Extract subtree at keypath (e.g., database.host)
-  -j, --json            Output as JSON (implies -c)
-      --str-output      Output raw str() instead of YAML
-      --show-vars       Print table of all defined variables (to stderr)
-      --symbols         List symbols in scope (human-readable)
-      --symbols-json    List symbols in scope (JSON for tooling)
-  -v, --verbose         Enable debug logging
-  -f, --file PATH       Config file (legacy, prefer positional args)
-  -h, --help            Show this help
-      --version         Show version
-
-Context Variables:
-  ++name value          Set context variable for ${...} expressions
-  ++name=value          Equals form
-  --define.name value   Long form
-
-Tracing:
-  --trace PATH          Show provenance chain for a config path
-  --trace-all           Show provenance for all values
-
-Config Overrides:
-  --path.to.key value   Override a config value at a dotted keypath
-  --path.to.key=value   Equals form"""
-
-
-def _print_legacy_help(file=None):
-    print(HELP_TEXT, file=file or sys.stdout)
-
-
-def parse_argv(argv: List[str]) -> DraconPrint:
-    """Parse command-line arguments into a DraconPrint instance (legacy compat)."""
-    SHORT_FLAGS = {
-        'c': 'construct', 'r': 'resolve', 'p': 'permissive',
-        'j': 'json_output', 'v': 'verbose',
-    }
-    LONG_FLAGS = {
-        '--construct': 'construct', '--resolve': 'resolve',
-        '--permissive': 'permissive', '--json': 'json_output',
-        '--str-output': 'str_output', '--show-vars': 'show_vars',
-        '--verbose': 'verbose', '--trace-all': 'trace_all',
-    }
-    SHORT_OPTIONS = {'s': 'select', 'f': 'file'}
-    LONG_OPTIONS = {'--select': 'select', '--file': 'file', '--trace': 'trace'}
-
-    config_files: List[str] = []
-    context: Dict[str, Any] = {}
-    overrides: Dict[str, Any] = {}
-    flags: Dict[str, Any] = {}
-
-    i = 0
-    while i < len(argv):
-        token = argv[i]
-
-        if token in ('--help', '-h'):
-            _print_legacy_help()
-            sys.exit(0)
-        if token == '--version':
-            print(f"dracon {_get_version()}")
-            sys.exit(0)
-
-        if token in LONG_FLAGS:
-            flags[LONG_FLAGS[token]] = True
-            i += 1
-            continue
-
-        if '=' in token and token.split('=', 1)[0] in LONG_OPTIONS:
-            key, val = token.split('=', 1)
-            name = LONG_OPTIONS[key]
-            if name == 'file':
-                config_files.append(val)
-            else:
-                flags[name] = val
-            i += 1
-            continue
-        if token in LONG_OPTIONS:
-            if i + 1 >= len(argv):
-                print(f"Error: {token} requires a value", file=sys.stderr)
-                sys.exit(1)
-            name = LONG_OPTIONS[token]
-            if name == 'file':
-                config_files.append(argv[i + 1])
-            else:
-                flags[name] = argv[i + 1]
-            i += 2
-            continue
-
-        if token.startswith('++'):
-            var_part = token[2:]
-            if '=' in var_part:
-                name, val = var_part.split('=', 1)
-                context[name] = _parse_yaml_value(val)
-            elif i + 1 < len(argv):
-                context[var_part] = _parse_yaml_value(argv[i + 1])
-                i += 1
-            else:
-                print(f"Error: {token} requires a value", file=sys.stderr)
-                sys.exit(1)
-            i += 1
-            continue
-
-        if token.startswith('--define.'):
-            name_part = token[len('--define.'):]
-            if '=' in name_part:
-                name, val = name_part.split('=', 1)
-                context[name] = _parse_yaml_value(val)
-            elif i + 1 < len(argv):
-                context[name_part] = _parse_yaml_value(argv[i + 1])
-                i += 1
-            else:
-                print(f"Error: {token} requires a value", file=sys.stderr)
-                sys.exit(1)
-            i += 1
-            continue
-
-        if token.startswith('-') and not token.startswith('--') and len(token) > 1:
-            chars = token[1:]
-            j = 0
-            while j < len(chars):
-                ch = chars[j]
-                if ch in SHORT_FLAGS:
-                    flags[SHORT_FLAGS[ch]] = True
-                    j += 1
-                elif ch in SHORT_OPTIONS:
-                    name = SHORT_OPTIONS[ch]
-                    remaining = chars[j + 1:]
-                    if remaining:
-                        val = remaining
-                    elif i + 1 < len(argv):
-                        i += 1
-                        val = argv[i]
-                    else:
-                        print(f"Error: -{ch} requires a value", file=sys.stderr)
-                        sys.exit(1)
-                    if name == 'file':
-                        config_files.append(val)
-                    else:
-                        flags[name] = val
-                    break
-                else:
-                    print(f"Error: unknown option: -{ch}", file=sys.stderr)
-                    sys.exit(1)
-            i += 1
-            continue
-
-        if token.startswith('--') and '.' in token.lstrip('-'):
-            key_part = token[2:]
-            if '=' in key_part:
-                name, val = key_part.split('=', 1)
-                overrides[name] = _parse_yaml_value(val)
-            elif i + 1 < len(argv):
-                overrides[key_part] = _parse_yaml_value(argv[i + 1])
-                i += 1
-            else:
-                print(f"Error: {token} requires a value", file=sys.stderr)
-                sys.exit(1)
-            i += 1
-            continue
-
-        if token.startswith('--'):
-            print(f"Error: unknown option: {token}", file=sys.stderr)
-            sys.exit(1)
-
-        if token.startswith('+'):
-            config_files.append(token[1:])
-            i += 1
-            continue
-
-        config_files.append(token)
-        i += 1
-
-    if not config_files:
-        print("Error: no config files specified\n", file=sys.stderr)
-        _print_legacy_help(file=sys.stderr)
-        sys.exit(1)
-
-    return DraconPrint(
-        config_files=config_files,
-        construct=flags.get('construct', False),
-        resolve=flags.get('resolve', False),
-        permissive=flags.get('permissive', False),
-        select=flags.get('select'),
-        json_output=flags.get('json_output', False),
-        str_output=flags.get('str_output', False),
-        show_vars=flags.get('show_vars', False),
-        verbose=flags.get('verbose', False),
-        context=context,
-        overrides=overrides,
-        trace=flags.get('trace'),
-        trace_all=flags.get('trace_all', False),
-    )
-
-
 # ── program-aware helpers ────────────────────────────────────────────────────
 
 
@@ -687,13 +479,15 @@ class ShowCmd(BaseModel):
 
         return self._run_program_mode()
 
-    def _run_raw_mode(self) -> str:
-        """Delegate to DraconPrint for raw YAML processing."""
-        # separate config files and context vars from targets
-        config_files = []
-        context = {}
-        overrides = {}
+    def _split_targets(self) -> tuple[List[str], Dict[str, Any], Dict[str, Any]]:
+        """split self.targets into (config_files, context, overrides).
 
+        ++name=value / --define.name=value go to context; +file and bare paths
+        go to config_files. Overrides start empty; reserved for dotted-key
+        --x.y=z forms when those land back in raw mode."""
+        config_files: List[str] = []
+        context: Dict[str, Any] = {}
+        overrides: Dict[str, Any] = {}
         for t in self.targets:
             if t.startswith('++'):
                 var_part = t[2:]
@@ -711,6 +505,32 @@ class ShowCmd(BaseModel):
                 config_files.append(t[1:])
             else:
                 config_files.append(t)
+        return config_files, context, overrides
+
+    def _build_printer(self) -> DraconPrint:
+        """Build the DraconPrint engine matching this ShowCmd's argv state.
+
+        Pure: no I/O, no sys.exit. Used by `_run_raw_mode` and by tests that
+        want to introspect the parsed argv without actually running compose."""
+        config_files, context, overrides = self._split_targets()
+        return DraconPrint(
+            config_files=config_files,
+            construct=self.do_construct,
+            resolve=self.resolve,
+            permissive=self.permissive,
+            select=self.select,
+            json_output=self.json_output,
+            show_vars=self.show_vars,
+            verbose=self.verbose,
+            context=context,
+            overrides=overrides,
+            trace=self.trace,
+            trace_all=self.trace_all,
+        )
+
+    def _run_raw_mode(self) -> str:
+        """Delegate to DraconPrint for raw YAML processing."""
+        config_files, context, _ = self._split_targets()
 
         # handle --symbols / --symbols-json: compose, then render from symbol table
         if self.symbols or self.symbols_json:
@@ -727,20 +547,7 @@ class ShowCmd(BaseModel):
             print(output)
             return output
 
-        printer = DraconPrint(
-            config_files=config_files,
-            construct=self.do_construct,
-            resolve=self.resolve,
-            permissive=self.permissive,
-            select=self.select,
-            json_output=self.json_output,
-            show_vars=self.show_vars,
-            verbose=self.verbose,
-            context=context,
-            overrides=overrides,
-            trace=self.trace,
-            trace_all=self.trace_all,
-        )
+        printer = self._build_printer()
 
         is_tty = sys.stdout.isatty()
         no_color = os.environ.get("NO_COLOR", "")
