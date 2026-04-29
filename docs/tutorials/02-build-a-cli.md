@@ -171,9 +171,9 @@ The decorator also adds a few other class methods:
 - `@dracon_program` turns a Pydantic model into a CLI program
 - `Arg()` controls how fields map to CLI arguments (positional, short flags, help text)
 - `+file.yaml` loads config files from the command line
-- `--flag value` overrides individual fields
+- `--flag value` sets any declared option — Pydantic field or top-level `!require` / `!set_default` in a layered config
 - `--nested.path value` overrides nested model fields
-- `++var=value` injects context variables for `${...}` interpolations
+- `++var=value` injects context variables for `${...}` interpolations (escape hatch when a name has no declaration or collides with a model field)
 - `run()` is dispatched automatically after parsing
 
 Next: subcommands, config file auto-discovery, and more advanced patterns.

@@ -140,19 +140,31 @@ Every `@dracon_program` includes:
 
 ### CLI Argument Parsing
 
+The mental model is one rule: **`--name value` targets anything declared, anywhere** —
+a Pydantic field on the program model, or a top-level `!require` / `!set_default`
+in any layered config. Both surfaces share the same argparse flag set and the
+same `--help` panel.
+
 - `+file.yaml` -- load as an additional config layer (merged left to right)
-- `++var=value` or `++var value` -- set context variable for `${...}` expressions
-- `--define.var=value` or `--define.var value` -- long form of `++`
-- `--flag value` or `--flag=value` -- set a named option
+- `--flag value` or `--flag=value` -- set a named option (model field *or* YAML-declared variable)
+- `--nested.path value` -- set a nested model field by dotted path
+- `++var=value` or `++var value` -- set a context variable directly (escape hatch, see below)
+- `--define.var=value` -- long form of `++`
 - Short flags cannot be combined: use `-c -r -j`, not `-crj`
+
+`++` and `--define.` stay as the generic context-injection rail. Reach for
+them when a flag has no declaration, when a model field shadows a YAML
+variable of the same name, or when you want to feed a raw YAML literal that
+sidesteps argparse coercion.
 
 ---
 
 ## CLI flags from config layers
 
-Top-level `!require` and `!set_default` directives in any `+`-layered config
-become real argparse flags at runtime. Adding a new flag for an experiment
-becomes a config edit, not a code edit.
+The flag mechanism described above is unified: it covers model fields *and*
+top-level `!require` / `!set_default` directives in any `+`-layered config.
+Adding a new flag for an experiment is a config edit, not a code edit — the
+same `--name value` rail handles it.
 
 ```yaml
 # plugins/analytics.yaml
@@ -198,15 +210,14 @@ Specifically:
 
 ### Why `++` still exists
 
-`++name=value` (and its long form `--define.name=value`) bypass all flag
-discovery. Reach for them when:
+`++name=value` and `--define.name=value` bypass all flag discovery. They
+stay because they cover three cases the unified flag rail cannot:
 
-- A model field shadows a YAML variable of the same name and you need
-  to write the YAML variable explicitly.
-- A name has no declaration anywhere — `++` is the generic, ad-hoc
-  context injection rail.
-- A discovered flag's argparse coercion gets in the way and you want
-  to feed a raw YAML literal instead (e.g. `++weights="[0.1, 0.2]"`).
+- A model field shadows a YAML variable of the same name; `++` writes
+  the YAML variable explicitly.
+- A name has no declaration anywhere — pure ad-hoc context injection.
+- A discovered flag's argparse coercion gets in the way; `++` accepts a
+  raw YAML literal instead (e.g. `++weights="[0.1, 0.2]"`).
 
 ### Inspecting at runtime
 

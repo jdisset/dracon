@@ -99,9 +99,10 @@ The docstring on each subcommand model appears as the command description.
 
 ## Layered configs as CLI plug-ins
 
-Use this when you want a layered config file to *grow* the flag set of your
-CLI. Top-level `!require` and `!set_default` directives in a `+file.yaml`
-become real argparse flags — `--help`-visible, with optional short alias.
+`--name value` is a single rail: it targets any Pydantic field on the program
+model *and* any top-level `!require` / `!set_default` in a layered config.
+Same flag set, same `--help` panel. So a layered config grows the CLI without
+touching Python.
 
 A small CLI:
 

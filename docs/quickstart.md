@@ -87,7 +87,7 @@ python app.py +base.yaml +prod.yaml --workers 8
 prod: 8 workers, db=db.prod.internal
 ```
 
-Config files are prefixed with `+`. CLI flags override everything.
+Config files are prefixed with `+`. `--name value` sets any declared option — a Pydantic field on the model, or a top-level `!require` / `!set_default` in a layered config. Same rail, same `--help` panel.
 
 ## What just happened
 
