@@ -16,10 +16,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Mapping, Optional
 
-from dracon.cli_declaration import CliDirective
+from dracon.cli_declaration import CliDirective, parse_directive_body
 from dracon.composer import CompositionResult
 from dracon.diagnostics import CompositionError, DraconError
-from dracon.loader import DraconLoader
+from dracon.loader import DraconLoader, compose_config_from_str
 
 logger = logging.getLogger(__name__)
 
@@ -72,14 +72,90 @@ def discover_cli_directives(
     for source in conf_sources:
         try:
             comp = loader.compose(source)
+            aggregate.extend(_collect_directives(comp))
         except (CompositionError, DraconError, FileNotFoundError, OSError) as e:
-            if soft:
+            # full composition can fail when downstream interpolations or
+            # includes need argv-supplied context. In that case fall back to
+            # a static YAML-level scan so the top-level !require / !set_default
+            # directives still surface in --help.
+            static = _static_scan(source, loader)
+            if static:
+                logger.debug(
+                    "discovery: full compose failed for %r (%s); using static scan with %d directives",
+                    source, e, len(static),
+                )
+                aggregate.extend(static)
+            elif soft:
                 logger.debug("discovery: skipping %r (%s)", source, e)
                 continue
-            raise
-        aggregate.extend(_collect_directives(comp))
+            else:
+                raise
 
     return _dedupe_last_wins(aggregate)
+
+
+def _static_scan(source: str, loader: DraconLoader) -> list[CliDirective]:
+    """Fallback used when full composition fails (typically because an
+    interpolation or include needs argv-supplied context that isn't yet
+    set). Re-uses the existing instruction matchers and the shared
+    `parse_directive_body` parser, so there's exactly one place that
+    knows how to recognise a directive — the instruction registry."""
+    from dracon.instructions import Require, SetDefault
+
+    content = _read_source_text(source, loader)
+    if content is None:
+        return []
+    try:
+        comp = compose_config_from_str(loader.yaml, content)
+    except Exception as e:
+        logger.debug("static scan: yaml compose failed for %r (%s)", source, e)
+        return []
+    root = getattr(comp, 'root', None)
+    if root is None or not hasattr(root, 'value'):
+        return []
+
+    out: list[CliDirective] = []
+    for key_node, value_node in root.value:
+        tag = getattr(key_node, 'tag', None) or ''
+        var_name = getattr(key_node, 'value', None)
+        if not isinstance(var_name, str) or not var_name.isidentifier():
+            continue
+        # the instruction matchers ARE the SSOT for tag classification.
+        require = Require.match(tag)
+        set_default = SetDefault.match(tag) if require is None else None
+        if require is not None:
+            kind, python_type = "require", None
+        elif set_default is not None:
+            kind, python_type = "set_default", set_default.target_type
+        else:
+            continue
+        try:
+            directive, _ = parse_directive_body(
+                var_name, value_node, kind, python_type, key_node=key_node,
+            )
+        except Exception as e:
+            logger.debug("static scan: skipping %s %r (%s)", kind, var_name, e)
+            continue
+        out.append(directive)
+    return out
+
+
+def _read_source_text(source: str, loader: DraconLoader) -> Optional[str]:
+    """Resolve a source string to raw YAML text via the loader's scheme
+    registry. Reuses the same scheme normalisation as `loader.compose`,
+    so bare paths get the `file:` scheme treatment."""
+    from dracon.include import ensure_scheme
+
+    scheme, _, rest = ensure_scheme(source).partition(':')
+    fn = (loader.custom_loaders or {}).get(scheme)
+    if fn is None:
+        return None
+    try:
+        result, _ = fn(rest, node=None, draconloader=loader)
+    except Exception as e:
+        logger.debug("static scan: %r loader failed for %r (%s)", scheme, source, e)
+        return None
+    return result if isinstance(result, str) else None
 
 
 def _collect_directives(comp: CompositionResult) -> list[CliDirective]:

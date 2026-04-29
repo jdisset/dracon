@@ -44,6 +44,52 @@ def _prog(model: type[BaseModel] = _Cfg) -> object:
 # basic flag wiring
 
 
+def test_directives_surface_when_full_compose_fails(tmp_path, capsys):
+    """A layer whose full composition fails (because a downstream
+    interpolation needs argv-supplied context) must still surface its
+    top-level !require / !set_default in --help via the static fallback."""
+    src = _write(
+        tmp_path,
+        "broken.yaml",
+        """
+        !require dataset_file: "path to dataset"
+        !set_default:int batch_size:
+          default: 32
+          help: "batch size"
+
+        # downstream interpolation that fails before argv parsing
+        !define _stem: ${dataset_file.rsplit('/', 1)[-1]}
+        used: ${_stem}
+        """,
+    )
+    with pytest.raises(SystemExit):
+        _prog().parse_args([f"+{src.as_posix()}", "--help"])
+    out = capsys.readouterr().out
+    assert "--dataset-file" in out
+    assert "--batch-size" in out
+    assert "batch size" in out
+
+
+def test_bare_path_layer_resolves_as_file(tmp_path, capsys, monkeypatch):
+    """A `+path/to/layer.yaml` (no `file:` scheme) must be treated as
+    `file:` for discovery, matching how `loader.compose` normalises it."""
+    src = _write(
+        tmp_path,
+        "layer.yaml",
+        """
+        !require port:
+          help: "bind port"
+        used: ${port}
+        """,
+    )
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit):
+        _prog().parse_args(["+layer.yaml", "--help"])
+    out = capsys.readouterr().out
+    assert "--port" in out
+    assert "bind port" in out
+
+
 def test_underscore_directive_dash_aliased_in_help_and_argv(tmp_path, capsys):
     """A `!require api_key:` should surface as `--api-key` in help and accept
     `--api-key VAL` on argv, matching the model-side `auto_dash_alias` rule."""

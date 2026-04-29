@@ -39,6 +39,13 @@ DEFAULT_LOADERS: Dict[str, Callable] = {
 }
 
 
+def ensure_scheme(source: str) -> str:
+    """Bare paths default to the `file:` scheme. SSOT for the normalisation
+    used by `loader.compose`, `stack._compose_layer`, and the CLI discovery
+    pre-pass."""
+    return source if ':' in source else f'file:{source}'
+
+
 @dataclass
 class IncludeComponents:
     """Represents the parsed components of an include string."""

@@ -805,15 +805,12 @@ def load_node(node: Node, **kwargs):
 
 def load_file(config_path: str | Path, raw_dict=True, **kwargs):
     """Convenience function to load a single file path."""
+    from dracon.include import ensure_scheme
     if isinstance(config_path, Path):
         path_str = config_path.resolve().as_posix()
     else:
         path_str = str(config_path)
-
-    if ":" not in path_str:
-        path_str = f"file:{path_str}"
-
-    return load(path_str, raw_dict=raw_dict, **kwargs)
+    return load(ensure_scheme(path_str), raw_dict=raw_dict, **kwargs)
 
 
 def loads(config_str: str, raw_dict=False, **kwargs):

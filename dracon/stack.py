@@ -321,12 +321,9 @@ class CompositionStack:
 
         try:
             if isinstance(layer.source, str):
-                from dracon.include import compose_from_include_str
-                source = layer.source
-                if ":" not in source:
-                    source = f"file:{source}"
+                from dracon.include import compose_from_include_str, ensure_scheme
                 return compose_from_include_str(
-                    self._loader, source,
+                    self._loader, ensure_scheme(layer.source),
                     custom_loaders=self._loader.custom_loaders,
                 )
             elif isinstance(layer.source, Node):
