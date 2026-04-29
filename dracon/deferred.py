@@ -504,135 +504,136 @@ def parse_query_params(query_string: str) -> Dict[str, Any]:
 PathOrStr = Union[KeyPath, str]
 
 
+def _normalize_force_deferred(
+    force_deferred_at: Optional[List[Union[PathOrStr, tuple[PathOrStr, Type]]]],
+) -> dict[KeyPath, Optional[Type]]:
+    """coerce the heterogenous force_deferred_at list to {KeyPath: type|None}."""
+    out: dict[KeyPath, Optional[Type]] = {}
+    for elt in force_deferred_at or []:
+        _path = None
+        _type = None
+        if isinstance(elt, tuple):
+            if len(elt) != 2:
+                raise ValueError(
+                    "force_deferred_at must be a list of paths or tuples of (path, type)"
+                )
+            _path, _type = elt
+            if isinstance(_path, str):
+                _path = KeyPath(_path)
+        elif isinstance(elt, str):
+            _path = KeyPath(elt)
+        elif isinstance(elt, KeyPath):
+            _path = elt
+        if not isinstance(_path, KeyPath):
+            raise ValueError("force_deferred_at must be a list of paths or tuples of (path, type)")
+        out[_path] = _type
+    return out
+
+
+def _resolve_deferred_type(
+    path: KeyPath, deferred_paths: dict[KeyPath, Optional[Type]]
+) -> tuple[bool, Optional[Type]]:
+    """if path matches any glob in deferred_paths, return (True, most-specific type)."""
+    matched = False
+    best_match = ROOTPATH
+    obj_type: Optional[Type] = None
+    for p, t in deferred_paths.items():
+        if p.match(path):
+            matched = True
+            if t is not None and (obj_type is None or len(p) > len(best_match)):
+                best_match = p
+                obj_type = t
+            break
+    return matched, obj_type
+
+
+def _strip_deferred_tag(node) -> dict:
+    """strip `!deferred[::params][:tag]` prefix, return parsed query params."""
+    qparams: dict = {}
+    tag = getattr(node, 'tag', None)
+    if not (isinstance(tag, str) and tag.startswith('!deferred')):
+        return qparams
+    rest = tag[len('!deferred'):]
+    if rest.startswith('::'):
+        parts = rest[2:].split(':', 1)
+        qparams = parse_query_params(parts[0])
+        node.tag = '!' + parts[1] if len(parts) > 1 else ''
+    elif rest.startswith(':'):
+        node.tag = '!' + rest[1:]
+    elif not rest:
+        node.tag = ''
+    else:
+        node.tag = rest if rest.startswith('!') else '!' + rest
+    return qparams
+
+
 @ftrace(watch=[], inputs=True)
 def process_deferred(
     comp: CompositionResult,
     force_deferred_at: Optional[List[Union[PathOrStr, tuple[PathOrStr, Type]]]] = None,
 ):
     from dracon.nodes import reset_tag
-    # force deferred_at is a list where each elt can be a path, or a tuple of (path, target_type)
+    from dracon.rewriter import (
+        NodeRewriter,
+        RewriteHandler,
+        RewriteResult,
+        MutationKind,
+    )
 
-    force_deferred_at = force_deferred_at or []
-    # early exit: no deferred paths requested, skip the expensive tree walk
-    if not force_deferred_at:
-        # still need to check for !deferred tags in the tree, but only walk if any exist
-        has_deferred_tag = False
+    deferred_paths = _normalize_force_deferred(force_deferred_at)
+
+    # early exit: no path globs requested and no !deferred tag in the tree
+    if not deferred_paths:
+        comp.make_map()
         if comp.node_map:
-            for node in comp.node_map.values():
-                tag = getattr(node, 'tag', None)
-                if tag and isinstance(tag, str) and tag.startswith('!deferred'):
-                    has_deferred_tag = True
-                    break
-        if not has_deferred_tag:
-            return comp
-    deferred_paths = {}
-    for elt in force_deferred_at:
-        _path = None
-        _type = None
-        if isinstance(elt, tuple):
-            if len(elt) == 2:
-                _path, _type = elt
-            else:
-                raise ValueError(
-                    "force_deferred_at must be a list of paths or tuples of (path, type)"
-                )
-        elif isinstance(elt, str):
-            _path = KeyPath(elt)
-        elif isinstance(elt, KeyPath):
-            _path = elt
+            has_deferred_tag = any(
+                isinstance(getattr(n, 'tag', None), str) and n.tag.startswith('!deferred')
+                for n in comp.node_map.values()
+            )
+            if not has_deferred_tag:
+                return comp
 
-        if not isinstance(_path, KeyPath):
-            raise ValueError("force_deferred_at must be a list of paths or tuples of (path, type)")
+    processed_paths: set[KeyPath] = set()
 
-        deferred_paths[_path] = _type
+    def discover(node, path):
+        if isinstance(node, DeferredNode):
+            return False
+        # already wrapped under a previously processed deferred ancestor
+        if any(path.startswith(p) for p in processed_paths):
+            return False
+        tag = getattr(node, 'tag', None)
+        is_tag_deferred = isinstance(tag, str) and tag.startswith('!deferred')
+        is_path_deferred, _ = _resolve_deferred_type(path, deferred_paths)
+        return is_tag_deferred or is_path_deferred
 
-    deferred_nodes = []
-
-    comp.make_map()
-
-    def find_deferred_nodes(node, path: KeyPath):
-        is_tag_deferred = (
-            hasattr(node, 'tag') and isinstance(node.tag, str) and node.tag.startswith('!deferred')
-        )
-        is_path_deferred = False
-        best_match = ROOTPATH
-        _type = None
-        for p, t in deferred_paths.items():
-            if p.match(path):
-                is_path_deferred = True
-                # take most specific type
-                if t is not None:
-                    if _type is None or len(p) > len(best_match):
-                        best_match = p
-                        _type = t
-                break
-
-        if not isinstance(node, DeferredNode) and (is_tag_deferred or is_path_deferred):
-            is_child_of_deferred = False
-            current_parent_path = path.parent
-            while current_parent_path != ROOTPATH and current_parent_path != path:
-                if any(p == current_parent_path for _, p, _ in deferred_nodes):
-                    is_child_of_deferred = True
-                    break
-                current_parent_path = current_parent_path.parent
-
-            if not is_child_of_deferred:
-                deferred_nodes.append((node, path, _type))
-
-    comp.walk(find_deferred_nodes)
-    deferred_nodes = sorted(deferred_nodes, key=lambda x: len(x[1]), reverse=True)
-
-    nodes_processed_paths = set()
-
-    for node, path, obj_type in deferred_nodes:
-        if any(path.startswith(processed_path) for processed_path in nodes_processed_paths):
-            continue
-
-        current_node_at_path = path.get_obj(comp.root)
-        if isinstance(current_node_at_path, DeferredNode):
-            continue
-
-        qparams = {}
-        node_context = {}
-        if hasattr(node, 'context'):
-            node_context = node.context
-
-        if hasattr(node, 'tag') and isinstance(node.tag, str) and node.tag.startswith('!deferred'):
-            node.tag = node.tag[len('!deferred') :]
-            if node.tag.startswith('::'):
-                tag_parts = node.tag[2:].split(':', 1)
-                query_string = tag_parts[0]
-                qparams = parse_query_params(query_string)
-                if len(tag_parts) > 1:
-                    node.tag = '!' + tag_parts[1]
-                else:
-                    node.tag = ''
-            elif node.tag.startswith(':'):
-                node.tag = '!' + node.tag[1:]
-            elif not node.tag:
-                node.tag = ''
-            else:
-                if node.tag and not node.tag.startswith('!'):
-                    node.tag = '!' + node.tag
-
-        if not hasattr(node, 'tag') or not node.tag or node.tag == '!':
+    def apply(comp, path, node):
+        # idempotency: someone already wrapped this path
+        current = path.get_obj(comp.root)
+        if isinstance(current, DeferredNode):
+            return RewriteResult.NO_CHANGE
+        _, obj_type = _resolve_deferred_type(path, deferred_paths)
+        node_context = node.context if hasattr(node, 'context') else {}
+        qparams = _strip_deferred_tag(node)
+        if not getattr(node, 'tag', None) or node.tag == '!':
             reset_tag(node)
-
         loader_instance = getattr(comp, '_loader_instance', None)
-
         logger.debug(f"Creating deferred node at {path} with type {obj_type}")
-
         new_node = make_deferred(
-            value=node,
-            path=path,
-            context=node_context,
-            comp=comp,
-            loader=loader_instance,
-            obj_type=obj_type,
-            **qparams,
+            value=node, path=path, context=node_context,
+            comp=comp, loader=loader_instance, obj_type=obj_type, **qparams,
         )
         comp.set_at(path, new_node)
-        nodes_processed_paths.add(path)
+        processed_paths.add(path)
+        return RewriteResult.MUTATED
 
+    handler = RewriteHandler(
+        name='process_deferred',
+        discover=discover,
+        apply=apply,
+        trace_label='deferred',
+        mutation_kind=MutationKind.WRAP,
+        restart_other_passes=False,
+    )
+    NodeRewriter(comp, handler, order='longest_first').run()
     comp.make_map()
     return comp
