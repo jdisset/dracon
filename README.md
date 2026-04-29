@@ -113,6 +113,7 @@ python app.py +base.yaml +prod.yaml --workers 8
 
 - Layered configs with `!include`, merge keys, selectors, and optional overlays
 - Standard CLIs generated from Pydantic models, with nested overrides and config-file layering
+- `!require` / `!set_default` directives that double as CLI flags: layered configs grow the flag set and `--help` text without touching the model
 - YAML callables with `!fn`, `!fn:path`, and `!pipe`
 - Runtime deferral with `!deferred` and `Resolvable[T]`
 - `make_callable()` for turning YAML into reusable Python factories
