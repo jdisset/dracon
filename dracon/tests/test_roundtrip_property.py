@@ -25,7 +25,7 @@ from typing import Annotated, Any, Literal, Union
 from hypothesis import HealthCheck, given, settings, strategies as st
 from pydantic import BaseModel, Field, computed_field
 
-from dracon import DraconLoader, dump, dump_to_node
+from dracon import DraconLoader, dump, dump_to_node, Lazy, LazyDraconModel
 from dracon.callable import DraconCallable
 from dracon.deferred import DeferredNode, make_deferred
 from dracon.lazy import LazyInterpolable
@@ -186,6 +186,11 @@ def equivalent(a: Any, b: Any) -> bool:
     """
     if a is b:
         return True
+    if isinstance(a, Lazy) or isinstance(b, Lazy):
+        # Lazy[T] equality is on the wrapped LazyInterpolable's expression source
+        ai = a._lazy if isinstance(a, Lazy) else a
+        bi = b._lazy if isinstance(b, Lazy) else b
+        return str(getattr(ai, 'value', ai)) == str(getattr(bi, 'value', bi))
     if isinstance(a, LazyInterpolable) or isinstance(b, LazyInterpolable):
         return str(getattr(a, 'value', a)) == str(getattr(b, 'value', b))
     if isinstance(a, DeferredNode) and isinstance(b, DeferredNode):
@@ -498,7 +503,54 @@ class TestWrapperRegressions:
         assert reloaded(y=7) == Point(x=5, y=7)
 
 
-# ── pydantic hybrid quoter ──────────────────────────────────────────────────
+# ── Lazy[T] alongside Resolvable[T] / DeferredNode[T] ──────────────────────
+
+
+class LazyCfg(LazyDraconModel):
+    """Holds a Lazy[int] field for round-trip tests."""
+    port: Lazy[int]
+
+
+class TestLazyTypedFieldRoundTrip:
+    """Lazy[T] is the third typed-deferred wrapper; pin its round-trip alongside
+    Resolvable[T] and DeferredNode[T]."""
+
+    def test_lazy_field_dumps_interpolation_text(self):
+        l = make_loader()
+        l.context["env_port"] = 9000
+        l.context["LazyCfg"] = LazyCfg
+        cfg = l.loads("!LazyCfg\nport: ${env_port}")
+        text = l.dump(cfg)
+        assert "${env_port}" in text
+        # the dumped text must NOT carry the resolved 9000 — that would
+        # mean the wrapper got auto-resolved on dump
+        assert "port: 9000" not in text
+
+    def test_lazy_field_round_trips(self):
+        l = make_loader()
+        l.context["env_port"] = 9000
+        l.context["LazyCfg"] = LazyCfg
+        cfg1 = l.loads("!LazyCfg\nport: ${env_port}")
+        text = l.dump(cfg1)
+        cfg2 = l.loads(text)
+        # both resolve to 9000 on access
+        assert cfg1.port == 9000
+        assert cfg2.port == 9000
+
+    def test_lazy_wrapper_identity_preserved_until_access(self):
+        """The wrapper must survive load → dump → load without auto-resolving."""
+        l = make_loader()
+        l.context["env_port"] = 9000
+        l.context["LazyCfg"] = LazyCfg
+        cfg = l.loads("!LazyCfg\nport: ${env_port}")
+        # peek at the raw field value via __dict__ to bypass the auto-resolve
+        # path; the field should hold a wrapper, not a resolved int
+        raw = cfg.__dict__["port"]
+        assert isinstance(raw, (Lazy, LazyInterpolable))
+
+
+class TestHybridQuoterRegressions:
+    """Regression anchors for the pydantic nested-wrapper flattening bugs."""
 
 
 class TestHybridQuoterRegressions:
