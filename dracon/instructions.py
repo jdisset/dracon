@@ -21,6 +21,11 @@ from dracon.interpolation import evaluate_expression, InterpolableNode, LazyCons
 from dracon.deferred import DeferredNode
 from functools import partial
 from dracon.nodes import DraconScalarNode
+from dracon.cli_declaration import (
+    CliDirective,
+    parse_directive_body,
+    _SET_DEFAULT_KEYS,
+)
 
 ##────────────────────────────────────────────────────────────────────────────}}}
 
@@ -45,6 +50,24 @@ def evaluate_nested_mapping_keys(node, engine, context):
     elif isinstance(node, DraconSequenceNode):
         for item in node.value:
             evaluate_nested_mapping_keys(item, engine, context)
+
+
+def _is_cli_metadata_body(value_node) -> bool:
+    """True iff `value_node` is a mapping body that should be parsed as
+    CLI metadata (per the !require / !set_default extended grammar).
+
+    Trigger: any string key in the (extended) allowed set. `default` is
+    recognised on `!require` too so an ill-formed body surfaces a clear
+    "require + default" error rather than falling through to legacy
+    dict-default semantics.
+    """
+    if not isinstance(value_node, DraconMappingNode):
+        return False
+    for k_node, _ in value_node.value:
+        kv = getattr(k_node, "value", None)
+        if isinstance(kv, str) and kv in _SET_DEFAULT_KEYS:
+            return True
+    return False
 
 
 def unpack_mapping_key(
@@ -612,6 +635,37 @@ class SetDefault(Define):
             return SetDefault(target_type=target, annotation_name=type_name)
         return None
 
+    def get_name_and_value(self, comp_res, path, loader):
+        from dracon.diagnostics import CompositionError
+        key_node = path.get_obj(comp_res.root)
+        value_node = path.removed_mapping_key().get_obj(comp_res.root)
+        if _is_cli_metadata_body(value_node):
+            parent_node = path.parent.get_obj(comp_res.root)
+            var_name = key_node.value
+            if not var_name.isidentifier():
+                raise CompositionError(
+                    f"Invalid variable name '{var_name}' in !set_default. "
+                    f"Must be a valid Python identifier.",
+                    context=node_source(key_node),
+                )
+            directive, default_value = parse_directive_body(
+                var_name, value_node, "set_default", self.target_type,
+                key_node=key_node,
+            )
+            comp_res.cli_directives.append(directive)
+            del parent_node[str(path[-1])]
+            return var_name, default_value, parent_node
+
+        # scalar / non-CLI-metadata body: fall through to legacy path, then
+        # record a directive carrying the resolved scalar default.
+        var_name, value, parent_node = super().get_name_and_value(comp_res, path, loader)
+        comp_res.cli_directives.append(CliDirective(
+            name=var_name, kind="set_default",
+            default=value, python_type=self.target_type,
+            source_context=node_source(key_node),
+        ))
+        return var_name, value, parent_node
+
     @ftrace(watch=[])
     def process(self, comp_res: CompositionResult, path: KeyPath, loader):
         var_name, value, parent_node = self.get_name_and_value(comp_res, path, loader)
@@ -1147,8 +1201,19 @@ class Require(Instruction):
                 context=ctx,
             )
 
-        hint = value_node.value if hasattr(value_node, 'value') else str(value_node)
+        if _is_cli_metadata_body(value_node):
+            directive, hint = parse_directive_body(
+                var_name, value_node, "require", None, key_node=key_node,
+            )
+        else:
+            hint = value_node.value if hasattr(value_node, 'value') else str(value_node)
+            directive = CliDirective(
+                name=var_name, kind="require",
+                help=hint or None, source_context=node_source(key_node),
+            )
+
         del parent_node[str(path[-1])]
+        comp_res.cli_directives.append(directive)
 
         if var_name in loader.context or var_name in comp_res.defined_vars:
             return comp_res

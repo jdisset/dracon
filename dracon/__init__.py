@@ -58,6 +58,7 @@ from dracon.deferred import DeferredNode
 from dracon.raw import RawExpression
 from dracon.composition_trace import CompositionTrace, TraceEntry
 from dracon.instructions import register_instruction, Instruction, unpack_mapping_key
+from dracon.cli_declaration import CliDirective
 from dracon.callable import DraconCallable
 from dracon.pipe import DraconPipe
 from dracon.partial import DraconPartial

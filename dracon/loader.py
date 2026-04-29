@@ -872,6 +872,7 @@ def cached_compose_config_from_str(yaml, content):
         defined_vars=deepcopy(cached.defined_vars) if cached.defined_vars else {},
         default_vars=set(cached.default_vars),
         pending_requirements=list(cached.pending_requirements),
+        cli_directives=list(cached.cli_directives),
         trace=None,
     )
 

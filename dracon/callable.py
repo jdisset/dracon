@@ -53,7 +53,19 @@ def _scan_template_interface(node, loader) -> tuple:
         anno_name = getattr(inst, 'annotation_name', None)
         anno_obj = resolve_annotation(anno_name, scope) if anno_name else MISSING
         v_val = getattr(v_node, 'value', None)
-        docs = v_val if isinstance(v_val, str) and v_val else None
+        if isinstance(v_val, str) and v_val:
+            docs = v_val
+        elif isinstance(v_node, DraconMappingNode):
+            # mapping body: pull `help` if present
+            docs = None
+            for kk, vv in v_node.value:
+                if getattr(kk, 'value', None) == 'help':
+                    h = getattr(vv, 'value', None)
+                    if isinstance(h, str) and h:
+                        docs = h
+                    break
+        else:
+            docs = None
         is_required = isinstance(inst, Require)
         spec = ParamSpec(
             name=name, required=is_required, docs=docs,

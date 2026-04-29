@@ -62,6 +62,7 @@ class CompositionResult(BaseModel):
     defined_vars: dict[str, Any] = {}
     default_vars: set[str] = set()  # vars set via !set_default (soft; overridable by !define)
     pending_requirements: list[tuple[str, str, Any]] = []  # (var_name, hint, source_context)
+    cli_directives: list[Any] = []  # CliDirective records, top-level only
     trace: Optional[CompositionTrace] = None
 
     def __deepcopy__(self, memo=None):
@@ -73,6 +74,7 @@ class CompositionResult(BaseModel):
             defined_vars=deepcopy(self.defined_vars, memo),
             default_vars=set(self.default_vars),
             pending_requirements=list(self.pending_requirements),
+            cli_directives=list(self.cli_directives),
             trace=deepcopy(self.trace, memo) if self.trace is not None else None,
         )
 
@@ -190,12 +192,18 @@ class CompositionResult(BaseModel):
         new_trace = self.trace
         if new_trace is None and isinstance(other, CompositionResult):
             new_trace = other.trace
+        # cli_directives live at the surface — concat in source order so a
+        # later layer can introduce flags without losing earlier ones
+        combined_directives = list(self.cli_directives) + (
+            list(other.cli_directives) if isinstance(other, CompositionResult) else []
+        )
         return CompositionResult(
             root=new_root,
             special_nodes=self.special_nodes,
             anchor_paths=self.anchor_paths,
             defined_vars=combined_vars,
             default_vars=combined_defaults,
+            cli_directives=combined_directives,
             trace=new_trace,
         )
 
