@@ -158,6 +158,16 @@ class CompositionResult(BaseModel):
                 self.default_vars.add(k)
             else:
                 self.default_vars.discard(k)
+        # propagate cli directives from the included composition: !set_default /
+        # !require declarations inside an included file are consumed (the tag
+        # is stripped) before the include returns, so the directives only
+        # survive on its CompositionResult.cli_directives. Without this hop,
+        # a wrapper file using `!include`, `<<: !include`, or
+        # `<<(<): !include` to pull in a vocabulary would lose every flag the
+        # vocabulary declares -- the symmetric counterpart of how
+        # `set_composition_at` already propagates `defined_vars` and trace.
+        if new_comp.cli_directives:
+            self.cli_directives = list(self.cli_directives) + list(new_comp.cli_directives)
         # merge child trace into parent
         if self.trace is not None and new_comp.trace is not None:
             prefix = keypath_to_dotted(at_path) or ""

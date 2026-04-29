@@ -177,3 +177,89 @@ def test_discover_uses_custom_loader_factory(tmp_path):
     assert seen, "loader_factory must be invoked"
     assert out[0].python_type is int
     assert out[0].default == 4242
+
+
+# ── flag discovery walks through `!include` (and `<<(<): !include`) ──────
+
+
+def test_discover_walks_through_propagating_include(tmp_path):
+    """A wrapper file that pulls in a vocabulary via ``<<(<): !include``
+    must surface that vocabulary's CLI directives. This is the natural
+    "wrapper file" pattern: ship a vocabulary, override a few values in
+    a thin wrapper, still get the vocabulary's flags in ``--help``.
+    """
+    extras = _write(
+        tmp_path,
+        "extras.yaml",
+        """
+        !set_default greeting:
+          default: "hello"
+          help: "what to print"
+          short: -g
+        !set_default count:
+          default: 1
+          help: "how many times"
+          short: -n
+        result: "${greeting} x ${count}"
+        """,
+    )
+    wrapper = _write(
+        tmp_path,
+        "wrapper.yaml",
+        f"""
+        !define count: 5
+        <<(<): !include {extras}
+        """,
+    )
+    out = discover_cli_directives([wrapper], seed_context={})
+    names = {d.name for d in out}
+    assert {"greeting", "count"} <= names, (
+        f"vocabulary flags not propagated through propagating include; got {names}"
+    )
+
+
+def test_discover_walks_through_plain_merge_include(tmp_path):
+    """``<<: !include other.yaml`` must also surface other.yaml's flags."""
+    extras = _write(
+        tmp_path,
+        "extras.yaml",
+        """
+        !set_default port:
+          default: 8080
+          help: "bind port"
+          short: -p
+        """,
+    )
+    wrapper = _write(
+        tmp_path,
+        "wrapper.yaml",
+        f"""
+        <<: !include {extras}
+        """,
+    )
+    out = discover_cli_directives([wrapper], seed_context={})
+    names = {d.name for d in out}
+    assert "port" in names, f"flags not propagated through plain merge include; got {names}"
+
+
+def test_discover_walks_through_top_level_include(tmp_path):
+    """``!include other.yaml`` at the top level surfaces other.yaml's flags."""
+    extras = _write(
+        tmp_path,
+        "extras.yaml",
+        """
+        !set_default level:
+          default: "info"
+          help: "log level"
+        """,
+    )
+    wrapper = _write(
+        tmp_path,
+        "wrapper.yaml",
+        f"""
+        !include {extras}
+        """,
+    )
+    out = discover_cli_directives([wrapper], seed_context={})
+    names = {d.name for d in out}
+    assert "level" in names, f"flags not propagated through top-level include; got {names}"
