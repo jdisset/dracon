@@ -169,3 +169,98 @@ class TestMultipleRecipesShareVocabulary:
         cfg = CLI.cli([f"+file:{r1}", f"+file:{r2}"])
         assert cfg.a == {"out": 20}
         assert cfg.b == {"out": 30}
+
+
+# ── ConfigFile path accepts scheme URIs (file:, pkg:, ...) ──────────────
+
+
+class TestConfigFileSchemeUris:
+    """ConfigFile path is a dracon include URI, not a bare filesystem path.
+
+    The same scheme grammar that ``!include`` and ``+file:foo.yaml`` accept must
+    work as a ConfigFile target (``file:`` is the obvious one; ``pkg:`` is
+    equally valid for projects shipping a package-resource vocabulary). The
+    discovery step used to silently drop anything with a ``:`` because it
+    delegated to ``Path.exists()`` -- which fails on scheme prefixes.
+    """
+
+    def test_file_scheme_path_is_accepted(self, tmp_path: Path):
+        vocab = _write(tmp_path, "vocab.yaml", """
+            !define Greeter: !fn
+              !require name: "who to greet"
+              !fn :
+                msg: "hello ${name}"
+        """)
+        recipe = _write(tmp_path, "recipe.yaml", """
+            result: !Greeter
+              name: world
+        """)
+
+        @dracon_program(name="prog", config_files=[ConfigFile(f"file:{vocab}")])
+        class CLI(BaseModel):
+            result: dict = {}
+
+        cfg = CLI.cli([f"+file:{recipe}"])
+        assert cfg.result == {"msg": "hello world"}
+
+    def test_pkg_scheme_path_is_accepted(self, tmp_path: Path, monkeypatch):
+        """A ``pkg:`` URI should compose just like an explicit ``!include
+        pkg:...`` would. We synthesize a tiny throwaway package on sys.path."""
+        import sys, importlib
+
+        pkg_root = tmp_path / "myvocab_pkg"
+        pkg_root.mkdir()
+        (pkg_root / "__init__.py").write_text("")
+        (pkg_root / "base.yaml").write_text(textwrap.dedent("""
+            !define Echo: !fn
+              !require x: "value"
+              !fn :
+                echoed: ${x}
+        """).lstrip())
+        recipe = _write(tmp_path, "recipe.yaml", """
+            r: !Echo { x: "from-pkg-vocab" }
+        """)
+
+        monkeypatch.syspath_prepend(str(tmp_path))
+        # ensure a stale import doesn't shadow the freshly-written tree
+        sys.modules.pop("myvocab_pkg", None)
+        importlib.invalidate_caches()
+
+        @dracon_program(
+            name="pkg-prog",
+            config_files=[ConfigFile("pkg:myvocab_pkg:base.yaml")],
+        )
+        class CLI(BaseModel):
+            r: dict = {}
+
+        cfg = CLI.cli([f"+file:{recipe}"])
+        assert cfg.r == {"echoed": "from-pkg-vocab"}
+
+    def test_required_scheme_uri_missing_raises(self, tmp_path: Path):
+        """``required=True`` on a scheme URI that won't resolve must surface
+        clearly, not silently drop the file."""
+        from dracon import ConfigFile, dracon_program
+
+        @dracon_program(
+            name="required-missing",
+            config_files=[ConfigFile("pkg:no_such_pkg_xyz:absent.yaml", required=True)],
+        )
+        class CLI(BaseModel):
+            x: int = 0
+
+        with pytest.raises((FileNotFoundError, ModuleNotFoundError, ImportError)):
+            CLI.cli([])
+
+    def test_optional_scheme_uri_missing_silently_skips(self, tmp_path: Path):
+        """``required=False`` (default) on a scheme URI that won't resolve
+        must behave like a missing optional bare path: silent skip."""
+
+        @dracon_program(
+            name="optional-missing",
+            config_files=[ConfigFile("pkg:no_such_pkg_xyz:absent.yaml")],
+        )
+        class CLI(BaseModel):
+            x: int = 7
+
+        cfg = CLI.cli([])
+        assert cfg.x == 7

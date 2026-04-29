@@ -111,24 +111,85 @@ def _finalize_yaml_param(decl: CliParam, auto_dash_alias: bool = True) -> CliPar
     )
 
 
+def _scheme_of(path: str) -> Optional[str]:
+    """Return the dracon include scheme prefix (``file``, ``pkg``, ``env``,
+    ...) if ``path`` starts with a known scheme followed by ``:``. Returns
+    ``None`` for bare filesystem paths so callers can apply local-path
+    semantics without confusing a Windows drive letter or a literal colon
+    in a filename for a scheme."""
+    if ':' not in path:
+        return None
+    from dracon.include import DEFAULT_LOADERS
+    head = path.split(':', 1)[0]
+    return head if head in DEFAULT_LOADERS else None
+
+
+def _probe_uri_exists(uri: str) -> bool:
+    """Soft existence check for a dracon include URI.
+
+    Routes through the loader registry so the same scheme grammar that
+    ``!include`` and ``+file:foo.yaml`` accept can drive ``ConfigFile``
+    discovery. Returns False on ``FileNotFoundError`` / ``ImportError``
+    (the contract used by ``!include?``); other errors propagate so a
+    typo'd config doesn't silently disappear.
+    """
+    from dracon.include import DEFAULT_LOADERS
+    scheme = _scheme_of(uri)
+    if scheme is None:
+        return False
+    rest = uri.split(':', 1)[1]
+    # strip optional @selector — existence is about the resource, not the subtree
+    if '@' in rest:
+        rest = rest.split('@', 1)[0]
+    reader = DEFAULT_LOADERS[scheme]
+    try:
+        reader(rest)
+    except (FileNotFoundError, ModuleNotFoundError, ImportError):
+        return False
+    return True
+
+
 def _discover_config_files(config_files: List[ConfigFile]) -> List[str]:
-    """resolve ConfigFile declarations to actual file paths."""
+    """Resolve ``ConfigFile`` declarations into ``+layer`` URIs that the
+    CLI's compose pipeline understands.
+
+    A ``ConfigFile.path`` may be either:
+    - a bare filesystem path (resolved via ``Path.exists()``), or
+    - a dracon include URI (``file:...``, ``pkg:...``, ``env:...``, etc.)
+      using any scheme registered in ``DEFAULT_LOADERS``.
+
+    The two paths share one contract: required→raise on missing,
+    optional→silent skip. This keeps ``ConfigFile`` symmetric with the
+    user's mental model that it is a leading ``<<(<):`` include layer
+    and removes the silent-drop trap where ``ConfigFile("file:...")`` or
+    ``ConfigFile("pkg:...")`` looked like a bug in symbol propagation.
+    """
     from dracon.loaders.cascade import find_cascade_files
 
     found = []
     for cf in config_files:
-        expanded = Path(cf.path).expanduser()
+        scheme = _scheme_of(cf.path)
         path_str = None
 
         if cf.search_parents:
+            if scheme is not None:
+                raise ValueError(
+                    f"search_parents is incompatible with scheme URI: {cf.path}"
+                )
+            expanded = Path(cf.path).expanduser()
             if expanded.is_absolute():
                 raise ValueError(
                     f"search_parents is meaningless with absolute path: {cf.path}"
                 )
             if find_cascade_files(cf.path):
                 path_str = f"cascade:{cf.path}"
-        elif expanded.exists():
-            path_str = str(expanded)
+        elif scheme is not None:
+            if _probe_uri_exists(cf.path):
+                path_str = cf.path
+        else:
+            expanded = Path(cf.path).expanduser()
+            if expanded.exists():
+                path_str = str(expanded)
 
         if path_str is not None:
             if cf.selector:
