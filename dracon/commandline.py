@@ -1527,10 +1527,17 @@ class Program(BaseModel, Generic[T]):
                 if arg_obj and arg_obj.raw:
                     v = _FullRawStr(v)
                 # str-typed fields skip YAML composition — pass through raw.
-                # Skip this for context-target args: defined_vars goes through
-                # the YAML scalar parser already (so "9000" → int 9000).
-                elif arg_obj and getattr(arg_obj, 'target', 'model') == 'model' \
-                        and _is_str_field(arg_obj.arg_type):
+                # Covers two sources: model-side `Arg(arg_type=str)` and
+                # YAML-declared `!set_default:str` (context-target with
+                # python_type=str). Both want the raw token to land as a
+                # string, not get re-parsed by ruamel (where "a: b" becomes
+                # a one-item dict).
+                elif arg_obj and (
+                    (getattr(arg_obj, 'target', 'model') == 'model'
+                     and _is_str_field(arg_obj.arg_type))
+                    or (getattr(arg_obj, 'target', None) == 'context'
+                        and getattr(arg_obj, 'python_type', None) is str)
+                ):
                     v = _RawStr(v)
 
                 target_dict[real_name] = v
@@ -1649,13 +1656,17 @@ class Program(BaseModel, Generic[T]):
         trace_all = raw_args.pop('__trace_all__', False)
         trace_enabled = bool(trace_path or trace_all)
 
-        # parse defined_vars values as YAML so e.g. "[[5,60]]" becomes list, not string
+        # parse defined_vars values as YAML so e.g. "[[5,60]]" becomes list, not string.
+        # _RawStr / _FullRawStr signal "this came from a str-typed CLI arg, keep as str"
+        # — otherwise "echo STRATEGY: noop" (containing ':') would parse as a dict.
         from io import StringIO
         from ruamel.yaml import YAML as _YAML
         _yaml_parser = _YAML()
         parsed_defined_vars = {}
         for k, v in defined_vars.items():
-            if isinstance(v, str):
+            if isinstance(v, (_RawStr, _FullRawStr)):
+                parsed_defined_vars[k] = str(v)
+            elif isinstance(v, str):
                 try:
                     parsed_defined_vars[k] = _yaml_parser.load(StringIO(v))
                 except Exception:
