@@ -251,5 +251,144 @@ class TestNodeDeepcopyCopiesContext:
         assert 'Agent' in clone.context
 
 
+class _Opaque:
+    """Stand-in for live, non-deepcopyable objects (JIT executables, GPU
+    handles, file descriptors, ML model caches, ...). The whole point is
+    that __deepcopy__ refuses."""
+
+    def __init__(self, name: str):
+        self.name = name
+
+    def __deepcopy__(self, memo):
+        raise TypeError(f"cannot pickle '{type(self).__name__}' object")
+
+    def __repr__(self) -> str:
+        return f"_Opaque({self.name!r})"
+
+
+class TestOpaqueLeafSurvivesCompose:
+    """Live, non-deepcopyable values bound via !define must survive
+    composition-time deepcopy paths (CompositionResult.__deepcopy__,
+    DeferredNode.copy, ...). They should be carried through by reference,
+    not cloned."""
+
+    def test_composition_result_shallow_copies_defined_vars(self):
+        from dracon.composer import CompositionResult
+        from dracon.nodes import DraconMappingNode
+
+        opaque = _Opaque('hello')
+        root = DraconMappingNode(tag='tag:yaml.org,2002:map', value=[])
+        comp = CompositionResult(root=root, defined_vars={'opaque': opaque})
+
+        clone = _deepcopy(comp)
+        assert clone.defined_vars['opaque'] is opaque
+        # the dict itself should be a separate container
+        assert clone.defined_vars is not comp.defined_vars
+
+    def test_deferred_node_copy_with_opaque_define(self):
+        from dracon import DraconLoader, resolve_all_lazy
+
+        yaml = """
+!define opaque: ${make_opaque('hello')}
+
+result: !deferred
+  echo: ${opaque.name}
+"""
+        loader = DraconLoader(
+            enable_interpolation=True,
+            context={'make_opaque': _Opaque},
+        )
+        cfg = loader.loads(yaml)
+        deferred = cfg['result']
+        clone = deferred.copy()
+        result = clone.construct()
+        resolve_all_lazy(result)
+        assert dict(result) == {'echo': 'hello'}
+
+    def test_deferred_compose_then_construct_with_opaque(self):
+        from dracon import DraconLoader, resolve_all_lazy
+
+        yaml = """
+!define opaque: ${make_opaque('hi')}
+
+result: !deferred
+  echo: ${opaque.name}
+"""
+        loader = DraconLoader(
+            enable_interpolation=True,
+            context={'make_opaque': _Opaque},
+        )
+        cfg = loader.loads(yaml)
+        result = cfg['result'].construct()
+        resolve_all_lazy(result)
+        assert dict(result) == {'echo': 'hi'}
+
+    def test_pydantic_wrapped_opaque(self):
+        from pydantic import BaseModel, ConfigDict
+        from dracon import DraconLoader, resolve_all_lazy
+
+        class Wrapper(BaseModel):
+            model_config = ConfigDict(arbitrary_types_allowed=True)
+            payload: _Opaque
+
+        yaml = """
+!define w: !Wrapper
+  payload: ${make_opaque('hello')}
+
+result: !deferred
+  echo: ${w.payload.name}
+"""
+        loader = DraconLoader(
+            enable_interpolation=True,
+            context={'make_opaque': _Opaque, 'Wrapper': Wrapper},
+        )
+        cfg = loader.loads(yaml)
+        # exercise the copy path that previously deepcopied defined_vars
+        deferred_copy = cfg['result'].copy()
+        result = deferred_copy.construct()
+        resolve_all_lazy(result)
+        assert dict(result) == {'echo': 'hello'}
+
+
+class TestDeepcopyFallback:
+    """The _deepcopy fallback should swallow only canonical 'I refuse to
+    be copied' signals on non-container leaves; real bugs in containers
+    must still surface."""
+
+    def test_typeerror_leaf_falls_back(self):
+        obj = _Opaque('x')
+        assert _deepcopy(obj) is obj
+
+    def test_notimplemented_leaf_falls_back(self):
+        class Stubborn:
+            def __deepcopy__(self, memo):
+                raise NotImplementedError
+
+        obj = Stubborn()
+        assert _deepcopy(obj) is obj
+
+    def test_runtime_error_leaf_still_raises(self):
+        class Buggy:
+            def __deepcopy__(self, memo):
+                raise RuntimeError("genuine bug, not a refusal")
+
+        with pytest.raises(RuntimeError):
+            _deepcopy(Buggy())
+
+    def test_container_with_bad_leaf_surfaces(self):
+        # if the bad leaf is wrapped inside a real container, copy.deepcopy
+        # recurses with the stdlib's own recursive call (not via our
+        # _deepcopy), so the leaf's TypeError bubbles back up to the
+        # container-level _deepcopy call. Containers are NOT covered by the
+        # fallback — the failure surfaces structured rather than being
+        # silently masked behind shared references inside cloned containers.
+        class HardRefuse:
+            def __deepcopy__(self, memo):
+                raise TypeError("nope")
+
+        with pytest.raises(TypeError):
+            _deepcopy([HardRefuse()])
+
+
 if __name__ == '__main__':
     pytest.main([__file__])

@@ -622,27 +622,32 @@ def _try_marshal(obj: T) -> Optional[T]:
         return None
 
 
+_REFUSED_COPY_EXCEPTIONS = (TypeError, NotImplementedError, copy.Error)
+
+
 def _deepcopy(obj: T, memo=None) -> T:
-    # if memo is None:
-    #     memo = {}
-
-    # obj_id = id(obj)
-    # if obj_id in memo:
-    #     return memo[obj_id]
-
-    # if hasattr(obj, '__deepcopy__'):
-    #     result = obj.__deepcopy__(memo)
-    #     memo[obj_id] = result
-    #     return result
-
     try:
         return copy.deepcopy(obj, memo)
-
     except Exception as e:
+        # modules / functions / types are singletons by nature: cloning is
+        # meaningless even when it would succeed.
         if isinstance(obj, (ModuleType, FunctionType, type)):
-            return obj  # Return the object itself for modules, functions and types
-        else:
-            raise e
+            return obj
+        # canonical "I refuse to be copied" signals (TypeError from pickle
+        # protocol, NotImplementedError from __deepcopy__, copy.Error) on
+        # a non-container leaf: carry the value through by reference. This
+        # covers live external resources — JIT executables, GPU handles,
+        # open files, DB cursors — which are inherently shared and can't
+        # be cloned. Containers (dict / list / tuple / set) are NOT caught:
+        # if a container's deepcopy fails it's because of a leaf inside,
+        # and the leaf-level fallback above will already have absorbed
+        # legitimate refusals — anything still raising at container level
+        # is a real bug and should surface.
+        if isinstance(e, _REFUSED_COPY_EXCEPTIONS) and not isinstance(
+            obj, (dict, list, tuple, set, frozenset)
+        ):
+            return obj
+        raise
 
 
 T = TypeVar('T')

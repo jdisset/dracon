@@ -67,11 +67,16 @@ class CompositionResult(BaseModel):
 
     def __deepcopy__(self, memo=None):
         # model_post_init will call make_map() since node_map is not passed (None)
+        # defined_vars holds user-bound !define values (potentially live, non-
+        # deepcopyable handles like JIT'd executables, GPU sessions, open
+        # files). The dict needs its own container so concurrent compositions
+        # don't share the mapping, but the values themselves are carried
+        # through by reference.
         return CompositionResult(
             root=deepcopy(self.root, memo),
             special_nodes={},
             anchor_paths=deepcopy(self.anchor_paths, memo),
-            defined_vars=deepcopy(self.defined_vars, memo),
+            defined_vars=dict(self.defined_vars),
             default_vars=set(self.default_vars),
             pending_requirements=list(self.pending_requirements),
             cli_directives=list(self.cli_directives),
