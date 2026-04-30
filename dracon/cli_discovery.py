@@ -95,13 +95,30 @@ def discover_cli_directives(
     return _dedupe_last_wins(aggregate)
 
 
-def _static_scan(source: str, loader: DraconLoader) -> list[CliParam]:
+def _static_scan(
+    source: str,
+    loader: DraconLoader,
+    _seen: Optional[set] = None,
+) -> list[CliParam]:
     """Fallback used when full composition fails (typically because an
     interpolation or include needs argv-supplied context that isn't yet
-    set). Re-uses the existing instruction matchers and the shared
-    `parse_directive_body` parser, so there's exactly one place that
-    knows how to recognise a directive — the instruction registry."""
-    from dracon.instructions import Require, SetDefault
+    set).
+
+    Walks the parsed YAML structurally without composing or resolving
+    interpolations, harvesting `!require` / `!set_default` declarations
+    wherever it goes. Descends into mapping/sequence values, treats
+    `!deferred`-tagged subtrees as transparent, follows `!include`
+    references whose paths are static (no `${...}`), and skips `!fn`
+    template bodies (those declarations live in a separate scope).
+
+    Re-uses the existing instruction matchers and `parse_directive_body`
+    so there's exactly one place that knows how to recognise a directive
+    -- the instruction registry."""
+    if _seen is None:
+        _seen = set()
+    if source in _seen:
+        return []
+    _seen.add(source)
 
     content = _read_source_text(source, loader)
     if content is None:
@@ -112,33 +129,72 @@ def _static_scan(source: str, loader: DraconLoader) -> list[CliParam]:
         logger.debug("static scan: yaml compose failed for %r (%s)", source, e)
         return []
     root = getattr(comp, 'root', None)
-    if root is None or not hasattr(root, 'value'):
+    if root is None:
         return []
 
     out: list[CliParam] = []
-    for key_node, value_node in root.value:
-        tag = getattr(key_node, 'tag', None) or ''
-        var_name = getattr(key_node, 'value', None)
-        if not isinstance(var_name, str) or not var_name.isidentifier():
-            continue
-        # the instruction matchers ARE the SSOT for tag classification.
-        require = Require.match(tag)
-        set_default = SetDefault.match(tag) if require is None else None
-        if require is not None:
-            kind, python_type = "require", None
-        elif set_default is not None:
-            kind, python_type = "set_default", set_default.target_type
-        else:
-            continue
-        try:
-            directive, _ = parse_directive_body(
-                var_name, value_node, kind, python_type, key_node=key_node,
-            )
-        except Exception as e:
-            logger.debug("static scan: skipping %s %r (%s)", kind, var_name, e)
-            continue
-        out.append(directive)
+    _scan_node(root, loader, _seen, out)
     return out
+
+
+def _scan_node(node, loader: DraconLoader, seen: set, out: list[CliParam]) -> None:
+    """Recursively walk a parsed YAML node tree, harvesting directives
+    from mapping keys and following includes. Pure structural -- no
+    composition, no interpolation evaluation."""
+    from dracon.instructions import Require, SetDefault
+    from dracon.include import IncludeNode
+
+    if isinstance(node, IncludeNode):
+        path = getattr(node, 'value', None)
+        # only follow includes whose path is a literal (no interpolation,
+        # no $DIR-style shorthand). The compose-time machinery handles the
+        # dynamic forms; static fallback stays purely structural.
+        if isinstance(path, str) and '${' not in path and '$(' not in path and '$' not in path:
+            out.extend(_static_scan(path, loader, seen))
+        return
+
+    val = getattr(node, 'value', None)
+    if not isinstance(val, list):
+        return
+
+    if val and isinstance(val[0], tuple):
+        # MappingNode: list of (key, value) pairs
+        for key_node, value_node in val:
+            key_tag = getattr(key_node, 'tag', None) or ''
+            # !fn template bodies fire in a separate scope at invocation
+            # time; their inner declarations are NOT outer-scope flags.
+            if key_tag.startswith('!fn'):
+                continue
+
+            var_name = getattr(key_node, 'value', None)
+            harvested = False
+            if isinstance(var_name, str) and var_name.isidentifier():
+                require = Require.match(key_tag)
+                set_default = SetDefault.match(key_tag) if require is None else None
+                if require is not None:
+                    kind, python_type = "require", None
+                elif set_default is not None:
+                    kind, python_type = "set_default", set_default.target_type
+                else:
+                    kind = None
+                if kind:
+                    try:
+                        directive, _ = parse_directive_body(
+                            var_name, value_node, kind, python_type, key_node=key_node,
+                        )
+                        out.append(directive)
+                        harvested = True
+                    except Exception as e:
+                        logger.debug("static scan: skipping %s %r (%s)", kind, var_name, e)
+
+            # don't recurse into a directive's own value body (it's the
+            # default/help mapping, not nested structure to scan).
+            if not harvested:
+                _scan_node(value_node, loader, seen, out)
+    else:
+        # SequenceNode
+        for item in val:
+            _scan_node(item, loader, seen, out)
 
 
 def _read_source_text(source: str, loader: DraconLoader) -> Optional[str]:

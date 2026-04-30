@@ -399,6 +399,135 @@ def test_discover_isolates_failing_deferred_subtree(tmp_path):
     )
 
 
+# ── static-fallback recursion: cold --help when full compose fails ─────
+
+
+def test_static_fallback_walks_into_deferred_includes(tmp_path):
+    """Cold `--help` case: the entry yaml has a `!require` whose value
+    drives a compose-time `!define` (so full composition fails until the
+    user provides it). Discovery must still surface flags reachable
+    through `!deferred` + `!include` via the static fallback."""
+    panel = _write(
+        tmp_path,
+        "panel.yaml",
+        """
+        !set_default panel_title:
+          default: "default-title"
+          help: "title shown above each panel"
+          short: -t
+        !set_default panel_color:
+          default: "blue"
+          help: "panel color"
+        result: "${panel_title} (${panel_color})"
+        """,
+    )
+    entry = _write(
+        tmp_path,
+        "entry.yaml",
+        f"""
+        !require path: "absolute path to something that must exist"
+        !define _content: !include file:${{path}}
+        panels:
+          - !each(i) ${{list(range(3))}}:
+              - !deferred
+                !define _i: ${{i}}
+                <<: !include {panel}
+        """,
+    )
+    out = discover_cli_directives([entry], seed_context={})
+    names = {d.name for d in out}
+    assert {"path", "panel_title", "panel_color"} <= names, (
+        f"static fallback didn't reach deferred-include flags; got {names}"
+    )
+    by_name = {d.name: d for d in out}
+    assert by_name["panel_title"].short == "-t"
+    assert by_name["panel_title"].help == "title shown above each panel"
+
+
+def test_static_fallback_walks_into_top_level_include(tmp_path):
+    """When full compose fails, static fallback must still follow a
+    top-level `<<: !include` so the included vocab's flags surface."""
+    extras = _write(
+        tmp_path,
+        "extras.yaml",
+        """
+        !set_default greeting:
+          default: "hello"
+          help: "what to print"
+          short: -g
+        """,
+    )
+    wrapper = _write(
+        tmp_path,
+        "wrapper.yaml",
+        f"""
+        !require runtime_path: "needed at compose time"
+        !define _bind: ${{open(runtime_path).read()}}
+        <<: !include {extras}
+        """,
+    )
+    out = discover_cli_directives([wrapper], seed_context={})
+    names = {d.name for d in out}
+    assert {"runtime_path", "greeting"} <= names, (
+        f"static fallback didn't follow top-level include; got {names}"
+    )
+
+
+def test_static_fallback_skips_interpolated_include_paths(tmp_path):
+    """Includes whose paths use `${...}` cannot be resolved statically.
+    The fallback must skip them gracefully (no error, no false flags)
+    while still surfacing every flag it CAN reach."""
+    entry = _write(
+        tmp_path,
+        "entry.yaml",
+        """
+        !require which: "which file"
+        !set_default visible:
+          default: 1
+          help: "always visible"
+        bound: !include file:${which}
+        """,
+    )
+    out = discover_cli_directives([entry], seed_context={})
+    names = {d.name for d in out}
+    assert {"which", "visible"} <= names
+    # nothing else should appear
+    assert names == {"which", "visible"}
+
+
+def test_static_fallback_handles_include_cycle(tmp_path):
+    """A cycle of !includes between two files must not loop forever."""
+    a_path = tmp_path / "a.yaml"
+    b_path = tmp_path / "b.yaml"
+    a_path.write_text(textwrap.dedent(f"""
+        !set_default flag_a:
+          default: 1
+          help: "from a"
+        <<: !include file:{b_path.as_posix()}
+        """).lstrip())
+    b_path.write_text(textwrap.dedent(f"""
+        !set_default flag_b:
+          default: 2
+          help: "from b"
+        <<: !include file:{a_path.as_posix()}
+        """).lstrip())
+    entry = _write(
+        tmp_path,
+        "entry.yaml",
+        f"""
+        !require boom: "compose-time fail"
+        !define _x: ${{boom + 1}}
+        <<: !include file:{a_path.as_posix()}
+        """,
+    )
+    out = discover_cli_directives([entry], seed_context={})
+    names = {d.name for d in out}
+    # cycle is broken; both flags surface, no infinite recursion
+    assert {"boom", "flag_a", "flag_b"} <= names, (
+        f"static fallback failed on include cycle; got {names}"
+    )
+
+
 def test_discover_walks_through_force_deferred_paths(tmp_path):
     """`force_deferred_at` paths are also wrapped during normal compose.
     Discovery should walk through those too: the same SSOT propagation
