@@ -73,7 +73,7 @@ def discover_cli_directives(
     for source in conf_sources:
         try:
             comp = loader.compose(source)
-            aggregate.extend(_collect_directives(comp))
+            aggregate.extend(_collect_directives(comp, loader))
         except (CompositionError, DraconError, FileNotFoundError, OSError) as e:
             # full composition can fail when downstream interpolations or
             # includes need argv-supplied context. In that case fall back to
@@ -159,8 +159,72 @@ def _read_source_text(source: str, loader: DraconLoader) -> Optional[str]:
     return result if isinstance(result, str) else None
 
 
-def _collect_directives(comp: CompositionResult) -> list[CliParam]:
-    return list(comp.cli_directives)
+def _collect_directives(
+    comp: CompositionResult,
+    loader: DraconLoader,
+    _seen: Optional[set] = None,
+) -> list[CliParam]:
+    """Collect directives at this composition's surface, then recurse into
+    each `DeferredNode` to harvest its inner directives in isolation.
+
+    Each deferred subtree composes independently in a fail-soft sandbox:
+    if its inner subtree references runtime-only context, the failure is
+    contained -- siblings still surface their flags. This preserves the
+    "!deferred is opaque to compose" semantics everywhere except this
+    discovery pass.
+    """
+    out = list(comp.cli_directives)
+    if _seen is None:
+        _seen = set()
+
+    if comp.node_map:
+        from dracon.deferred import DeferredNode
+        for node in comp.node_map.values():
+            if not isinstance(node, DeferredNode):
+                continue
+            key = id(node)
+            if key in _seen:
+                continue
+            _seen.add(key)
+            out.extend(_discover_in_deferred(node, loader, _seen))
+
+    return out
+
+
+def _discover_in_deferred(deferred_node, loader: DraconLoader, _seen: set) -> list[CliParam]:
+    """Run a discovery compose on a deferred subtree's inner Node tree.
+    Failures are caught: a bad deferred can't kill discovery for siblings."""
+    from copy import deepcopy
+    from dracon.composer import CompositionResult as _CR
+    from dracon.nodes import Node
+
+    inner = getattr(deferred_node, 'value', None)
+    if not isinstance(inner, Node):
+        return []
+
+    # the inner subtree was already stripped of its `!deferred` tag during
+    # the original wrap (see `process_deferred.apply`), so re-running the
+    # compose pipeline on a deepcopy will not infinitely re-wrap.
+    sub_loader = loader.copy()
+    sub_loader._skip_require_check = True
+    # prime the sub-loader's context from the deferred's captured context
+    # (file location vars like FILE_PATH, plus any !define bound in scope)
+    deferred_ctx = getattr(deferred_node, 'context', None) or {}
+    if deferred_ctx:
+        try:
+            sub_loader.context.update(deferred_ctx)
+        except Exception:
+            pass
+
+    try:
+        sub_comp = _CR(root=deepcopy(inner))
+        sub_comp = sub_loader.post_process_composed(sub_comp)
+    except Exception as e:
+        logger.debug(
+            "discovery: deferred subtree compose failed (%s); siblings unaffected", e,
+        )
+        return []
+    return _collect_directives(sub_comp, sub_loader, _seen)
 
 
 def _dedupe_last_wins(params: list[CliParam]) -> list[CliParam]:

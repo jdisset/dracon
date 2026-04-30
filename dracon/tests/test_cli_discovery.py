@@ -263,3 +263,174 @@ def test_discover_walks_through_top_level_include(tmp_path):
     out = discover_cli_directives([wrapper], seed_context={})
     names = {d.name for d in out}
     assert "level" in names, f"flags not propagated through top-level include; got {names}"
+
+
+# ── flag discovery walks into !deferred subtrees ─────────────────────────
+
+
+def test_discover_walks_into_deferred_with_include(tmp_path):
+    """A `!deferred` subtree that pulls in a sub-task vocabulary via
+    `<<: !include` must still surface the included vocabulary's CLI
+    directives. The wrapper "list of tasks" pattern depends on this."""
+    panel = _write(
+        tmp_path,
+        "panel.yaml",
+        """
+        !set_default panel_title:
+          default: "default-title"
+          help: "title shown above each panel"
+          short: -t
+        !set_default panel_color:
+          default: "blue"
+          help: "panel color"
+        result: "${panel_title} (${panel_color})"
+        """,
+    )
+    entry = _write(
+        tmp_path,
+        "entry.yaml",
+        f"""
+        !set_default n: 3
+        panels:
+          - !each(i) ${{list(range(n))}}:
+              - !deferred
+                !define _i: ${{i}}
+                <<: !include {panel}
+        """,
+    )
+    out = discover_cli_directives([entry], seed_context={})
+    names = {d.name for d in out}
+    assert {"n", "panel_title", "panel_color"} <= names, (
+        f"deferred-include directives not surfaced; got {names}"
+    )
+    by_name = {d.name: d for d in out}
+    assert by_name["panel_title"].short == "-t"
+    assert by_name["panel_title"].help == "title shown above each panel"
+    assert by_name["panel_color"].help == "panel color"
+
+
+def test_discover_walks_into_plain_deferred_block(tmp_path):
+    """A `!deferred` block that declares its own flags inline (no include)
+    must still surface them. This is the simpler shape of the same bug."""
+    src = _write(
+        tmp_path,
+        "entry.yaml",
+        """
+        outer: 1
+        task: !deferred
+          !set_default port:
+            default: 8080
+            help: "bind port"
+            short: -p
+          !require run_id: "runtime id"
+          path: /runs/${run_id}:${port}
+        """,
+    )
+    out = discover_cli_directives([src], seed_context={})
+    names = {d.name for d in out}
+    assert {"port", "run_id"} <= names, (
+        f"flags inside a !deferred block not surfaced; got {names}"
+    )
+
+
+def test_discover_walks_into_each_deferred_include(tmp_path):
+    """`!each` over `!deferred` items, each pulling a sub-vocabulary, must
+    surface the sub-vocabulary's flags exactly once (deduped)."""
+    sub = _write(
+        tmp_path,
+        "sub.yaml",
+        """
+        !set_default knob:
+          default: 1
+          help: "a knob"
+          short: -k
+        v: ${knob}
+        """,
+    )
+    entry = _write(
+        tmp_path,
+        "entry.yaml",
+        f"""
+        !set_default n: 2
+        items:
+          - !each(i) ${{list(range(n))}}:
+              - !deferred
+                <<: !include {sub}
+        """,
+    )
+    out = discover_cli_directives([entry], seed_context={})
+    names = [d.name for d in out]
+    assert names.count("knob") == 1, f"knob should appear once after dedup; got {names}"
+    assert "n" in names
+
+
+def test_discover_isolates_failing_deferred_subtree(tmp_path):
+    """Per-deferred isolation: a `!deferred` whose inner subtree blows
+    up at composer-time (e.g. a `!define` whose interpolation needs
+    runtime context) must NOT kill discovery for sibling deferreds or
+    for the surrounding layer's flags. The bad deferred is silently
+    dropped from discovery; everything else still surfaces."""
+    src = _write(
+        tmp_path,
+        "entry.yaml",
+        """
+        !set_default top_level:
+          default: 1
+          help: "top-level always visible"
+        bad: !deferred
+          !define _items: ${list(range(int(missing_runtime_var)))}
+          !set_default lost_flag:
+            default: 0
+            help: "should be silently lost"
+        good: !deferred
+          !set_default kept_flag:
+            default: 1
+            help: "should still surface"
+        """,
+    )
+    out = discover_cli_directives([src], seed_context={})
+    names = {d.name for d in out}
+    assert "top_level" in names
+    assert "kept_flag" in names, (
+        f"sibling deferred lost flags due to a failing deferred; got {names}"
+    )
+    assert "lost_flag" not in names, (
+        f"a failing deferred surfaced its flags somehow; got {names}"
+    )
+
+
+def test_discover_walks_through_force_deferred_paths(tmp_path):
+    """`force_deferred_at` paths are also wrapped during normal compose.
+    Discovery should walk through those too: the same SSOT propagation
+    chain that surfaces directives from a non-deferred subtree must keep
+    working when the user pre-declares the path as deferred."""
+    panel = _write(
+        tmp_path,
+        "panel.yaml",
+        """
+        !set_default panel_title:
+          default: "default-title"
+          help: "title"
+        result: ${panel_title}
+        """,
+    )
+    entry = _write(
+        tmp_path,
+        "entry.yaml",
+        f"""
+        task:
+          <<: !include {panel}
+        """,
+    )
+
+    from dracon import DraconLoader
+
+    def factory(**kwargs):
+        kwargs.setdefault("deferred_paths", ["/task"])
+        return DraconLoader(**kwargs)
+
+    out = discover_cli_directives([entry], seed_context={}, loader_factory=factory)
+    names = {d.name for d in out}
+    assert "panel_title" in names, (
+        f"flags inside a force-deferred subtree not surfaced; got {names}"
+    )
