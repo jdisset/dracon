@@ -43,7 +43,7 @@ from dracon.lazy import resolve_all_lazy
 from dracon.merge import MergeKey
 from dracon.resolvable import Resolvable, get_inner_type
 from dracon.symbols import MISSING
-from dracon.utils import build_nested_dict, list_like, dict_like
+from dracon.utils import build_nested_dict, list_like, dict_like, merge_dotted_into_context
 
 COLOR_RED = "#EC7D76"
 COLOR_BLUE = "#8D5DE9"
@@ -272,6 +272,17 @@ def _is_str_field(arg_type) -> bool:
         non_none = [a for a in args if a is not type(None)]
         return all(a is str for a in non_none)
     return False
+
+
+def _parse_yaml_scalar(value: Any) -> Any:
+    if not isinstance(value, str) or isinstance(value, (_RawStr, _FullRawStr)):
+        return value
+    from io import StringIO as _StringIO
+    from ruamel.yaml import YAML as _Y
+    try:
+        return _Y().load(_StringIO(value))
+    except Exception:
+        return value
 
 
 def _detect_collection_type(tp) -> Optional[str]:
@@ -1719,9 +1730,14 @@ class Program(BaseModel, Generic[T]):
             else:
                 parsed_defined_vars[k] = v
 
+        # dotted ++ vars are routed post-compose into mapping context vars,
+        # not stashed as literal "a.b" names.
+        flat_defined_vars = {k: v for k, v in parsed_defined_vars.items() if '.' not in k}
+        dotted_defined_vars = {k: v for k, v in parsed_defined_vars.items() if '.' in k}
+
         # wrap context with tracking for unused variable warnings
-        tracked_context = TrackedContext(defined_var_keys=parsed_defined_vars.keys())
-        tracked_context.update(parsed_defined_vars)
+        tracked_context = TrackedContext(defined_var_keys=flat_defined_vars.keys())
+        tracked_context.update(flat_defined_vars)
 
         loader = DraconLoader(
             enable_interpolation=True, base_dict_type=dict, base_list_type=list,
@@ -1732,7 +1748,7 @@ class Program(BaseModel, Generic[T]):
         from dracon.symbol_table import SymbolTable
         if isinstance(loader.context, SymbolTable):
             loader.context.enable_tracking(
-                defined_var_keys=set(parsed_defined_vars.keys()),
+                defined_var_keys=set(flat_defined_vars.keys()),
                 shared_accessed=tracked_context._accessed_keys,
             )
         loader.yaml.representer.exclude_defaults = False
@@ -1809,6 +1825,22 @@ class Program(BaseModel, Generic[T]):
                 current_composition = loader.merge(
                     current_composition, wrapped_comp, merge_key=MergeKey(raw="<<{<+}[<+]")
                 )
+
+        # dotted ++/-- overrides deep-merge into mapping context vars when
+        # the root segment names one; otherwise -- falls through to the
+        # config-tree merge below and ++ falls back to a literal context entry.
+        composed_defs = current_composition.defined_vars
+        for k, v in merge_dotted_into_context(
+            dotted_defined_vars, loader.context, composed_defs=composed_defs,
+        ).items():
+            loader.context[k] = v
+        dotted_nested = {k: _parse_yaml_scalar(v) for k, v in nested_args.items() if '.' in k}
+        leftover_nested = merge_dotted_into_context(
+            dotted_nested, loader.context, composed_defs=composed_defs,
+        )
+        for k in dotted_nested:
+            if k not in leftover_nested:
+                del nested_args[k]
 
         from dracon.nodes import Node
 

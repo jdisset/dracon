@@ -320,6 +320,45 @@ def clean_context_keys(context: DictLike) -> DictLike:
     return dict(cleaned)
 
 
+def deep_set_in_mapping(target: Any, parts: list, value: Any) -> None:
+    cursor = target
+    for part in parts[:-1]:
+        cur = cursor.get(part) if hasattr(cursor, 'get') else None
+        if not dict_like(cur):
+            cursor[part] = {}
+        cursor = cursor[part]
+    cursor[parts[-1]] = value
+
+
+def merge_dotted_into_context(
+    dotted: Dict[str, Any], context: Any, composed_defs: Optional[Dict] = None,
+) -> Dict[str, Any]:
+    """deep-merge {a.b.c: v} into context['a'][b][c] when the root names a
+    mapping. mutates targets in place. returns the unconsumed subset."""
+    unconsumed: Dict[str, Any] = {}
+    for key, value in dotted.items():
+        root, *rest = key.split('.')
+        target = None
+        if composed_defs is not None and root in composed_defs and dict_like(composed_defs[root]):
+            target = composed_defs[root]
+        elif root in context and dict_like(context[root]):
+            target = context[root]
+        if target is None or not rest:
+            unconsumed[key] = value
+            continue
+        deep_set_in_mapping(target, rest, value)
+        try:
+            context[root] = target
+        except Exception:
+            pass
+        if composed_defs is not None:
+            try:
+                composed_defs[root] = target
+            except Exception:
+                pass
+    return unconsumed
+
+
 def build_nested_dict(flat_args: Dict[str, Any]) -> Dict[str, Any]:
     """
     example:

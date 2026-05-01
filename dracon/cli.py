@@ -27,7 +27,7 @@ from dracon import (
     resolve_all_lazy,
     subcommand,
 )
-from dracon.utils import build_nested_dict
+from dracon.utils import build_nested_dict, merge_dotted_into_context
 
 log = logging.getLogger("dracon")
 
@@ -43,6 +43,15 @@ def _parse_yaml_value(val: str) -> Any:
         return yaml.load(StringIO(val))
     except Exception:
         return val
+
+
+def _route_dotted_context_overrides(dotted_ctx: Dict[str, Any], loader_context: Any, cr) -> None:
+    leftover = merge_dotted_into_context(
+        dotted_ctx, loader_context,
+        composed_defs=getattr(cr, 'defined_vars', None),
+    )
+    for k, v in leftover.items():
+        loader_context[k] = v
 
 
 def _apply_overrides(loader, composition, overrides: Dict[str, Any]):
@@ -165,14 +174,19 @@ class DraconPrint:
     def run(self) -> str:
         """Load, process, and format config. Returns output string."""
         trace_enabled = self.trace is not None or self.trace_all
-        loader = DraconLoader(context=self.context.copy(), trace=trace_enabled)
+        flat_ctx = {k: v for k, v in self.context.items() if '.' not in k}
+        dotted_ctx = {k: v for k, v in self.context.items() if '.' in k}
+        loader = DraconLoader(context=flat_ctx.copy(), trace=trace_enabled)
         cr = None
 
         try:
-            if self.construct and not self.overrides and not trace_enabled:
+            need_compose_flow = bool(self.overrides) or bool(dotted_ctx)
+            if self.construct and not need_compose_flow and not trace_enabled:
                 res = loader.load(self.config_files)
             else:
                 cr = loader.compose(self.config_files)
+                if dotted_ctx:
+                    _route_dotted_context_overrides(dotted_ctx, loader.context, cr)
                 if self.overrides:
                     cr = _apply_overrides(loader, cr, self.overrides)
                     if cr.trace is not None:
@@ -225,8 +239,12 @@ class DraconPrint:
         trace_enabled = self.trace is not None or self.trace_all
         if not trace_enabled:
             return None
-        loader = DraconLoader(context=self.context.copy(), trace=True)
+        flat_ctx = {k: v for k, v in self.context.items() if '.' not in k}
+        dotted_ctx = {k: v for k, v in self.context.items() if '.' in k}
+        loader = DraconLoader(context=flat_ctx.copy(), trace=True)
         cr = loader.compose(self.config_files)
+        if dotted_ctx:
+            _route_dotted_context_overrides(dotted_ctx, loader.context, cr)
         if self.overrides:
             cr = _apply_overrides(loader, cr, self.overrides)
         if cr.trace is None:
