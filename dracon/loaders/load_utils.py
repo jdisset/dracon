@@ -8,6 +8,13 @@ def with_possible_ext(path: str):
     return [p, p.with_suffix('.yaml'), p.with_suffix('.yml'), p.with_suffix('')]
 
 
+FILE_CONTEXT_KEYS: frozenset = frozenset({
+    'DIR', 'FILE', 'FILE_PATH', 'FILE_STEM', 'FILE_EXT',
+    'FILE_LOAD_TIME', 'FILE_LOAD_TIME_UNIX', 'FILE_LOAD_TIME_UNIX_MS',
+    'FILE_SIZE',
+})
+
+
 def make_file_context(p: Path) -> dict:
     """Build the standard file-metadata context dict from a resolved Path."""
     now = time.time()

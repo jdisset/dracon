@@ -14,15 +14,20 @@ real CLI run has finished collecting argv values.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Callable, Mapping, Optional
 
 from dracon.cli_declaration import CliDirective, parse_directive_body
 from dracon.cli_param import CliParam
 from dracon.composer import CompositionResult
 from dracon.diagnostics import CompositionError, DraconError
+from dracon.interpolation_utils import transform_dollar_vars
 from dracon.loader import DraconLoader, compose_config_from_str
+from dracon.loaders.load_utils import FILE_CONTEXT_KEYS
 
 logger = logging.getLogger(__name__)
+
+_BARE_VAR_REF = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}')
 
 
 def discover_cli_directives(
@@ -108,8 +113,9 @@ def _static_scan(
     interpolations, harvesting `!require` / `!set_default` declarations
     wherever it goes. Descends into mapping/sequence values, treats
     `!deferred`-tagged subtrees as transparent, follows `!include`
-    references whose paths are static (no `${...}`), and skips `!fn`
-    template bodies (those declarations live in a separate scope).
+    references whose paths resolve from the source's own file context
+    (`$DIR`, `${FILE_STEM}`, ...), and skips `!fn` template bodies
+    (those declarations live in a separate scope).
 
     Re-uses the existing instruction matchers and `parse_directive_body`
     so there's exactly one place that knows how to recognise a directive
@@ -120,9 +126,10 @@ def _static_scan(
         return []
     _seen.add(source)
 
-    content = _read_source_text(source, loader)
-    if content is None:
+    read = _read_source_text(source, loader)
+    if read is None:
         return []
+    content, file_ctx = read
     try:
         comp = compose_config_from_str(loader.yaml, content)
     except Exception as e:
@@ -133,24 +140,31 @@ def _static_scan(
         return []
 
     out: list[CliParam] = []
-    _scan_node(root, loader, _seen, out)
+    _scan_node(root, loader, file_ctx, _seen, out)
     return out
 
 
-def _scan_node(node, loader: DraconLoader, seen: set, out: list[CliParam]) -> None:
+def _scan_node(
+    node,
+    loader: DraconLoader,
+    file_ctx: Mapping[str, Any],
+    seen: set,
+    out: list[CliParam],
+) -> None:
     """Recursively walk a parsed YAML node tree, harvesting directives
     from mapping keys and following includes. Pure structural -- no
-    composition, no interpolation evaluation."""
+    composition, no interpolation evaluation. `file_ctx` is the source's
+    file-metadata dict, used to statically resolve `$DIR` /
+    `${FILE_STEM}` shorthands in include paths."""
     from dracon.instructions import Require, SetDefault
     from dracon.include import IncludeNode
 
     if isinstance(node, IncludeNode):
         path = getattr(node, 'value', None)
-        # only follow includes whose path is a literal (no interpolation,
-        # no $DIR-style shorthand). The compose-time machinery handles the
-        # dynamic forms; static fallback stays purely structural.
-        if isinstance(path, str) and '${' not in path and '$(' not in path and '$' not in path:
-            out.extend(_static_scan(path, loader, seen))
+        if isinstance(path, str):
+            resolved = _expand_file_context(path, file_ctx)
+            if '$' not in resolved:
+                out.extend(_static_scan(resolved, loader, seen))
         return
 
     val = getattr(node, 'value', None)
@@ -158,7 +172,6 @@ def _scan_node(node, loader: DraconLoader, seen: set, out: list[CliParam]) -> No
         return
 
     if val and isinstance(val[0], tuple):
-        # MappingNode: list of (key, value) pairs
         for key_node, value_node in val:
             key_tag = getattr(key_node, 'tag', None) or ''
             # !fn template bodies fire in a separate scope at invocation
@@ -190,17 +203,32 @@ def _scan_node(node, loader: DraconLoader, seen: set, out: list[CliParam]) -> No
             # don't recurse into a directive's own value body (it's the
             # default/help mapping, not nested structure to scan).
             if not harvested:
-                _scan_node(value_node, loader, seen, out)
+                _scan_node(value_node, loader, file_ctx, seen, out)
     else:
-        # SequenceNode
         for item in val:
-            _scan_node(item, loader, seen, out)
+            _scan_node(item, loader, file_ctx, seen, out)
 
 
-def _read_source_text(source: str, loader: DraconLoader) -> Optional[str]:
-    """Resolve a source string to raw YAML text via the loader's scheme
-    registry. Reuses the same scheme normalisation as `loader.compose`,
-    so bare paths get the `file:` scheme treatment."""
+def _expand_file_context(path: str, file_ctx: Mapping[str, Any]) -> str:
+    """Mirror the compose-time pipeline (`transform_dollar_vars` then
+    `${NAME}` resolution) but only against the source's own file
+    context. Names not in `file_ctx` keep their `${...}` -- the
+    caller's `$`-check then rejects truly-dynamic paths the static
+    fallback can't resolve without argv."""
+    if '$' not in path or not file_ctx:
+        return path
+    return _BARE_VAR_REF.sub(
+        lambda m: str(file_ctx[m.group(1)]) if m.group(1) in file_ctx else m.group(0),
+        transform_dollar_vars(path),
+    )
+
+
+def _read_source_text(
+    source: str, loader: DraconLoader
+) -> Optional[tuple[str, dict]]:
+    """Resolve a source string to (raw YAML text, file-context dict) via
+    the loader's scheme registry. Reuses the same scheme normalisation
+    as `loader.compose`, so bare paths get the `file:` scheme treatment."""
     from dracon.include import ensure_scheme
 
     scheme, _, rest = ensure_scheme(source).partition(':')
@@ -208,11 +236,13 @@ def _read_source_text(source: str, loader: DraconLoader) -> Optional[str]:
     if fn is None:
         return None
     try:
-        result, _ = fn(rest, node=None, draconloader=loader)
+        result, ctx = fn(rest, node=None, draconloader=loader)
     except Exception as e:
         logger.debug("static scan: %r loader failed for %r (%s)", scheme, source, e)
         return None
-    return result if isinstance(result, str) else None
+    if not isinstance(result, str):
+        return None
+    return result, (ctx if isinstance(ctx, dict) else {})
 
 
 def _collect_directives(
@@ -246,7 +276,9 @@ def _collect_directives(
             _seen.add(key)
             inner = getattr(node, 'value', None)
             if isinstance(inner, Node):
-                _scan_node(inner, loader, _seen, out)
+                ctx = getattr(node, 'context', None) or {}
+                file_ctx = {k: ctx[k] for k in FILE_CONTEXT_KEYS if k in ctx}
+                _scan_node(inner, loader, file_ctx, _seen, out)
 
     return out
 

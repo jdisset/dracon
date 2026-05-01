@@ -610,3 +610,145 @@ def test_discover_walks_through_force_deferred_paths(tmp_path):
     assert "panel_title" in names, (
         f"flags inside a force-deferred subtree not surfaced; got {names}"
     )
+
+
+# ── static-fallback resolves file-context vars ($DIR/$FILE_*) in includes ─
+
+
+def test_static_fallback_walks_through_dir_relative_include(tmp_path):
+    """When full compose fails (e.g. an interpolation needs argv-supplied
+    context), the static fallback must still follow `!include file:$DIR/...`
+    references — `$DIR` is resolvable at scan time from the source's own
+    path. The "ship a vocabulary, point to it via $DIR" SSOT pattern
+    breaks otherwise on cold `--help`."""
+    ssot = tmp_path / "ssot.yaml"
+    ssot.write_text(textwrap.dedent("""
+        !set_default xlims:
+          default: [0, 0.65]
+          help: "x-axis limits from SSOT"
+        """).lstrip())
+    entry = _write(
+        tmp_path,
+        "entry.yaml",
+        """
+        <<(<): !include file:$DIR/ssot.yaml
+
+        !require dataset_file: "must be set"
+
+        # forces full compose to fail until argv is parsed
+        result: !include file:${dataset_file}.yaml
+        """,
+    )
+    out = discover_cli_directives([entry], soft=True)
+    names = {d.name for d in out}
+    assert {"dataset_file", "xlims"} <= names, (
+        f"$DIR-relative include skipped by static fallback; got {names}"
+    )
+
+
+def test_static_fallback_walks_through_file_stem_include(tmp_path):
+    """`$FILE_STEM` and friends are also statically resolvable from the
+    source path — they must be substituted before the literal check."""
+    sibling = tmp_path / "entry-companion.yaml"
+    sibling.write_text(textwrap.dedent("""
+        !set_default companion_flag:
+          default: 7
+          help: "from companion"
+        """).lstrip())
+    entry = _write(
+        tmp_path,
+        "entry.yaml",
+        """
+        <<: !include file:$DIR/$FILE_STEM-companion.yaml
+        !require runtime_only: "forces compose failure"
+        crash: ${runtime_only + 1}
+        """,
+    )
+    out = discover_cli_directives([entry], soft=True)
+    names = {d.name for d in out}
+    assert "companion_flag" in names, (
+        f"$FILE_STEM include not substituted; got {names}"
+    )
+
+
+def test_static_fallback_recurses_through_nested_dir_include(tmp_path):
+    """`$DIR` substitution must follow recursion: an SSOT included via
+    `$DIR/...` may itself include another file via `$DIR/...`, and the
+    second-level $DIR should resolve against the SSOT's own directory,
+    not the entry file's."""
+    sub = tmp_path / "sub" / "deep.yaml"
+    sub.parent.mkdir()
+    sub.write_text(textwrap.dedent("""
+        !set_default deep_flag:
+          default: "deep"
+          help: "from a deeper file"
+        """).lstrip())
+    mid = tmp_path / "sub" / "mid.yaml"
+    mid.write_text(textwrap.dedent("""
+        <<: !include file:$DIR/deep.yaml
+        !set_default mid_flag:
+          default: "mid"
+          help: "from mid"
+        """).lstrip())
+    entry = _write(
+        tmp_path,
+        "entry.yaml",
+        """
+        <<: !include file:$DIR/sub/mid.yaml
+        !require runtime_only: "forces compose failure"
+        crash: ${runtime_only + 1}
+        """,
+    )
+    out = discover_cli_directives([entry], soft=True)
+    names = {d.name for d in out}
+    assert {"mid_flag", "deep_flag"} <= names, (
+        f"nested $DIR include not resolved against the including file; got {names}"
+    )
+
+
+def test_collect_directives_walks_dir_relative_deferred_include(tmp_path):
+    """Same bug class, full-compose path: a `!deferred` subtree whose
+    `<<: !include file:$DIR/...` references a sibling vocabulary must
+    surface that vocabulary's flags. Discovery walks the deferred tree
+    structurally, so the file context must come from the deferred node
+    itself (the file that contains it)."""
+    panel = tmp_path / "panel.yaml"
+    panel.write_text(textwrap.dedent("""
+        !set_default panel_flag:
+          default: 1
+          help: "from panel"
+        """).lstrip())
+    entry = _write(
+        tmp_path,
+        "entry.yaml",
+        """
+        panels:
+          - !deferred
+            <<: !include file:$DIR/panel.yaml
+        """,
+    )
+    out = discover_cli_directives([entry])
+    names = {d.name for d in out}
+    assert "panel_flag" in names, (
+        f"$DIR-relative include inside !deferred not resolved; got {names}"
+    )
+
+
+def test_static_fallback_still_skips_truly_dynamic_paths(tmp_path):
+    """Pre-substituting file-context vars must not regress the existing
+    behaviour: `${...}` and `$(...)` paths still depend on argv-supplied
+    context and must remain unfollowed."""
+    entry = _write(
+        tmp_path,
+        "entry.yaml",
+        """
+        !require which: "which file"
+        !set_default visible:
+          default: 1
+          help: "always visible"
+        bound: !include file:${which}
+        """,
+    )
+    out = discover_cli_directives([entry], seed_context={})
+    names = {d.name for d in out}
+    assert names == {"which", "visible"}

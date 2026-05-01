@@ -949,13 +949,7 @@ def cached_compose_config_from_str(yaml, content):
 _post_process_cache: LRUCache = LRUCache(maxsize=128)
 
 
-# per-file include-loader keys (DIR/FILE/...): determined by file content,
-# stable across reuses, kept on cached nodes so `${$DIR}` etc. still resolve.
-_FILE_CONTEXT_KEYS: frozenset = frozenset({
-    'DIR', 'FILE', 'FILE_PATH', 'FILE_STEM', 'FILE_EXT',
-    'FILE_LOAD_TIME', 'FILE_LOAD_TIME_UNIX', 'FILE_LOAD_TIME_UNIX_MS',
-    'FILE_SIZE',
-})
+from dracon.loaders.load_utils import FILE_CONTEXT_KEYS as _FILE_CONTEXT_KEYS
 
 
 def _snapshot_for_cache(result: CompositionResult) -> CompositionResult:
