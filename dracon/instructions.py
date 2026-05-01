@@ -165,6 +165,9 @@ def process_instructions(comp_res: CompositionResult, loader) -> CompositionResu
     the vocab.
     """
     from dracon.interpolation import LazyResolutionPending
+    from dracon.diagnostics import UndefinedNameError
+    from dracon.merge import cached_merge_key
+    from dracon.nodes import MergeNode
     from dracon.rewriter import (
         NodeRewriter,
         RewriteHandler,
@@ -173,6 +176,17 @@ def process_instructions(comp_res: CompositionResult, loader) -> CompositionResu
     )
 
     deferred: list = []
+    in_compose_phase = bool(getattr(loader, '_composition_phase', False))
+
+    def _has_pending_propagating_merge() -> bool:
+        for n in (comp_res.node_map or {}).values():
+            if isinstance(n, MergeNode):
+                try:
+                    if cached_merge_key(n.merge_key_raw).context_propagation:
+                        return True
+                except Exception:
+                    pass
+        return False
 
     def discover(node, path):
         tag = getattr(node, 'tag', None)
@@ -194,6 +208,16 @@ def process_instructions(comp_res: CompositionResult, loader) -> CompositionResu
             return RewriteResult.MUTATED
         except LazyResolutionPending:
             # vocab not yet populated by includes/merges; retry later
+            deferred.append(DeferredInstruction(inst, path, node))
+            comp._deferred_instructions = deferred  # type: ignore[attr-defined]
+            return RewriteResult.NO_CHANGE
+        except UndefinedNameError:
+            # the missing name may arrive via a `<<(<):` propagating merge
+            # not yet processed. defer iff such a merge is pending; otherwise
+            # let the genuine error bubble. retry runs with phase=False so
+            # post-merge failures still raise.
+            if not in_compose_phase or not _has_pending_propagating_merge():
+                raise
             deferred.append(DeferredInstruction(inst, path, node))
             comp._deferred_instructions = deferred  # type: ignore[attr-defined]
             return RewriteResult.NO_CHANGE
