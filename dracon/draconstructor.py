@@ -728,7 +728,7 @@ class Draconstructor(Constructor):
         context['__DRACON_NODES'] = {
             i: Resolvable(node=n, ctor=self.copy()) for i, n in self.referenced_nodes.items()
         }
-        logger.debug(f"context for {node}: {context}")
+        logger.debug("context for %s: %s", node, context)
 
         lzy = LazyInterpolable(
             value=node_value,
