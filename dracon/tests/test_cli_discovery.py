@@ -364,12 +364,16 @@ def test_discover_walks_into_each_deferred_include(tmp_path):
     assert "n" in names
 
 
-def test_discover_isolates_failing_deferred_subtree(tmp_path):
-    """Per-deferred isolation: a `!deferred` whose inner subtree blows
-    up at composer-time (e.g. a `!define` whose interpolation needs
-    runtime context) must NOT kill discovery for sibling deferreds or
-    for the surrounding layer's flags. The bad deferred is silently
-    dropped from discovery; everything else still surfaces."""
+def test_discover_robust_to_runtime_dependent_deferred(tmp_path):
+    """Discovery is structural -- it harvests `!set_default` / `!require`
+    declarations from a deferred subtree without composing it. So even
+    when the deferred contains compose-time code that references
+    runtime-only context (e.g. `!define _items: ${runtime_only}`), every
+    declared flag still surfaces, and sibling deferreds are unaffected.
+
+    This is a strict improvement over the previous compose-per-deferred
+    approach, which would silently drop flags from any deferred whose
+    inner subtree couldn't compose without runtime input."""
     src = _write(
         tmp_path,
         "entry.yaml",
@@ -377,11 +381,11 @@ def test_discover_isolates_failing_deferred_subtree(tmp_path):
         !set_default top_level:
           default: 1
           help: "top-level always visible"
-        bad: !deferred
+        risky: !deferred
           !define _items: ${list(range(int(missing_runtime_var)))}
-          !set_default lost_flag:
+          !set_default risky_flag:
             default: 0
-            help: "should be silently lost"
+            help: "still declared, still surfaces"
         good: !deferred
           !set_default kept_flag:
             default: 1
@@ -391,11 +395,9 @@ def test_discover_isolates_failing_deferred_subtree(tmp_path):
     out = discover_cli_directives([src], seed_context={})
     names = {d.name for d in out}
     assert "top_level" in names
-    assert "kept_flag" in names, (
-        f"sibling deferred lost flags due to a failing deferred; got {names}"
-    )
-    assert "lost_flag" not in names, (
-        f"a failing deferred surfaced its flags somehow; got {names}"
+    assert "kept_flag" in names
+    assert "risky_flag" in names, (
+        f"declared flag inside runtime-dependent deferred should still surface; got {names}"
     )
 
 
@@ -525,6 +527,51 @@ def test_static_fallback_handles_include_cycle(tmp_path):
     # cycle is broken; both flags surface, no infinite recursion
     assert {"boom", "flag_a", "flag_b"} <= names, (
         f"static fallback failed on include cycle; got {names}"
+    )
+
+
+def test_discover_perf_many_deferred_clones(tmp_path):
+    """Locks in O(tree size) discovery cost: 100 `!each`-generated
+    deferred clones, each with `<<: !include file:./panel.yaml`, must
+    discover in well under a second. Earlier versions ran a full
+    `post_process_composed` per deferred, which scaled to ~22s for
+    real-world configs (one full compose per clone)."""
+    import time
+
+    panel = _write(
+        tmp_path,
+        "panel.yaml",
+        """
+        !set_default panel_title:
+          default: "default-title"
+          help: "title"
+          short: -t
+        !set_default panel_color:
+          default: "blue"
+          help: "color"
+        result: "${panel_title} (${panel_color})"
+        """,
+    )
+    entry = _write(
+        tmp_path,
+        "entry.yaml",
+        f"""
+        !set_default n: 100
+        panels:
+          - !each(i) ${{list(range(n))}}:
+              - !deferred
+                !define _i: ${{i}}
+                <<: !include {panel}
+        """,
+    )
+    t0 = time.perf_counter()
+    out = discover_cli_directives([entry], seed_context={})
+    elapsed = time.perf_counter() - t0
+    names = {d.name for d in out}
+    assert {"n", "panel_title", "panel_color"} <= names
+    assert elapsed < 1.0, (
+        f"discovery took {elapsed:.2f}s for 100 deferred clones; "
+        f"should be sub-second (was previously O(N) full composes)"
     )
 
 
