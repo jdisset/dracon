@@ -44,6 +44,57 @@ def _prog(model: type[BaseModel] = _Cfg) -> object:
 # basic flag wiring
 
 
+def test_discovery_skipped_when_argv_uses_no_yaml_flags(tmp_path, monkeypatch):
+    """Optimization: when argv contains only baseline tokens (positional
+    layers + model-side flags + ++context vars), skip the YAML flag
+    discovery crawl entirely. The crawl only runs when something in argv
+    might need a YAML-declared flag (or --help)."""
+    layer = _write(
+        tmp_path,
+        "layer.yaml",
+        """
+        !set_default port:
+          default: 8080
+          help: "bind port"
+        result: ${port}
+        """,
+    )
+    prog = _prog()
+
+    call_count = {"n": 0}
+    from dracon import cli_discovery as _cd
+    real = _cd.discover_cli_directives
+
+    def spy(*args, **kwargs):
+        call_count["n"] += 1
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(_cd, "discover_cli_directives", spy)
+    # also patch the symbol the parser imports lazily inside _discover_yaml_args
+    import dracon.commandline as _cmd
+    monkeypatch.setattr(_cmd, "discover_cli_directives", spy, raising=False)
+
+    # case A: argv has no flags that need YAML discovery
+    prog.parse_args([f"+file:{layer.as_posix()}"])
+    assert call_count["n"] == 0, (
+        f"discovery ran for an argv with no YAML-flag needs ({call_count['n']} calls)"
+    )
+
+    # case B: --help requested — discovery must run so help can list flags
+    try:
+        prog.parse_args([f"+file:{layer.as_posix()}", "--help"])
+    except SystemExit:
+        pass
+    assert call_count["n"] >= 1, "discovery must run when --help is requested"
+
+    # case C: an unknown --flag in argv — discovery must run to register it
+    pre = call_count["n"]
+    prog.parse_args([f"+file:{layer.as_posix()}", "--port", "9000"])
+    assert call_count["n"] > pre, (
+        "discovery must run when argv has an unknown dash-flag"
+    )
+
+
 def test_directives_surface_when_full_compose_fails(tmp_path, capsys):
     """A layer whose full composition fails (because a downstream
     interpolation needs argv-supplied context) must still surface its

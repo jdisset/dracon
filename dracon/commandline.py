@@ -879,7 +879,14 @@ class Program(BaseModel, Generic[T]):
         # tokens, so the registration has to happen up-front. Reuses the same
         # loader factory the final run will use so schemes / context types
         # resolve identically.
-        self._discover_yaml_args(argv, kwargs.get('context'))
+        #
+        # Skip the crawl entirely when argv has no token that could possibly
+        # need a YAML-declared flag (no --help, no unknown dash-flags, only
+        # baseline / nested-path / ++context tokens). Most "run with default
+        # config" invocations land here, and the crawl is pure overhead in
+        # that case.
+        if self._argv_needs_yaml_discovery(argv):
+            self._discover_yaml_args(argv, kwargs.get('context'))
 
         if self._subcommand_map:
             return self._parse_with_subcommands(argv, **kwargs)
@@ -933,6 +940,44 @@ class Program(BaseModel, Generic[T]):
             }
         )
         return conf, final_raw_args
+
+    def _argv_needs_yaml_discovery(self, argv: List[str]) -> bool:
+        """Cheap structural pre-check: does argv contain any token that
+        could only be parsed if YAML-declared flags are registered?
+
+        Returns True when:
+          - `--help` / `-h` is requested (the help screen wants to list
+            every YAML-declared flag), OR
+          - argv carries any `--xxx` / `-x` token that isn't already a
+            model-side flag, isn't a `--dotted.path` nested override,
+            and isn't a `++name=value` / `--define.name` generic context
+            var.
+
+        Returns False otherwise -- e.g. ``prog +layer.yaml`` with no
+        flags, or ``prog +layer.yaml -e prod`` where ``-e`` is
+        model-side -- and we skip the discovery crawl entirely.
+        """
+        if any(tok in ('--help', '-h') for tok in argv):
+            return True
+
+        # baseline arg_map: model-side flags only. Captured lazily by
+        # _discover_yaml_args; on the very first call it isn't set yet, in
+        # which case `self._arg_map` is the baseline anyway.
+        baseline = getattr(self, '_baseline_arg_map', None) or self._arg_map
+
+        for tok in argv:
+            if not tok.startswith('-'):
+                continue
+            if tok.startswith('++') or tok.startswith('--define.'):
+                continue  # generic context var, no flag registration needed
+            name = tok.split('=', 1)[0]
+            if name in baseline:
+                continue  # known model-side flag
+            if name.startswith('--') and '.' in name[2:]:
+                continue  # dotted nested-path override (handled by parser)
+            return True  # unknown dash-flag — needs discovery
+
+        return False
 
     def _discover_yaml_args(self, argv: List[str], program_context: Optional[Dict[str, Any]]) -> None:
         """Compose +layer files just enough to harvest YAML-declared CLI flags.
