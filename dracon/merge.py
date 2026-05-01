@@ -163,8 +163,9 @@ def _apply_one_merge(comp_res, merge_key_path: KeyPath, loader):
     # existing-wins preserves the include's own !define values
     parent_ctx = getattr(new_parent, 'context', None)
     if parent_ctx and any(not k.startswith('__') for k in parent_ctx):
-        merge_node = deepcopy(merge_node)
-        from dracon.composer import walk_node as _walk
+        # fast tree copy avoids the per-node copy.deepcopy dispatch overhead
+        from dracon.composer import fast_copy_node_tree, walk_node as _walk
+        merge_node = fast_copy_node_tree(merge_node)
         _walk(merge_node, partial(add_to_context, parent_ctx, merge_key=cached_merge_key('<<{>~}[>~]')))
     new_parent = merged(new_parent, merge_node, merge_key)
     if not isinstance(new_parent, Node):
@@ -438,8 +439,12 @@ def merged(existing: Any, new: Any, k: MergeKey = DEFAULT_ADD_TO_CONTEXT_MERGE_K
         other_soft = getattr(other, '_soft_keys', None)
         result_soft = getattr(result, '_soft_keys', None)
 
+        # bypass SymbolTable source lookups (each miss fires importlib)
+        result_entries = getattr(result, '_entries', None)
+        _result_contains = result_entries.__contains__ if result_entries is not None else result.__contains__
+
         for key, value in other.items():
-            if key not in result:
+            if not _result_contains(key):
                 result[key] = value
                 if other_soft and key in other_soft and result_soft is not None:
                     result_soft.add(key)
@@ -467,17 +472,10 @@ def _ensure_soft_dict(ctx):
     """Ensure context dict supports soft key tracking."""
     if ctx is None:
         return SoftPriorityDict()
-    # SymbolTable: don't return as-is (would share the reference).
-    # downgrade to SoftPriorityDict to keep node contexts independent.
+    # SymbolTable.copy() is an entries-dict copy — no per-symbol materialization
     from dracon.symbol_table import SymbolTable
     if isinstance(ctx, SymbolTable):
-        ctx._suspend_tracking = True
-        try:
-            spd = SoftPriorityDict(ctx)
-        finally:
-            ctx._suspend_tracking = False
-        spd._soft_keys = set(ctx._soft_keys)
-        return spd
+        return ctx.copy()
     if hasattr(ctx, '_soft_keys'):
         return ctx
     # plain dict -> upgrade to SoftPriorityDict; other dict subclasses -> add _soft_keys attr
@@ -497,34 +495,48 @@ def add_to_context(new_context, existing_item, merge_key=DEFAULT_ADD_TO_CONTEXT_
 
     ctx = getattr(existing_item, 'context', None)
     if ctx is not None:
-        # fast path: skip_clean=True signals we're in the bulk context propagation loop.
-        # for replace+existing with no soft keys on either side, just add missing keys.
+        # short-circuit: same SymbolTable already attached — nothing to merge in
+        if ctx is new_context:
+            if hasattr(existing_item, '_clear_ctx') and existing_item._clear_ctx:
+                for k in existing_item._clear_ctx:
+                    if k in ctx:
+                        del ctx[k]
+            return
+
+        # bulk-propagation fast path: replace+existing with no soft keys = just add missing
+        from dracon.symbol_table import SymbolTable
         if (skip_clean
             and not merge_key.context_propagation
             and merge_key.dict_mode == MergeMode.REPLACE
             and merge_key.dict_priority == MergePriority.EXISTING
             and not getattr(ctx, '_soft_keys', None)
             and not getattr(new_context, '_soft_keys', None)):
-            for k, v in new_context.items():
-                if k not in ctx:
-                    ctx[k] = v
-        else:
-            # SymbolTable: merge in-place to preserve type
-            from dracon.symbol_table import SymbolTable
             if isinstance(ctx, SymbolTable):
-                if merge_key.context_propagation:
-                    mode_char = '+' if merge_key.dict_mode == MergeMode.APPEND else '~'
-                    effective_key = cached_merge_key(f"{{{mode_char}<}}")
+                if isinstance(new_context, SymbolTable) and ctx.is_synced_with(new_context):
+                    return
+                ctx_entries = ctx._entries
+                if isinstance(new_context, SymbolTable):
+                    for k, entry in new_context._entries.items():
+                        if k not in ctx_entries:
+                            ctx.define(entry)
                 else:
-                    effective_key = merge_key
+                    for k, v in new_context.items():
+                        if k not in ctx_entries:
+                            ctx[k] = v
+            else:
+                for k, v in new_context.items():
+                    if k not in ctx:
+                        ctx[k] = v
+        else:
+            if merge_key.context_propagation:
+                mode_char = '+' if merge_key.dict_mode == MergeMode.APPEND else '~'
+                effective_key = cached_merge_key(f"{{{mode_char}<}}")
+            else:
+                effective_key = merge_key
+            if isinstance(ctx, SymbolTable):
                 _merge_into_symbol_table(ctx, new_context, effective_key)
             else:
                 existing_item.context = _ensure_soft_dict(ctx)
-                if merge_key.context_propagation:
-                    mode_char = '+' if merge_key.dict_mode == MergeMode.APPEND else '~'
-                    effective_key = cached_merge_key(f"{{{mode_char}<}}")
-                else:
-                    effective_key = merge_key
                 existing_item.context = merged(existing_item.context, new_context, effective_key)
     else:
         existing_item.context = _ensure_soft_dict(new_context)
@@ -549,47 +561,56 @@ def _merge_into_symbol_table(table, new_context, merge_key):
     from dracon.symbol_table import SymbolTable
 
     existing_wins = merge_key.dict_priority == MergePriority.EXISTING
-    new_soft = getattr(new_context, '_soft_keys', None)
     new_is_table = isinstance(new_context, SymbolTable)
 
-    def _write(k, v):
-        if new_is_table:
-            entry = new_context._entries.get(k)
-            if entry is not None:
-                table.define(entry)
-                return
-        table[k] = v
+    # synced clone of new_context (or superset) is a no-op for existing-wins
+    if existing_wins and new_is_table and table.is_synced_with(new_context):
+        return
 
-    if existing_wins:
-        # existing (table) is pdict, new_context is other
-        for k, v in new_context.items():
-            if k not in table:
-                _write(k, v)
-                if new_soft and k in new_soft:
-                    table._soft_keys.add(k)
-            elif table.is_soft(k) and not (new_soft and k in new_soft):
-                # pdict (table) has soft key, other (new) has hard key -> other wins
-                _write(k, v)
-                table._soft_keys.discard(k)
+    new_soft = getattr(new_context, '_soft_keys', None)
+    table_entries = table._entries
+    table_soft = table._soft_keys
+    table_parent = table._parent
+
+    # cheap membership check that skips SymbolTable source lookups
+    def _local_in_table(k):
+        if k in table_entries:
+            return True
+        p = table_parent
+        while p is not None:
+            if k in p._entries:
+                return True
+            p = p._parent
+        return False
+
+    # iterate raw entries when possible to skip the materializing items() view
+    if new_is_table:
+        items = new_context._entries.items()
+        def _write(k, payload): table.define(payload)
     else:
-        # new_context is pdict, table (existing) is other
-        for k, v in new_context.items():
-            if k not in table:
-                _write(k, v)
-                if new_soft and k in new_soft:
-                    table._soft_keys.add(k)
+        items = new_context.items()
+        def _write(k, payload): table[k] = payload
+
+    for k, payload in items:
+        is_new_soft = bool(new_soft and k in new_soft)
+        if not _local_in_table(k):
+            _write(k, payload)
+            if is_new_soft:
+                table_soft.add(k)
+            continue
+        is_existing_soft = k in table_soft
+        if existing_wins:
+            if is_existing_soft and not is_new_soft:
+                _write(k, payload)
+                table_soft.discard(k)
+        else:
+            if is_new_soft and not is_existing_soft:
+                continue
+            _write(k, payload)
+            if is_new_soft:
+                table_soft.add(k)
             else:
-                # key exists in both
-                is_new_soft = new_soft and k in new_soft
-                is_existing_soft = table.is_soft(k)
-                if is_new_soft and not is_existing_soft:
-                    # pdict (new) has soft key, other (existing) has hard key -> other wins, skip
-                    continue
-                _write(k, v)
-                if is_new_soft:
-                    table._soft_keys.add(k)
-                else:
-                    table._soft_keys.discard(k)
+                table_soft.discard(k)
 
 
 @ftrace(inputs=False, output=False, watch=[])

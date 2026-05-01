@@ -140,6 +140,20 @@ _TYPE_BASES = (type, typing._GenericAlias, typing._SpecialForm, typing._SpecialG
 
 
 def get_all_types(items):
+    # SymbolTable: peek at _entries to skip the materializing items() view
+    from dracon.symbol_table import SymbolTable
+    if isinstance(items, SymbolTable):
+        result = {}
+        for name, entry in items._entries.items():
+            sym = entry.symbol
+            if getattr(sym, '_kind', None) == 'plain':
+                obj = sym._callable
+                if isinstance(obj, _TYPE_BASES):
+                    result[name] = obj
+        if items._parent is not None:
+            for name, obj in get_all_types(items._parent).items():
+                result.setdefault(name, obj)
+        return result
     return {
         name: obj
         for name, obj in items.items()
@@ -288,8 +302,15 @@ class Draconstructor(Constructor):
     def construct_object(self, node, deep=True, target_type=None):
         current_loader_context = self.dracon_loader.context if self.dracon_loader else {}
 
-        self.localns.update(DEFAULT_TYPES)
-        self.localns.update(get_all_types(current_loader_context))
+        # memoize loader-context type sweep across construct_object calls
+        cached = getattr(self, '_loader_ctx_types_cache', None)
+        ctx_key = (id(current_loader_context), len(current_loader_context) if current_loader_context else 0)
+        if cached is None or cached[0] != ctx_key:
+            ctx_types = get_all_types(current_loader_context)
+            ctx_types.update(DEFAULT_TYPES)
+            cached = (ctx_key, ctx_types)
+            self._loader_ctx_types_cache = cached
+        self.localns.update(cached[1])
         # surface type-valued !define aliases from node.context so resolve_type() can find them
         node_ctx = getattr(node, 'context', None)
         if node_ctx:

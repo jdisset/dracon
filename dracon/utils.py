@@ -271,9 +271,10 @@ def clean_context_keys(context: DictLike) -> DictLike:
     """returns a new dict with leading '$' removed from keys."""
     if not context:
         return context
-    # fast path: scan for $ keys without generator/any() overhead
+    # SymbolTable: peek at raw _entries to skip parent traversal
+    raw_keys = getattr(context, '_entries', context)
     needs_clean = False
-    for k in context:
+    for k in raw_keys:
         if k.__class__ is str and len(k) > 0 and k[0] == '$':
             needs_clean = True
             break

@@ -688,30 +688,37 @@ class DraconLoader:
         from dracon.composer import CompositionResult
         from dracon.diagnostics import SourceContext
         comp = CompositionResult(root=node)
+        _UNKNOWN_PATHS = ('<unicode string>', '<unknown>')
 
         def add_trace(n, path):
             # determine file path - use provided or from node's context
             fp = file_path
-            if not fp and hasattr(n, 'context'):
-                fp = n.context.get('FILE_PATH') or n.context.get('FILE')
+            if not fp:
+                ctx_attr = getattr(n, 'context', None)
+                if ctx_attr is not None:
+                    fp = ctx_attr.get('FILE_PATH') or ctx_attr.get('FILE')
 
-            if hasattr(n, '_source_context') and n._source_context is not None:
-                ctx = n._source_context
-                new_trace = (include_loc,) + ctx.include_trace
-                new_fp = fp if fp and ctx.file_path in ('<unicode string>', '<unknown>') else ctx.file_path
+            sc = getattr(n, '_source_context', None)
+            if sc is not None:
+                kp = str(path) if path else sc.keypath
+                new_fp = fp if fp and sc.file_path in _UNKNOWN_PATHS else sc.file_path
                 n._source_context = SourceContext(
-                    file_path=new_fp, line=ctx.line, column=ctx.column,
-                    keypath=str(path) if path else ctx.keypath,
-                    include_trace=new_trace, operation_context=ctx.operation_context,
+                    file_path=new_fp, line=sc.line, column=sc.column,
+                    keypath=kp,
+                    include_trace=(include_loc,) + sc.include_trace,
+                    operation_context=sc.operation_context,
                 )
-            elif hasattr(n, 'start_mark') and n.start_mark is not None:
-                from dracon.nodes import make_source_context
-                ctx = make_source_context(n.start_mark, include_trace=(include_loc,), keypath=str(path))
-                if ctx and fp and ctx.file_path in ('<unicode string>', '<unknown>'):
-                    ctx = SourceContext(file_path=fp, line=ctx.line, column=ctx.column,
-                                        keypath=ctx.keypath, include_trace=ctx.include_trace)
-                if hasattr(n, '_source_context'):
-                    n._source_context = ctx
+            else:
+                sm = getattr(n, 'start_mark', None)
+                if sm is not None and hasattr(n, '_source_context'):
+                    from dracon.nodes import make_source_context
+                    new_sc = make_source_context(sm, include_trace=(include_loc,), keypath=str(path))
+                    if new_sc and fp and new_sc.file_path in _UNKNOWN_PATHS:
+                        new_sc = SourceContext(
+                            file_path=fp, line=new_sc.line, column=new_sc.column,
+                            keypath=new_sc.keypath, include_trace=new_sc.include_trace,
+                        )
+                    n._source_context = new_sc
 
         comp.walk(add_trace)
 

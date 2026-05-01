@@ -68,20 +68,36 @@ def _split_parametric(tag: str) -> tuple[str, tuple[str, ...]]:
     return base, args
 
 
+# memoize positive and negative lookups — importlib miss is the dominant
+# cost in inner merge loops, and the same candidate names are queried many
+# times during composition.
+_DYNAMIC_LOOKUP_MISS = object()
+_dynamic_lookup_cache: dict[str, Any] = {}
+
+
 def _dynamic_import_lookup(tag_name: str) -> Symbol[Any] | None:
     """Resolve a tag name through resolve_type (importlib + module scan)."""
-    # local import: draconstructor -> symbols/symbol_table at import time;
-    # importing here keeps symbol_table.py free of construction deps.
+    cached = _dynamic_lookup_cache.get(tag_name)
+    if cached is _DYNAMIC_LOOKUP_MISS:
+        return None
+    if cached is not None:
+        return cached
+
     from dracon.draconstructor import resolve_type
     from typing import Any as _Any
 
     try:
         resolved = resolve_type(f'!{tag_name}', localns={})
     except Exception:
-        return None
-    if resolved is None or resolved is _Any:
-        return None
-    return auto_symbol(resolved, name=tag_name)
+        resolved = None
+    sym = auto_symbol(resolved, name=tag_name) if (resolved is not None and resolved is not _Any) else None
+    _dynamic_lookup_cache[tag_name] = sym if sym is not None else _DYNAMIC_LOOKUP_MISS
+    return sym
+
+
+def clear_dynamic_lookup_cache() -> None:
+    """Clear the dynamic-import lookup cache. Use after registering new modules."""
+    _dynamic_lookup_cache.clear()
 
 
 def make_dynamic_import_source(*, name: str = 'dynamic_import') -> SymbolSource:
@@ -110,6 +126,7 @@ class SymbolTable(MutableMapping):
         '_entries', '_soft_keys', '_parent',
         '_accessed_keys', '_defined_var_keys', '_suspend_tracking',
         '_identify_cache', '_sources',
+        '_synced_sources',  # {id(src._entries): len_at_clone_time}
     )
     __dracon_no_merge__ = True
 
@@ -127,6 +144,7 @@ class SymbolTable(MutableMapping):
         self._suspend_tracking: bool = False
         self._identify_cache: dict[type, str] | None = None
         self._sources: list[SymbolSource] = list(sources)
+        self._synced_sources: dict[int, int] | None = None
 
     # ── access tracking (for CLI unused-var warnings) ────────────────────
 
@@ -186,6 +204,7 @@ class SymbolTable(MutableMapping):
             raise
         self._soft_keys.discard(key)
         self._identify_cache = None
+        self._synced_sources = None
 
     def __contains__(self, key: object) -> bool:
         if key in self._entries:
@@ -199,12 +218,14 @@ class SymbolTable(MutableMapping):
         return False
 
     def __iter__(self) -> Iterator[str]:
+        if self._parent is None:
+            yield from self._entries
+            return
         seen = set(self._entries)
         yield from self._entries
-        if self._parent is not None:
-            for k in self._parent:
-                if k not in seen:
-                    yield k
+        for k in self._parent:
+            if k not in seen:
+                yield k
 
     def items(self):
         """Iterate key-value pairs without triggering access tracking."""
@@ -424,7 +445,16 @@ class SymbolTable(MutableMapping):
         tbl._defined_var_keys = self._defined_var_keys
         tbl._suspend_tracking = False
         tbl._identify_cache = None  # rebuild lazily on the clone
+        # snapshot lets later merges from `self` short-circuit when the clone
+        # is provably a strict superset of `self`'s entries
+        tbl._synced_sources = {id(self._entries): len(self._entries)}
         return tbl
+
+    def is_synced_with(self, source: 'SymbolTable') -> bool:
+        if self._synced_sources is None:
+            return False
+        snap = self._synced_sources.get(id(source._entries))
+        return snap is not None and snap >= len(source._entries)
 
     def copy(self) -> SymbolTable:
         return self._clone(parent=self._parent)
@@ -433,6 +463,7 @@ class SymbolTable(MutableMapping):
         self._entries.clear()
         self._soft_keys.clear()
         self._identify_cache = None
+        self._synced_sources = None
 
     def __copy__(self) -> SymbolTable:
         return self.copy()

@@ -116,12 +116,17 @@ class NodeRewriter:
         skipped: set[tuple] = set()
         deferred_pending: dict[tuple, tuple[KeyPath, Node]] = {}
 
+        # only rebuild node_map after MUTATED — NO_CHANGE/DEFERRED don't touch the tree
+        self.comp.make_map()
+        need_remap = False
         for _ in range(self.max_passes):
             outcome.iterations += 1
-            self.comp.make_map()
+            if need_remap:
+                self.comp.make_map()
+                need_remap = False
             candidates = self._ordered_candidates()
             candidates = [
-                (p, n) for p, n in candidates if (str(p), id(n)) not in skipped
+                (p, n) for p, n in candidates if (p, id(n)) not in skipped
             ]
             if not candidates:
                 break
@@ -132,12 +137,13 @@ class NodeRewriter:
                 outcome.mutated = True
                 skipped.clear()
                 deferred_pending.clear()
+                need_remap = True
             elif result is RewriteResult.DEFERRED:
-                key = (str(path), id(node))
+                key = (path, id(node))
                 deferred_pending[key] = (path.copy(), node)
                 skipped.add(key)
             else:  # NO_CHANGE
-                skipped.add((str(path), id(node)))
+                skipped.add((path, id(node)))
         else:
             raise RuntimeError(
                 f"NodeRewriter[{self.handler.name}] exceeded max_passes={self.max_passes}"

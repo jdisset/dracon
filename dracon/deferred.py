@@ -37,6 +37,47 @@ DraconLoader = ForwardRef('DraconLoader')
 T = TypeVar('T')
 
 
+def _subtree_has_nested_deferred(node) -> bool:
+    from dracon.composer import DraconMappingNode, DraconSequenceNode
+    if isinstance(node, DraconMappingNode):
+        children = (v for _, v in node.value)
+    elif isinstance(node, DraconSequenceNode):
+        children = node.value
+    else:
+        return False
+    for child in children:
+        if isinstance(child, DeferredNode) or _subtree_has_nested_deferred(child):
+            return True
+    return False
+
+
+def _snapshot_composition(comp):
+    return (
+        dict(comp.defined_vars) if comp.defined_vars else None,
+        set(comp.default_vars) if comp.default_vars else None,
+        list(comp.pending_requirements) if comp.pending_requirements else None,
+        {k: list(v) for k, v in comp.special_nodes.items()} if comp.special_nodes else None,
+        dict(comp.anchor_paths) if comp.anchor_paths else None,
+    )
+
+
+def _restore_composition(comp, snapshot):
+    defined_vars, default_vars, pending, special_nodes, anchor_paths = snapshot
+    if defined_vars is not None:
+        comp.defined_vars = defined_vars
+    if default_vars is not None:
+        comp.default_vars = default_vars
+    if pending is not None:
+        comp.pending_requirements = pending
+    if special_nodes is not None:
+        comp.special_nodes = special_nodes
+    else:
+        for k in list(comp.special_nodes.keys()):
+            comp.special_nodes[k] = []
+    if anchor_paths is not None:
+        comp.anchor_paths = anchor_paths
+
+
 ## {{{                       --     DeferredNode     --
 class DeferredNode(ContextNode, Generic[T]):
     """
@@ -211,6 +252,11 @@ class DeferredNode(ContextNode, Generic[T]):
         merged_context = merged(self.context, context or {}, cached_merge_key("{<~}[<~]"))
         merged_context = ShallowDict(merged_context)
 
+        # snapshot so siblings sharing `_full_composition` don't see this
+        # construct's residue (would be O(N²) re-walks across the loop)
+        saved_node = self.path.get_obj(composition.root)
+        saved_state = _snapshot_composition(composition)
+
         composition.set_at(self.path, value)
 
         if self._clear_ctx:
@@ -233,14 +279,16 @@ class DeferredNode(ContextNode, Generic[T]):
         if context:
             self._loader.update_context(context)
 
-        composition.walk_no_path(
+        subtree_root = self.path.get_obj(composition.root)
+        # walk only the spliced-in subtree; siblings already have loader ctx
+        walk_node(
+            node=subtree_root,
             callback=partial(
                 add_to_context, self._loader.context, merge_key=cached_merge_key('{<~}[<~]')
             )
         )
-        # overwrite this node's existing context with the new merged context
         walk_node(
-            node=self.path.get_obj(composition.root),
+            node=subtree_root,
             callback=partial(add_to_context, merged_context, merge_key=cached_merge_key('{<~}[<~]')),
         )
 
@@ -251,6 +299,16 @@ class DeferredNode(ContextNode, Generic[T]):
         result = CompositionResult(root=subtree)
         result._loader_instance = self._loader
         result._obj_type = self.obj_type
+
+        # nested deferreds still need absolute paths in the shared composition
+        if not _subtree_has_nested_deferred(subtree):
+            try:
+                composition.set_at(self.path, saved_node)
+            except Exception:
+                pass
+            _restore_composition(composition, saved_state)
+            composition.make_map()
+
         return result
 
     @ftrace(watch=[])

@@ -241,6 +241,13 @@ def retry_deferred_instructions(
 @ftrace()
 def process_assertions(comp_res: CompositionResult, loader) -> CompositionResult:
     """Process all !assert instructions after other instructions have resolved."""
+    comp_res.make_map()
+    if comp_res.node_map and not any(
+        isinstance(getattr(n, 'tag', None), str) and n.tag.startswith('!assert')
+        for n in comp_res.node_map.values()
+    ):
+        return comp_res
+
     assert_nodes = []
 
     def find_assert_nodes(node: Node, path: KeyPath):
@@ -252,7 +259,6 @@ def process_assertions(comp_res: CompositionResult, loader) -> CompositionResult
             if inst is not None and getattr(inst, 'deferred', False):
                 assert_nodes.append((inst, path))
 
-    comp_res.make_map()
     skip_paths = deferred_instruction_value_paths(comp_res)
     comp_res.walk(find_assert_nodes)
     assert_nodes = sorted(assert_nodes, key=lambda x: len(x[1]))

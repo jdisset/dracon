@@ -692,7 +692,10 @@ def fast_copy_node_tree(node):
             comment=node.comment,
         )
     else:
-        # DraconScalarNode or any other node type - immutable value, just copy structure
+        # subclasses with extra state (DeferredNode etc.) need full deepcopy
+        from dracon.nodes import DraconScalarNode
+        if cls is not DraconScalarNode:
+            return deepcopy(node)
         n = cls.__new__(cls)
         n.tag = node.tag
         n.value = node.value
