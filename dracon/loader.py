@@ -281,6 +281,7 @@ class DraconLoader:
         self.yaml.composer.enable_shorthand_vars = self.enable_shorthand_vars
         self.yaml.constructor.dracon_loader = self
         self.yaml.constructor.yaml_base_dict_type = self.base_dict_type
+        self.yaml.constructor.yaml_base_list_type = self.base_list_type
         self.yaml.constructor.interpolation_engine = self.interpolation_engine
 
     def reset_context(self):

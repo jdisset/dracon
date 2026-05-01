@@ -30,7 +30,7 @@ from dracon.interpolation_utils import (
     InterpolationMatch,
 )
 from dracon.interpolation import evaluate_expression, InterpolationError, DraconError
-from dracon.utils import list_like, dict_like, DEFAULT_EVAL_ENGINE
+from dracon.utils import list_like, dict_like, raw_items, DEFAULT_EVAL_ENGINE
 
 import inspect
 from pydantic_core import core_schema  # Added core_schema
@@ -414,7 +414,7 @@ def collect_lazy_by_depth(obj, path=ROOTPATH, seen=None):
 
         # handle dict-like objects
         if dict_like(o):
-            for k, v in list(o.items()):
+            for k, v in list(raw_items(o)):
                 if isinstance(k, LazyInterpolable):
                     key_path = p.copy().down(MAPPING_KEY).down(str(k.value))
                     if depth not in lazy_keys_by_depth:
@@ -613,7 +613,7 @@ def resolve_all_lazy(
         if not resolved_something_in_last_pass:
             logger.debug(f"No changes in pass {pass_num}, proceeding to children recursion.")
             if dict_like(obj):
-                for k, v in list(obj.items()):
+                for k, v in list(raw_items(obj)):
                     key_str = k.value if isinstance(k, LazyInterpolable) else str(k)
                     child_path = current_path + key_str
                     obj[k] = resolve_all_lazy(
@@ -687,8 +687,8 @@ def recursive_update_lazy_container(obj, root_obj, current_path, seen=None):
         return
 
     if dict_like(obj):
-        # iterate over copy of items for safety if dict changes
-        for key, value in list(obj.items()):
+        # iterate raw — `.items()` would resolve lazies on Dracon's Mapping
+        for key, value in list(raw_items(obj)):
             # update key if it's lazy
             if isinstance(key, LazyInterpolable):
                 key.root_obj = root_obj

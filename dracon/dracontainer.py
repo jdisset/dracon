@@ -3,7 +3,7 @@
 
 from typing import Any, Dict, List, Union, TypeVar, Generic, Optional, Set
 from dracon.keypath import ROOTPATH, KeyPath
-from dracon.utils import DictLike, ListLike, deepcopy, dict_like, list_like
+from dracon.utils import DictLike, ListLike, deepcopy, dict_like, list_like, raw_items
 from dracon.lazy import (
     Lazy,
     recursive_update_lazy_container,
@@ -292,7 +292,7 @@ class Mapping(Dracontainer, dict, Generic[K, V]):
         dict.__init__(self)
         Dracontainer.__init__(self)
         if data:
-            for key, value in data.items():
+            for key, value in raw_items(data):
                 self[key] = value
 
     @property
@@ -316,6 +316,21 @@ class Mapping(Dracontainer, dict, Generic[K, V]):
         # instead of the raw wrappers stored in the underlying dict.
         return dict.__iter__(self)
 
+    # values()/items() route through _handle_lazy so user helpers in
+    # ${...} see resolved values consistently with m[key]. `_data` is
+    # the raw escape hatch for internal walkers. `.get()` deliberately
+    # stays raw (inherited dict.get): pydantic-core's Rust validator
+    # walks model inputs via .get() and needs the raw LazyInterpolable
+    # so its Lazy[T] field validator can wrap it.
+
+    def values(self):
+        for key in dict.__iter__(self):
+            yield self._handle_lazy(key, dict.__getitem__(self, key))
+
+    def items(self):
+        for key in dict.__iter__(self):
+            yield key, self._handle_lazy(key, dict.__getitem__(self, key))
+
     def __setitem__(self, key, value):
         # during pickle restoration, SETITEMS runs BEFORE BUILD (state), so
         # the dracon bookkeeping isn't set up yet. In that case we just
@@ -327,8 +342,10 @@ class Mapping(Dracontainer, dict, Generic[K, V]):
         dict.__setitem__(self, key, self._to_dracontainer(value, key))
 
     def update(self, other=(), /, **kwargs):
+        # raw iter on `other` so any LazyInterpolable values copy across
+        # without being resolved (and replaced) in the source mapping.
         if hasattr(other, 'items'):
-            for key, value in other.items():
+            for key, value in raw_items(other):
                 self[key] = value
         else:
             for key, value in other:

@@ -211,6 +211,18 @@ _LIST_METHODS = ('__getitem__', '__add__', '__iter__', '__len__')
 _list_like_cache: dict[type, bool] = {}
 
 
+def raw_items(obj):
+    """Iterate (key, value) pairs without triggering lazy resolution.
+
+    Dracon's `Mapping.items()` resolves `LazyInterpolable` values on
+    access. Internal walkers (resolution, recursive update, copy, ruamel
+    construction) need the raw stored values instead. We route through
+    the `_data` raw view when present; for any other mapping-like, the
+    inherited `.items()` is already raw."""
+    raw = getattr(obj, '_data', None)
+    return raw.items() if raw is not None else obj.items()
+
+
 def list_like(obj) -> bool:
     if isinstance(obj, type):
         return False

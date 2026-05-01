@@ -257,7 +257,12 @@ class Draconstructor(Constructor):
         Constructor.__init__(self, preserve_quotes=preserve_quotes, loader=loader)
         self.preserve_quotes = preserve_quotes
         self.yaml_base_dict_type = dracontainer.Mapping
+        # ruamel wraps default-tagged sequences with yaml_base_list_type
+        # (not yaml_base_sequence_type, despite the name). Without this,
+        # `!define s: [...]` ends up as a plain list and the LazyInterpolable
+        # values stored in it never get resolved on access.
         self.yaml_base_sequence_type = dracontainer.Sequence
+        self.yaml_base_list_type = dracontainer.Sequence
         self.dracon_loader = dracon_loader
 
         self.localns = collect_all_types(
