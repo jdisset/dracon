@@ -594,6 +594,82 @@ class DraconComposer(Composer):
 ## {{{                           --     utils     --
 
 
+# tags whose presence forces post_process work
+_DYN_TAG_PREFIXES: Final = (
+    '!include', '!include?', '!define', '!set_default', '!require',
+    '!each', '!if', '!fn', '!pipe', '!deferred', '!assert', '!noconstruct',
+    '!returns',
+)
+
+# tags whose post_process effect reads outer loader.context
+_CTX_DEPENDENT_TAG_PREFIXES: Final = (
+    '!each', '!if', '!fn', '!pipe', '!require', '!assert',
+)
+
+
+def _tag_matches_any_prefix(tag, prefixes) -> bool:
+    if not (isinstance(tag, str) and tag.startswith('!')):
+        return False
+    for p in prefixes:
+        if tag == p or tag.startswith(p + ':') or tag.startswith(p + ' ') or tag.startswith(p + '('):
+            return True
+    return False
+
+
+def is_static_node(node) -> bool:
+    """True iff the tree contains no IncludeNode/MergeNode/InterpolableNode,
+    no UnsetNode, no anchors, and no dracon-instruction tags."""
+    cls = type(node)
+    if cls is DraconScalarNode:
+        if node.anchor or _tag_matches_any_prefix(node.tag, _DYN_TAG_PREFIXES):
+            return False
+        return node.value != DRACON_UNSET_VALUE
+    if cls is DraconMappingNode:
+        if node.anchor or _tag_matches_any_prefix(node.tag, _DYN_TAG_PREFIXES):
+            return False
+        for k, v in node.value:
+            if not is_static_node(k) or not is_static_node(v):
+                return False
+        return True
+    if cls is DraconSequenceNode:
+        if node.anchor:
+            return False
+        for v in node.value:
+            if not is_static_node(v):
+                return False
+        return True
+    return False
+
+
+def is_post_process_context_independent(node) -> bool:
+    """True iff the post_process result is determined by file content alone.
+
+    Excludes compose-time control flow that reads outer scope: `!each`/`!if`
+    (branches), `!fn`/`!pipe` (template invocation), `!require`/`!assert`
+    (checks), and tag-position `${...}` (eager). Other forms keep their
+    outer-scope sensitivity confined to lazy resolution time.
+    """
+    tag = getattr(node, 'tag', None)
+    if isinstance(tag, str) and ('${' in tag or '$(' in tag):
+        return False
+    if _tag_matches_any_prefix(tag, _CTX_DEPENDENT_TAG_PREFIXES):
+        return False
+    cls = type(node)
+    if cls is DraconMappingNode:
+        for k, v in node.value:
+            if not is_post_process_context_independent(k):
+                return False
+            if not is_post_process_context_independent(v):
+                return False
+        return True
+    if cls is DraconSequenceNode:
+        for v in node.value:
+            if not is_post_process_context_independent(v):
+                return False
+        return True
+    return True
+
+
 def fast_copy_node_tree(node):
     """Fast, specialized tree copy for Dracon node trees.
 

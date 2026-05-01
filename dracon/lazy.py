@@ -683,6 +683,9 @@ def recursive_update_lazy_container(obj, root_obj, current_path, seen=None):
         obj._dracon_root_obj = root_obj
         obj._dracon_current_path = current_path
 
+    if getattr(obj, '_dracon_has_lazy', True) is False:
+        return
+
     if dict_like(obj):
         # iterate over copy of items for safety if dict changes
         for key, value in list(obj.items()):

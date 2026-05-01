@@ -18,7 +18,7 @@ from dracon.nodes import (
 )
 from dracon.diagnostics import SourceContext, DraconError
 
-from dracon.keypath import KeyPath, ROOTPATH
+from dracon.keypath import KeyPath, ROOTPATH, KeyPathToken
 from dracon.merge import add_to_context, merged, MergeKey, cached_merge_key, reset_context
 
 from functools import partial
@@ -49,6 +49,59 @@ def _subtree_has_nested_deferred(node) -> bool:
         if isinstance(child, DeferredNode) or _subtree_has_nested_deferred(child):
             return True
     return False
+
+
+def _strip_path_prefix(p: KeyPath, prefix_parts) -> KeyPath:
+    """Reroot `p` at the subtree located at `prefix_parts` in the full tree."""
+    pp = p.parts
+    n = len(prefix_parts)
+    if len(pp) < n or tuple(pp[:n]) != tuple(prefix_parts):
+        return p
+    rel_parts = list(pp[n:])
+    if not rel_parts or rel_parts[0] != KeyPathToken.ROOT:
+        rel_parts.insert(0, KeyPathToken.ROOT)
+    rel = KeyPath.__new__(KeyPath)
+    rel.parts = rel_parts
+    rel.is_simple = False
+    rel._hash = None
+    return rel
+
+
+_OUTER_INTERP_MARKERS = ('__DRACON_NODES', '&', '@')
+
+
+def _outer_ref_in_str(s) -> bool:
+    return isinstance(s, str) and any(m in s for m in _OUTER_INTERP_MARKERS)
+
+
+def _subtree_needs_outer_tree(node, composition) -> bool:
+    """True iff the subtree references the outer composition tree at compose
+    or resolve time: absolute / relative / anchor-keyed `!include`, or
+    `${&path}` / `${@path}` interpolations (already rewritten to
+    `__DRACON_NODES[...]` by preprocess_references)."""
+    from dracon.composer import (
+        DraconMappingNode, DraconSequenceNode, IncludeNode, InterpolableNode,
+    )
+    anchor_paths = composition.anchor_paths or {}
+
+    def _walk(n):
+        if isinstance(n, IncludeNode):
+            v = n.value
+            if not isinstance(v, str):
+                return False
+            if v.startswith(('/', '@', '.')):
+                return True
+            head = v.split('@', 1)[0]
+            return ':' not in head and head in anchor_paths
+        if isinstance(n, InterpolableNode):
+            return _outer_ref_in_str(n.value) or _outer_ref_in_str(getattr(n, 'tag', None))
+        if isinstance(n, DraconMappingNode):
+            return any(_walk(k) or _walk(v) for k, v in n.value)
+        if isinstance(n, DraconSequenceNode):
+            return any(_walk(v) for v in n.value)
+        return False
+
+    return _walk(node)
 
 
 def _snapshot_composition(comp):
@@ -252,8 +305,13 @@ class DeferredNode(ContextNode, Generic[T]):
         merged_context = merged(self.context, context or {}, cached_merge_key("{<~}[<~]"))
         merged_context = ShallowDict(merged_context)
 
-        # snapshot so siblings sharing `_full_composition` don't see this
-        # construct's residue (would be O(N²) re-walks across the loop)
+        # rerooted compose: post_process only the deferred subtree (avoids
+        # O(N²) over N sibling deferreds sharing _full_composition). Falls
+        # back to the splice path when the subtree references outer state.
+        if (not _subtree_has_nested_deferred(value)
+                and not _subtree_needs_outer_tree(value, composition)):
+            return self._compose_rerooted(value, composition, context, merged_context)
+
         saved_node = self.path.get_obj(composition.root)
         saved_state = _snapshot_composition(composition)
 
@@ -309,6 +367,61 @@ class DeferredNode(ContextNode, Generic[T]):
             _restore_composition(composition, saved_state)
             composition.make_map()
 
+        return result
+
+    def _compose_rerooted(self, value, composition, context, merged_context):
+        """Compose `value` against a fresh CompositionResult rooted at it,
+        carrying over the outer scope state post_process needs (defined_vars,
+        anchor_paths) but not walking the rest of the tree."""
+        sub_defined_vars = dict(composition.defined_vars) if composition.defined_vars else {}
+        sub_default_vars = set(composition.default_vars) if composition.default_vars else set()
+
+        if self._clear_ctx:
+            for key in self._clear_ctx:
+                sub_defined_vars.pop(key, None)
+                sub_default_vars.discard(key)
+
+            def _clear_stale_context(node):
+                ctx = getattr(node, 'context', None)
+                if ctx is not None:
+                    for key in self._clear_ctx:
+                        ctx.pop(key, None)
+            walk_node(value, _clear_stale_context)
+            for key in self._clear_ctx:
+                self._loader.context.pop(key, None)
+
+        if context:
+            self._loader.update_context(context)
+
+        soft_replace = cached_merge_key('{<~}[<~]')
+        walk_node(value, partial(add_to_context, self._loader.context, merge_key=soft_replace))
+        walk_node(value, partial(add_to_context, merged_context, merge_key=soft_replace))
+
+        sub_comp = CompositionResult(
+            root=value,
+            special_nodes={},
+            anchor_paths=composition.anchor_paths,
+            defined_vars=sub_defined_vars,
+            default_vars=sub_default_vars,
+            pending_requirements=list(composition.pending_requirements) if composition.pending_requirements else [],
+            cli_directives=list(composition.cli_directives) if composition.cli_directives else [],
+            trace=None,
+        )
+
+        # deferred_paths were rerooted onto self.path upstream; strip that
+        # prefix back off so they address sub_comp's local paths.
+        saved = self._loader.deferred_paths
+        self_parts = self.path.parts if self.path is not None else []
+        if self_parts and saved:
+            self._loader.deferred_paths = [_strip_path_prefix(p, self_parts) for p in saved]
+        try:
+            compres = self._loader.post_process_composed(sub_comp)
+        finally:
+            self._loader.deferred_paths = saved
+
+        result = CompositionResult(root=compres.root)
+        result._loader_instance = self._loader
+        result._obj_type = self.obj_type
         return result
 
     @ftrace(watch=[])

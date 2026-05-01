@@ -187,7 +187,7 @@ def compose_from_include_str(
                 merged_context = merged(node.context, new_context, cached_merge_key("{<~}[<~]"))
                 add_to_context(merged_context, new_loader)
 
-            result = new_loader.compose_config_from_str(result)
+            result = new_loader.compose_config_from_str(result, _cacheable_pp=True)
         if components.key_path:
             result = result.rerooted(KeyPath(components.key_path))
         return result

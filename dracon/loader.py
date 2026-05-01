@@ -20,6 +20,8 @@ from dracon.composer import (
     DraconComposer,
     delete_unset_nodes,
     fast_copy_node_tree,
+    is_static_node,
+    is_post_process_context_independent,
 )
 
 from dracon.draconstructor import Draconstructor
@@ -344,11 +346,27 @@ class DraconLoader:
     def __setstate__(self, state):
         self.__dict__.update(state)
 
-    def compose_config_from_str(self, content: str) -> CompositionResult:
+    def compose_config_from_str(self, content: str, _cacheable_pp: bool = False) -> CompositionResult:
         if self.use_cache:
             composed_content = cached_compose_config_from_str(self.yaml, content)
         else:
             composed_content = compose_config_from_str(self.yaml, content)
+
+        # inner-include post-process cache: skip the full pipeline when the
+        # included file's content alone determines the resulting tree.
+        if (_cacheable_pp
+            and self.use_cache
+            and not self.deferred_paths
+            and getattr(composed_content, '_is_pp_ctx_independent', False)):
+            key = hashkey(content)
+            cached_pp = _post_process_cache.get(key)
+            if cached_pp is not None:
+                return _reuse_post_processed(cached_pp, self.context)
+            result = self.post_process_composed(composed_content)
+            if not result.cli_directives and not result.pending_requirements:
+                _post_process_cache[key] = _snapshot_for_cache(result)
+            return result
+
         return self.post_process_composed(composed_content)
 
     def _trace_for_path(self, keypath: Optional[str]) -> Optional[list]:
@@ -482,6 +500,21 @@ class DraconLoader:
         if _needs_initial_trace:
             from dracon.composition_trace import CompositionTrace
             comp.trace = CompositionTrace()
+
+        # static fast path: nothing to include / merge / interpolate / instruct;
+        # the full pipeline collapses to make_map + context propagation.
+        if getattr(comp, '_is_static', False) and not self.deferred_paths:
+            comp.make_map()
+            comp.walk_no_path(
+                callback=partial(
+                    add_to_context, self.context,
+                    merge_key=cached_merge_key('{>~}[>~]'), skip_clean=True,
+                )
+            )
+            if _needs_initial_trace:
+                _record_initial_definitions(comp)
+            comp.update_paths()
+            return comp
 
         ser_debug(self, operation='deepcopy')
         ser_debug(comp, operation='deepcopy')
@@ -627,6 +660,10 @@ class DraconLoader:
                     include_loc = loc
 
             new_loader = self.copy()
+            # outer post_process re-runs process_deferred after the splice,
+            # so inner compose doesn't need to honor outer deferred_paths
+            # (and clearing them lets the static fast path fire here).
+            new_loader.deferred_paths = []
             try:
                 include_composed = compose_from_include_str(
                     new_loader,
@@ -893,7 +930,7 @@ def cached_compose_config_from_str(yaml, content):
     cached = _cached_compose_config_from_str(yaml, content)
     # fast tree copy instead of generic deepcopy
     new_root = fast_copy_node_tree(cached.root)
-    return CompositionResult(
+    res = CompositionResult(
         root=new_root,
         special_nodes={},
         anchor_paths=deepcopy(cached.anchor_paths) if cached.anchor_paths else None,
@@ -903,11 +940,108 @@ def cached_compose_config_from_str(yaml, content):
         cli_directives=list(cached.cli_directives),
         trace=None,
     )
+    res._is_static = getattr(cached, '_is_static', False)
+    res._is_pp_ctx_independent = getattr(cached, '_is_pp_ctx_independent', False)
+    return res
+
+
+_post_process_cache: LRUCache = LRUCache(maxsize=128)
+
+
+# per-file include-loader keys (DIR/FILE/...): determined by file content,
+# stable across reuses, kept on cached nodes so `${$DIR}` etc. still resolve.
+_FILE_CONTEXT_KEYS: frozenset = frozenset({
+    'DIR', 'FILE', 'FILE_PATH', 'FILE_STEM', 'FILE_EXT',
+    'FILE_LOAD_TIME', 'FILE_LOAD_TIME_UNIX', 'FILE_LOAD_TIME_UNIX_MS',
+    'FILE_SIZE',
+})
+
+
+def _snapshot_for_cache(result: CompositionResult) -> CompositionResult:
+    """Snapshot a post-processed composition: deep-copy the tree and strip
+    per-call context entries so later reuses bind to the new caller."""
+    snap_root = fast_copy_node_tree(result.root)
+    _strip_node_contexts(snap_root)
+    return CompositionResult(
+        root=snap_root,
+        special_nodes={},
+        anchor_paths=deepcopy(result.anchor_paths) if result.anchor_paths else None,
+        defined_vars=dict(result.defined_vars) if result.defined_vars else {},
+        default_vars=set(result.default_vars),
+        pending_requirements=[],
+        cli_directives=deepcopy(result.cli_directives) if result.cli_directives else [],
+        trace=deepcopy(result.trace) if result.trace is not None else None,
+    )
+
+
+def _reuse_post_processed(cached: CompositionResult, loader_ctx) -> CompositionResult:
+    """Clone a cached post-processed composition for reuse: rebuild node_map,
+    re-attach the calling loader.context so lazy resolution sees the new
+    caller's vocabulary, then re-propagate cached defined_vars with
+    Define / SetDefault semantics (`default_vars` tags the soft subset)."""
+    new_root = fast_copy_node_tree(cached.root)
+    defined = cached.defined_vars
+    default = cached.default_vars or set()
+    res = CompositionResult(
+        root=new_root,
+        special_nodes={},
+        anchor_paths=deepcopy(cached.anchor_paths) if cached.anchor_paths else None,
+        defined_vars=dict(defined) if defined else {},
+        default_vars=set(default),
+        pending_requirements=list(cached.pending_requirements),
+        cli_directives=list(cached.cli_directives),
+        trace=deepcopy(cached.trace) if cached.trace is not None else None,
+    )
+    res.make_map()
+    soft_pin = cached_merge_key('{>~}[>~]')
+    hard_pin = cached_merge_key('{<~}[<~]')
+    if loader_ctx:
+        res.walk_no_path(
+            callback=partial(add_to_context, loader_ctx, merge_key=soft_pin, skip_clean=True)
+        )
+    if defined:
+        hard = {k: v for k, v in defined.items() if k not in default}
+        soft = {k: v for k, v in defined.items() if k in default}
+        if hard:
+            res.walk_no_path(
+                callback=partial(add_to_context, hard, merge_key=hard_pin, skip_clean=True)
+            )
+        if soft:
+            res.walk_no_path(
+                callback=partial(add_to_context, soft, merge_key=soft_pin, skip_clean=True)
+            )
+    return res
+
+
+def _strip_node_contexts(node):
+    """Reduce each node.context to file-context entries (DIR/FILE/...) and
+    drop the rest, so the new caller's add_to_context fills it in fresh."""
+    cls = type(node)
+    ctx = getattr(node, 'context', None)
+    if ctx:
+        try:
+            new_ctx = type(ctx)()
+            for k in _FILE_CONTEXT_KEYS:
+                if k in ctx:
+                    new_ctx[k] = ctx[k]
+            node.context = new_ctx
+        except Exception:
+            node.context = {k: ctx[k] for k in _FILE_CONTEXT_KEYS if k in ctx}
+    if cls is DraconMappingNode:
+        for k, v in node.value:
+            _strip_node_contexts(k)
+            _strip_node_contexts(v)
+    elif cls is DraconSequenceNode:
+        for v in node.value:
+            _strip_node_contexts(v)
 
 
 @cached(LRUCache(maxsize=128), key=lambda yaml, content: hashkey(content))
 def _cached_compose_config_from_str(yaml, content):
-    return compose_config_from_str(yaml, content)
+    res = compose_config_from_str(yaml, content)
+    res._is_static = is_static_node(res.root)
+    res._is_pp_ctx_independent = is_post_process_context_independent(res.root)
+    return res
 
 
 T = TypeVar('T')

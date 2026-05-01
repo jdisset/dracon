@@ -147,6 +147,9 @@ class Dracontainer:
     _dracon_root_obj = None
     _dracon_current_path = ROOTPATH
     _dracon_lazy_resolve = True
+    # pessimistic class default; instances reset to False in __init__ and
+    # flip back to True the first time a lazy descendant gets installed.
+    _dracon_has_lazy: bool = True
 
     def __init__(self):
         self._auto_interp = True
@@ -156,6 +159,7 @@ class Dracontainer:
         self._dracon_root_obj = self
         self._dracon_current_path = ROOTPATH
         self._dracon_lazy_resolve = True
+        self._dracon_has_lazy = False
 
     def cleanup(self):
         """Clear internal references and caches"""
@@ -181,6 +185,7 @@ class Dracontainer:
         new_obj._dracon_root_obj = self._dracon_root_obj
         new_obj._dracon_current_path = self._dracon_current_path
         new_obj._dracon_lazy_resolve = self._dracon_lazy_resolve
+        new_obj._dracon_has_lazy = self._dracon_has_lazy
         if self._dracon_root_obj is self:
             new_obj._dracon_root_obj = new_obj
 
@@ -251,6 +256,12 @@ class Dracontainer:
             newval = Mapping(value)
         elif isinstance(value, list) and not isinstance(value, str):
             newval = Sequence(value)
+
+        from dracon.lazy import LazyInterpolable
+        if (isinstance(newval, LazyInterpolable)
+                or isinstance(value, LazyInterpolable)
+                or getattr(newval, '_dracon_has_lazy', False)):
+            self._dracon_has_lazy = True
 
         recursive_update_lazy_container(
             newval,
