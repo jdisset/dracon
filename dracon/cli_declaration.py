@@ -89,8 +89,14 @@ _YAML_SCALAR_COERCE = {
 
 
 def _scalar_value(value_node) -> Any:
-    """Pull the python value out of a scalar node, applying YAML scalar tag
-    coercion for typed forms (int/float/bool/null)."""
+    """Recursively pull the python value out of a node tree, applying
+    YAML scalar tag coercion (int/float/bool/null) and unwrapping
+    sequence/mapping children. Non-Node values pass through."""
+    from dracon.nodes import DraconMappingNode, DraconSequenceNode
+    if isinstance(value_node, DraconSequenceNode):
+        return [_scalar_value(child) for child in value_node.value]
+    if isinstance(value_node, DraconMappingNode):
+        return {_scalar_value(k): _scalar_value(v) for k, v in value_node.value}
     if not hasattr(value_node, "value"):
         return value_node
     raw = value_node.value
