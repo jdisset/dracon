@@ -32,6 +32,22 @@ from dracon.cli_declaration import (
 ## {{{                      --     instruct utils     --
 
 
+def _has_explicit(context, var_name: str) -> bool:
+    """True iff `var_name` is *explicitly* present in `context`.
+
+    SymbolTable's `__contains__` returns True for names resolvable via
+    sources (e.g. ``dynamic_import`` exposing Python builtins like
+    ``min``/``max``/``sum``). Those are great for interpolation eval
+    but disastrous for !require / !set_default scoping checks: a
+    template that declares `!set_default min: 1` would otherwise read
+    `<built-in function min>` from the source and skip its own default.
+    """
+    from dracon.symbol_table import SymbolTable
+    if isinstance(context, SymbolTable):
+        return context.has_explicit(var_name)
+    return var_name in (context or {})
+
+
 def evaluate_nested_mapping_keys(node, engine, context):
     if isinstance(node, DraconMappingNode):
         new_items = []
@@ -306,7 +322,7 @@ def check_pending_requirements(comp_res: CompositionResult, loader) -> None:
     unsatisfied = [
         (var, hint, ctx)
         for var, hint, ctx in comp_res.pending_requirements
-        if var not in loader.context and var not in comp_res.defined_vars
+        if not _has_explicit(loader.context, var) and var not in comp_res.defined_vars
     ]
     if unsatisfied:
         lines = []
@@ -713,13 +729,16 @@ class SetDefault(Define):
 
         parent_context = getattr(parent_node, 'context', None) or {}
         parent_soft_keys = getattr(parent_context, '_soft_keys', set()) or set()
-        context_has_value = var_name in loader.context and var_name in parent_context
+        context_has_value = (
+            _has_explicit(loader.context, var_name)
+            and _has_explicit(parent_context, var_name)
+        )
         defined_has_value = var_name in comp_res.defined_vars
         existing_is_default = var_name in comp_res.default_vars
         if context_has_value:
             effective = loader.context[var_name]
             is_soft_default = False
-        elif var_name in parent_context:
+        elif _has_explicit(parent_context, var_name):
             effective = parent_context[var_name]
             is_soft_default = var_name in parent_soft_keys
         elif defined_has_value and not existing_is_default:
@@ -745,7 +764,7 @@ class SetDefault(Define):
         walk_node(node=parent_node, callback=_add_effective)
 
         if context_has_value or (
-            var_name in parent_context and var_name not in parent_soft_keys
+            _has_explicit(parent_context, var_name) and var_name not in parent_soft_keys
         ):
             comp_res.defined_vars[var_name] = effective
             comp_res.default_vars.discard(var_name)
@@ -1264,7 +1283,7 @@ class Require(Instruction):
         del parent_node[str(path[-1])]
         comp_res.cli_directives.append(directive)
 
-        if var_name in loader.context or var_name in comp_res.defined_vars:
+        if _has_explicit(loader.context, var_name) or var_name in comp_res.defined_vars:
             # mark as accessed: a satisfied !require is a real read of the
             # variable contract, even if no ${var} interpolation reads it.
             # this prevents the unused-var warning from firing on values

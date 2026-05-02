@@ -217,6 +217,25 @@ class SymbolTable(MutableMapping):
                     return True
         return False
 
+    def has_explicit(self, key: str) -> bool:
+        """True iff `key` is defined in this table or its parent chain.
+
+        Unlike ``__contains__``, this does NOT consult symbol sources
+        (e.g. the ``dynamic_import`` source that exposes Python
+        builtins). Use this for "is this variable user-defined?"
+        questions like !require satisfaction and !set_default shadowing
+        -- otherwise builtins (``min``, ``max``, ``sum`` ...) silently
+        satisfy declarations the user never set.
+        """
+        if key in self._entries:
+            return True
+        p = self._parent
+        while p is not None:
+            if key in p._entries:
+                return True
+            p = p._parent
+        return False
+
     def __iter__(self) -> Iterator[str]:
         if self._parent is None:
             yield from self._entries

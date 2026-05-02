@@ -1006,14 +1006,20 @@ class Program(BaseModel, Generic[T]):
             self._args = list(self._baseline_args)
             self._arg_map = dict(self._baseline_arg_map)
 
-        sources, seed = self._extract_layer_sources_and_seed(argv)
+        sources, _ = self._extract_layer_sources_and_seed(argv)
         if not sources:
             return
 
-        seed_context: Dict[str, Any] = {}
-        if program_context:
-            seed_context.update(program_context)
-        seed_context.update(seed)
+        # argv-supplied ++name=value seeds are deliberately NOT mixed in:
+        # discovery only needs to harvest !require / !set_default
+        # declarations, and their existence is purely structural. Letting
+        # argv values into the loader context drives full !each / !if
+        # expansion against user data, which scales with override size and
+        # has wedged the CLI on cross-product configs with long string
+        # overrides. Compose still fires for dynamic-declaration discovery;
+        # if it fails (e.g. interpolations needing argv), discover falls
+        # back to a structural static scan that finds the same directives.
+        seed_context: Dict[str, Any] = dict(program_context) if program_context else {}
 
         # discovery is purely opportunistic: surface yaml-declared flags so
         # argv parsing accepts them. The real loader will run later and raise
