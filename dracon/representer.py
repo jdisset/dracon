@@ -261,6 +261,9 @@ class DraconRepresenter(RoundTripRepresenter):
     def represent_ndarray(self, data: np.ndarray) -> Node:
         return self.represent_sequence(DEFAULT_SEQ_TAG, data.tolist(), flow_style=True)
 
+    def represent_frozenset(self, data: frozenset) -> Node:
+        return self.represent_sequence(DEFAULT_SEQ_TAG, sorted(data), flow_style=True)
+
     def represent_enum(self, data: Enum) -> Node:
         """Represent Enum values by their underlying value."""
         return self.represent_data(data.value)
@@ -489,6 +492,7 @@ DraconRepresenter.add_representer(Resolvable, DraconRepresenter.represent_resolv
 DraconRepresenter.add_representer(DeferredNode, DraconRepresenter.represent_deferred_node)
 DraconRepresenter.add_representer(InterpolableNode, DraconRepresenter.represent_interpolable_node)
 DraconRepresenter.add_representer(np.ndarray, DraconRepresenter.represent_ndarray)
+DraconRepresenter.add_representer(frozenset, DraconRepresenter.represent_frozenset)
 
 from dracon.raw import RawExpression
 DraconRepresenter.add_representer(RawExpression, DraconRepresenter.represent_dracon_dumpable)
