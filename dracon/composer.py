@@ -601,9 +601,13 @@ _DYN_TAG_PREFIXES: Final = (
     '!returns',
 )
 
-# tags whose post_process effect reads outer loader.context
+# tags whose post_process effect reads outer loader.context. `!define`
+# family is included: the eager value evaluation in `Define.process` would
+# otherwise be frozen into the post_process cache against the first caller's
+# scope.
 _CTX_DEPENDENT_TAG_PREFIXES: Final = (
     '!each', '!if', '!fn', '!pipe', '!require', '!assert',
+    '!define', '!define?', '!set_default',
 )
 
 

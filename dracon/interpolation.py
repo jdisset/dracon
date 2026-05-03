@@ -49,6 +49,7 @@ from dracon.diagnostics import (
 # keep InterpolationError as alias for backwards compatibility
 class InterpolationError(EvaluationError):
     """Backwards compatibility alias for EvaluationError."""
+
     def __init__(self, message, context=None, cause=None, expression=None):
         super().__init__(message, context=context, cause=cause, expression=expression)
 
@@ -58,6 +59,7 @@ BASE_DRACON_SYMBOLS: Dict[str, Any] = {}
 
 try:
     import numpy as np
+
     BASE_DRACON_SYMBOLS['np'] = np
 except ImportError:
     pass  # numpy not installed
@@ -65,20 +67,30 @@ except ImportError:
 
 class _UnresolvedSentinel:
     _instance = None
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
-    def __repr__(self): return 'UNRESOLVED'
-    def __bool__(self): return False
+
+    def __repr__(self):
+        return 'UNRESOLVED'
+
+    def __bool__(self):
+        return False
+
 
 UNRESOLVED_SENTINEL = _UnresolvedSentinel()
 
 
 class PartiallyResolved:
     __slots__ = ('expr',)
-    def __init__(self, expr: str): self.expr = expr
-    def __repr__(self): return f'PartiallyResolved({self.expr!r})'
+
+    def __init__(self, expr: str):
+        self.expr = expr
+
+    def __repr__(self):
+        return f'PartiallyResolved({self.expr!r})'
 
 
 _FOLDABLE = (str, int, float, bool, type(None))
@@ -233,7 +245,15 @@ class LazyConstructable:
     """Deferred construction marker for !define with type tags.
     NOT a proxy; resolved by the interpolation engine before user code sees it."""
 
-    __slots__ = ('_node', '_loader', '_source', '_result', '_post_process', '_defined_vars', '_resolving')
+    __slots__ = (
+        '_node',
+        '_loader',
+        '_source',
+        '_result',
+        '_post_process',
+        '_defined_vars',
+        '_resolving',
+    )
 
     def __init__(self, node, loader, source=None, defined_vars=None, post_process=None):
         self._node = node
@@ -255,8 +275,7 @@ class LazyConstructable:
 
         if self._resolving:
             raise CompositionError(
-                f"circular dependency: !define at {self._source} "
-                f"triggers construction of itself"
+                f"circular dependency: !define at {self._source} triggers construction of itself"
             )
         self._resolving = True
         try:
@@ -286,10 +305,7 @@ class LazyConstructable:
             if getattr(self._loader, '_composition_phase', False):
                 raise LazyResolutionPending(e) from e
             tag = getattr(self._node, 'tag', '?')
-            raise CompositionError(
-                f"error constructing {tag} "
-                f"(defined at {self._source})"
-            ) from e
+            raise CompositionError(f"error constructing {tag} (defined at {self._source})") from e
         finally:
             self._resolving = False
 
@@ -370,10 +386,16 @@ def _analyze_eval_error(expr: str, error: Exception, symbols: Optional[dict]) ->
                     # check if this variable is used with .attr_name in the expression
                     if re.search(rf'\b{re.escape(var_name)}\.{re.escape(attr_name)}\b', expr):
                         if isinstance(var_val, (list, tuple)):
-                            hints.append(f"'{var_name}' is a {obj_type} with {len(var_val)} item(s), not a single object")
-                            hints.append(f"Try: '{var_name}[0].{attr_name}' to access the first item, or use !each to iterate")
+                            hints.append(
+                                f"'{var_name}' is a {obj_type} with {len(var_val)} item(s), not a single object"
+                            )
+                            hints.append(
+                                f"Try: '{var_name}[0].{attr_name}' to access the first item, or use !each to iterate"
+                            )
                         else:
-                            hints.append(f"'{var_name}' is a {obj_type} which doesn't have attribute '{attr_name}'")
+                            hints.append(
+                                f"'{var_name}' is a {obj_type} which doesn't have attribute '{attr_name}'"
+                            )
                         break
 
     # pattern: name 'X' is not defined
@@ -383,7 +405,12 @@ def _analyze_eval_error(expr: str, error: Exception, symbols: Optional[dict]) ->
         hints.append(f"Variable '{var_name}' is not defined in this context")
         if symbols:
             # suggest similar names
-            similar = [k for k in symbols.keys() if not k.startswith('_') and (var_name.lower() in k.lower() or k.lower() in var_name.lower())]
+            similar = [
+                k
+                for k in symbols.keys()
+                if not k.startswith('_')
+                and (var_name.lower() in k.lower() or k.lower() in var_name.lower())
+            ]
             if similar:
                 hints.append(f"Did you mean: {', '.join(similar[:3])}?")
 
@@ -394,26 +421,58 @@ def _analyze_eval_error(expr: str, error: Exception, symbols: Optional[dict]) ->
 
     # pattern: 'NoneType' object ...
     if "'NoneType' object" in error_msg:
-        hints.append("A value in the expression is None - check if a variable failed to load or is missing")
+        hints.append(
+            "A value in the expression is None - check if a variable failed to load or is missing"
+        )
 
     return "\n".join(hints) if hints else ""
 
 
+class _LazyResolvingDict(dict):
+    """eval namespace that resolves Lazy values on first lookup."""
+
+    __slots__ = ()
+
+    def __getitem__(self, key):
+        val = super().__getitem__(key)
+        if isinstance(val, (LazyConstructable, LazyProtocol)):
+            resolved = val.resolve()
+            super().__setitem__(key, resolved)
+            return resolved
+        return val
+
+    def get(self, key, default=None):
+        try:
+            val = super().__getitem__(key)
+        except KeyError:
+            return default
+        if isinstance(val, (LazyConstructable, LazyProtocol)):
+            resolved = val.resolve()
+            super().__setitem__(key, resolved)
+            return resolved
+        return val
+
+
 @ftrace(watch=[], inputs=['expr'])
-def do_safe_eval(expr: str, engine: str, symbols: Optional[dict] = None, source_context: Optional[SourceContext] = None, permissive: bool = False) -> Any:
+def do_safe_eval(
+    expr: str,
+    engine: str,
+    symbols: Optional[dict] = None,
+    source_context: Optional[SourceContext] = None,
+    permissive: bool = False,
+) -> Any:
     original_expr = expr
     expr = preprocess_expr(expr)
 
     # pre-access symbols that appear in the expression to trigger tracking
-    # this ensures accesses are recorded before copying to eval namespace
-    # resolve any lazy symbols so the eval engine gets concrete values
+    # in TrackedContext (drives unused-defined-var detection). Resolution
+    # of lazy values is intentionally deferred to eval-time name lookup so
+    # Python's short-circuit semantics are honored - see _LazyResolvingDict.
     if symbols is not None:
         identifiers = _extract_identifiers(expr)
         for ident in identifiers:
-            if ident in symbols and not ident.startswith('__'):
-                val = symbols.get(ident)  # triggers TrackedContext tracking
-                if isinstance(val, (LazyConstructable, LazyProtocol)):
-                    symbols[ident] = val.resolve()
+            if not ident.startswith('__') and ident in symbols:
+                symbols.get(ident)
 
     try:
         return _do_safe_eval_engine(expr, engine, symbols, source_context, original_expr)
@@ -437,6 +496,10 @@ def _get_asteval_proto() -> tuple[Interpreter, dict]:
     if _asteval_proto is None:
         _asteval_proto = Interpreter(max_string_length=1000)
         _asteval_base_symtable = dict(_asteval_proto.symtable)
+        # swap the prototype's symtable for a lazy-resolving variant so
+        # name lookups during eval resolve LazyConstructable/LazyProtocol
+        # on demand (preserving Python short-circuit semantics).
+        _asteval_proto.symtable = _LazyResolvingDict(_asteval_proto.symtable)
     return _asteval_proto, _asteval_base_symtable
 
 
@@ -449,6 +512,7 @@ def _asteval_eval(expr: str, symbols: Optional[dict]) -> Any:
         if _asteval_depth > 1:
             # reentrant: fall back to fresh instance to avoid symtable clobber
             interp = Interpreter(user_symbols=symbols or {}, max_string_length=1000)
+            interp.symtable = _LazyResolvingDict(interp.symtable)
             return interp.eval(expr, raise_errors=True)
         proto, base = _get_asteval_proto()
         proto.symtable.clear()
@@ -465,16 +529,32 @@ def _asteval_eval(expr: str, symbols: Optional[dict]) -> Any:
         _asteval_depth -= 1
 
 
-def _do_safe_eval_engine(expr: str, engine: str, symbols: Optional[dict], source_context: Optional[SourceContext], original_expr: str) -> Any:
+def _do_safe_eval_engine(
+    expr: str,
+    engine: str,
+    symbols: Optional[dict],
+    source_context: Optional[SourceContext],
+    original_expr: str,
+) -> Any:
     if engine == 'asteval':
         try:
             res = _asteval_eval(expr, symbols)
+        except LazyResolutionPending:
+            # composition-phase retry signal must propagate unchanged so
+            # process_instructions can defer the triggering instruction.
+            raise
         except Exception as e:
             # detect undefined name errors before generic handling
             if isinstance(e, NameError):
                 m = _UNDEF_NAME_RE.search(str(e))
                 if m:
-                    raise UndefinedNameError(m.group(1), context=source_context, cause=e, expression=original_expr, available_symbols=symbols) from e
+                    raise UndefinedNameError(
+                        m.group(1),
+                        context=source_context,
+                        cause=e,
+                        expression=original_expr,
+                        available_symbols=symbols,
+                    ) from e
             hint = _analyze_eval_error(expr, e, symbols)
             # asteval populates error list even when raising - extract location info
             proto, _ = _get_asteval_proto()
@@ -491,23 +571,36 @@ def _do_safe_eval_engine(expr: str, engine: str, symbols: Optional[dict], source
                 msg += error_location
             if hint:
                 msg += f"\n\nHint:\n{hint}"
-            raise EvaluationError(msg, context=source_context, cause=e, expression=original_expr, available_symbols=symbols) from e
+            raise EvaluationError(
+                msg,
+                context=source_context,
+                cause=e,
+                expression=original_expr,
+                available_symbols=symbols,
+            ) from e
 
         proto, _ = _get_asteval_proto()
         if proto.error:
             errormsg = '\n'.join(': '.join(e.get_error()) for e in proto.error)
-            raise EvaluationError(f"Expression evaluation failed:\n{errormsg}", context=source_context, expression=original_expr, available_symbols=symbols)
+            raise EvaluationError(
+                f"Expression evaluation failed:\n{errormsg}",
+                context=source_context,
+                expression=original_expr,
+                available_symbols=symbols,
+            )
         return res
 
     elif engine == 'eval':
         try:
-            eval_globals = {}
+            eval_globals = _LazyResolvingDict()
             eval_globals.update(__builtins__)  # type: ignore
-            eval_globals.update(symbols or {})
+            if symbols:
+                eval_globals.update(symbols)
             # compile with meaningful identifier for better tracebacks
             identifier = "<dracon expression>"
             if source_context:
                 import os
+
                 # try to get a real filename (not <unicode string>)
                 file_path = source_context.file_path
                 if file_path and file_path.startswith('<') and source_context.include_trace:
@@ -523,6 +616,9 @@ def _do_safe_eval_engine(expr: str, engine: str, symbols: Optional[dict], source
                     identifier = f"<expr at line {source_context.line}>"
             code_obj = compile(expr, identifier, 'eval')
             return eval(code_obj, eval_globals)
+        except LazyResolutionPending:
+            # composition-phase retry signal must propagate unchanged
+            raise
         except SyntaxError as e:
             # syntax errors have offset info
             error_location = ""
@@ -531,18 +627,36 @@ def _do_safe_eval_engine(expr: str, engine: str, symbols: Optional[dict], source
             msg = f"Syntax error in expression: {e.msg}"
             if error_location:
                 msg += error_location
-            raise EvaluationError(msg, context=source_context, cause=e, expression=original_expr, available_symbols=symbols) from e
+            raise EvaluationError(
+                msg,
+                context=source_context,
+                cause=e,
+                expression=original_expr,
+                available_symbols=symbols,
+            ) from e
         except Exception as e:
             # detect undefined name errors before generic handling
             if isinstance(e, NameError):
                 name = getattr(e, 'name', None)
                 if name:
-                    raise UndefinedNameError(name, context=source_context, cause=e, expression=original_expr, available_symbols=symbols) from e
+                    raise UndefinedNameError(
+                        name,
+                        context=source_context,
+                        cause=e,
+                        expression=original_expr,
+                        available_symbols=symbols,
+                    ) from e
             hint = _analyze_eval_error(expr, e, symbols)
             msg = f"Error evaluating expression: {e}"
             if hint:
                 msg += f"\n\nHint:\n{hint}"
-            raise EvaluationError(msg, context=source_context, cause=e, expression=original_expr, available_symbols=symbols) from e
+            raise EvaluationError(
+                msg,
+                context=source_context,
+                cause=e,
+                expression=original_expr,
+                available_symbols=symbols,
+            ) from e
     else:
         raise ValueError(f"Unknown interpolation engine: {engine}")
 
@@ -662,7 +776,9 @@ def evaluate_expression(
             permissive=permissive,
             _unescape_result=False,
         )
-        evaluated_expr = do_safe_eval(str(resolved_expr), engine, symbols, source_context, permissive=permissive)
+        evaluated_expr = do_safe_eval(
+            str(resolved_expr), engine, symbols, source_context, permissive=permissive
+        )
         if evaluated_expr is UNRESOLVED_SENTINEL:
             endexpr = expr  # leave ${...} as-is
         elif isinstance(evaluated_expr, PartiallyResolved):
@@ -687,7 +803,9 @@ def evaluate_expression(
                 permissive=permissive,
                 _unescape_result=False,
             )
-            evaluated_expr = do_safe_eval(str(resolved_expr), engine, symbols, source_context, permissive=permissive)
+            evaluated_expr = do_safe_eval(
+                str(resolved_expr), engine, symbols, source_context, permissive=permissive
+            )
             if evaluated_expr is UNRESOLVED_SENTINEL:
                 continue  # leave this ${...} block as-is
             elif isinstance(evaluated_expr, PartiallyResolved):
@@ -769,7 +887,9 @@ class InterpolableNode(ContextNode):
         self.init_outermost_interpolations = state['init_outermost_interpolations']
         self.referenced_nodes = state['referenced_nodes']
 
-    def evaluate(self, path='/', root_obj=None, engine=DEFAULT_EVAL_ENGINE, context=None, permissive=False):
+    def evaluate(
+        self, path='/', root_obj=None, engine=DEFAULT_EVAL_ENGINE, context=None, permissive=False
+    ):
         context = context or {}
         context = {**self.context, **context}
         newval = evaluate_expression(
