@@ -116,8 +116,13 @@ class _TemplateStrategy:
         return None  # templates have no single underlying Python type
 
     def reduce(self, sym):
-        # template state is loader-bound; no clean dotted-path round-trip
-        raise TypeError("CallableSymbol of kind 'template' is not picklable")
+        # state-based round-trip through the canonical factory; constituents
+        # (template node, loader) must themselves be picklable
+        return (
+            _reconstruct_template,
+            (sym._template_node, sym._loader, sym._source,
+             sym._file_context, sym._name, sym._has_return),
+        )
 
     def deepcopy(self, sym, memo):
         clone = CallableSymbol.__new__(CallableSymbol)
@@ -183,6 +188,15 @@ def _run_template(sym, kwargs, invocation_context=None):
         ) from e
     finally:
         sym._call_depth -= 1
+
+
+def _reconstruct_template(template_node, loader, source, file_context, name, has_return):
+    """Pickle reconstruction: rebuild the template through its canonical factory."""
+    return CallableSymbol.from_template(
+        template_node, loader,
+        source=source, file_context=file_context,
+        name=name, has_return=has_return,
+    )
 
 
 register_callable_strategy('template', _TemplateStrategy())

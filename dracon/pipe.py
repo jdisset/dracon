@@ -95,8 +95,9 @@ class _PipeStrategy:
         return None  # pipes compose callables, no type identity
 
     def reduce(self, sym):
-        # stages may be context-bound callables; not generally picklable
-        raise TypeError("CallableSymbol of kind 'pipe' is not picklable")
+        # state-based round-trip through the canonical factory; stages
+        # must themselves be picklable
+        return (_reconstruct_pipe, (sym._stages, sym._stage_kwargs, sym._name))
 
     def deepcopy(self, sym, memo):
         clone = CallableSymbol.__new__(CallableSymbol)
@@ -132,6 +133,11 @@ def _run_pipe(sym, kwargs):
                     call_kwargs[unfilled] = value
         value = stage(**call_kwargs)
     return value
+
+
+def _reconstruct_pipe(stages, stage_kwargs, name):
+    """Pickle reconstruction: rebuild the pipe through its canonical factory."""
+    return CallableSymbol.from_pipe(stages, stage_kwargs, name=name)
 
 
 register_callable_strategy('pipe', _PipeStrategy())

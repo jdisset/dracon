@@ -388,3 +388,96 @@ def test_pydantic_model_pickling():
     assert unpickled["model"].setting1 == "test1"
 
 
+# ── CallableSymbol pickling (template / pipe / partial) ──────────────────────
+
+
+def _stage_seed():
+    # produces a dict, which the pipe unpacks into the next stage's kwargs
+    return {'val': 4}
+
+
+def _stage_double(val):
+    return val * 2
+
+
+def _add_kw(a, b):
+    return a + b
+
+
+def test_pickle_template_symbol_direct():
+    """A CallableSymbol of kind 'template' built directly survives pickling
+    and is invokable after restore."""
+    from dracon.callable import DraconCallable
+    from dracon.composer import DraconMappingNode
+    from dracon.nodes import DraconScalarNode
+
+    # mapping tag mirrors what reset_tag() leaves after instructions strip !fn
+    map_tag = 'tag:yaml.org,2002:map'
+    str_tag = 'tag:yaml.org,2002:str'
+    out_k = DraconScalarNode(tag=str_tag, value='msg')
+    out_v = DraconScalarNode(tag=str_tag, value='hello world')
+    tpl_node = DraconMappingNode(tag=map_tag, value=[(out_k, out_v)])
+
+    tpl = DraconCallable(
+        template_node=tpl_node, loader=DraconLoader(), name='greet'
+    )
+    # sanity: template invokes pre-pickle
+    assert tpl()['msg'] == 'hello world'
+
+    restored = pickle_unpickle(tpl)
+    assert restored._kind == 'template'
+    assert restored._name == 'greet'
+    assert restored()['msg'] == 'hello world'
+
+
+def test_pickle_template_via_loaded_config():
+    """A config that uses a !fn template round-trips through pickle and
+    still produces the same result on the restored side."""
+    src = """
+    !define greet: !fn
+      !require who: name
+      msg: hello ${who}
+    result: ${greet(who='world')}
+    """
+    loader = DraconLoader()
+    config = loader.loads(src)
+    config.resolve_all_lazy()
+    assert dict(config['result']) == {'msg': 'hello world'}
+
+    restored = pickle_unpickle(config)
+    assert dict(restored['result']) == {'msg': 'hello world'}
+
+
+def test_pickle_pipe_symbol():
+    """A CallableSymbol of kind 'pipe' survives pickling and runs after restore."""
+    from dracon.symbols import CallableSymbol
+
+    p = CallableSymbol.from_pipe(
+        stages=(_stage_seed, _stage_double),
+        stage_kwargs=({}, {}),
+        name='p',
+    )
+    assert p() == 8
+
+    restored = pickle_unpickle(p)
+    assert restored._kind == 'pipe'
+    assert restored._name == 'p'
+    assert restored() == 8
+
+
+def test_pickle_partial_symbol():
+    """A CallableSymbol of kind 'partial' (built via !fn:path) round-trips."""
+    from dracon.symbols import CallableSymbol
+
+    sym = CallableSymbol.from_partial(
+        func_path='dracon.tests.test_picklable._add_kw',
+        func=_add_kw,
+        kwargs={'b': 10},
+    )
+    assert sym(a=5) == 15
+
+    restored = pickle_unpickle(sym)
+    assert restored._kind == 'partial'
+    assert restored(a=5) == 15
+
+
