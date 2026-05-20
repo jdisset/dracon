@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 """End-to-end tests inspired by real layered-vocabulary configs.
 
@@ -113,7 +113,7 @@ class TestThreeLevelVocabularyChain:
 
     def test_a_level_type_resolves_through_b_template_at_c(self, tmp_path: Path):
         """A registers a Python type via context_types; B builds it inside its
-        !fn body; C invokes B's !fn — A's type resolves at C's construction."""
+        !fn body; C invokes B's !fn -- A's type resolves at C's construction."""
         from pydantic import BaseModel
 
         class Service(BaseModel):

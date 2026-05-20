@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """Tests for dracon-print CLI tool (now in dracon.cli)."""
 import json
 import sys

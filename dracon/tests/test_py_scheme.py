@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """Tests for the py: include scheme and !fn: scheme-URI extension.
 
 The py: scheme unifies Python symbol resolution under dracon's include
@@ -28,7 +30,7 @@ def _loads(yaml_str, **ctx):
     return cfg
 
 
-# ── 1. !include py:dotted — selector form ─────────────────────────────────────
+# ── 1. !include py:dotted -- selector form ─────────────────────────────────────
 
 
 class TestPyIncludeDottedSelector:
@@ -65,12 +67,12 @@ val: ${PI}
         assert cfg['val'] == 3.14
 
 
-# ── 2. !include py: without selector — submodule resolution ───────────────────
+# ── 2. !include py: without selector -- submodule resolution ───────────────────
 
 
 class TestPyIncludeWithoutSelector:
     def test_dotted_submodule_as_value(self):
-        """`!include py:dotted.path` — the path itself identifies a symbol."""
+        """`!include py:dotted.path` -- the path itself identifies a symbol."""
         cfg = _loads("""
 !define Add: !include py:dracon.tests.test_py_scheme_helper.add
 result: ${Add(a=10, b=20)}
@@ -182,7 +184,7 @@ v: ${X}
 """)
 
 
-# ── 6. privacy — underscore names not exported by default ─────────────────────
+# ── 6. privacy -- underscore names not exported by default ─────────────────────
 
 
 class TestPyPrivacy:
@@ -237,7 +239,7 @@ pi: !include py:dracon.tests.test_py_scheme_helper@PI_APPROX
         """py: is wired through the same loader registry as file:/pkg:/etc.
 
         We verify the scheme chokepoint is uniform by replacing the py loader
-        with a spy — any other loader plugs into the same socket.
+        with a spy -- any other loader plugs into the same socket.
         """
         from dracon.loader import DraconLoader
 
@@ -264,7 +266,7 @@ class TestPyPrivacyExplicit:
     def test_explicit_underscore_via_fn_still_resolves(self):
         """Explicit `!fn:py:mod.name` reaches private names via dotted-fallback.
 
-        `!fn:` is an explicit symbol reference, not a namespace import — it
+        `!fn:` is an explicit symbol reference, not a namespace import -- it
         calls getattr directly, bypassing the public-only filter used by
         `!include py:mod` namespace construction.
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """Regression tests for list_like / dict_like.
 
 The cache is keyed by `type(obj)`. Without the class-object guard,

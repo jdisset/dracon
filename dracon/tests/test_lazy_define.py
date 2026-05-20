@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """Tests for lazy construction in !define with tagged nodes."""
 import pytest
 from copy import deepcopy

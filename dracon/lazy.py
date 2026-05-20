@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 from typing import (
     Any,
@@ -81,8 +81,6 @@ T = TypeVar('T')
 
 
 class LazyInterpolable(Lazy[T]):
-    """A lazy object that can be resolved (i.e. interpolated) to a value when needed."""
-
     def __init__(
         self,
         value: Any,
@@ -196,7 +194,14 @@ class LazyInterpolable(Lazy[T]):
             if self.name and isinstance(self.current_path, KeyPath):
                 self.current_path = owner_instance._dracon_current_path + self.name
 
-        newval = self.resolve()
+        try:
+            newval = self.resolve()
+        except InterpolationError as e:
+            # `@path` / `&path` against a not-yet-finalized parent root: defer
+            # so a re-rooting of the surrounding container can fix it next time
+            if 'get_obj' in str(e.__cause__ or e):
+                return self
+            raise
 
         if setval:
             setattr(owner_instance, self.name, newval)
@@ -211,18 +216,9 @@ class LazyInterpolable(Lazy[T]):
     def __get_pydantic_core_schema__(
         cls, source: Type[Any], handler: GetCoreSchemaHandler
     ) -> core_schema.CoreSchema:
-        """
-        Pydantic v2 core schema generation for LazyInterpolable.
-
-        Allows Pydantic to handle LazyInterpolable inputs during validation
-        by attempting to resolve them first.
-        """
-
-        # define a validation function that tries to resolve LazyInterpolable
         def validate_lazy(value: Any) -> Any:
             if isinstance(value, cls):
                 try:
-                    # attempt to resolve the lazy value immediately
                     resolved = value.resolve()
                     logger.debug(f"pydantic validator resolved {value!r} to {resolved!r}")
                     return resolved
@@ -233,7 +229,6 @@ class LazyInterpolable(Lazy[T]):
                     return value
             return value
 
-        # get the schema for the inner type T if LazyInterpolable[T] is used
         args = get_args(source)
         if args:
             inner_schema = handler(args[0])
@@ -332,7 +327,12 @@ def resolve_single_value(path, value, root, context_override=None):
         parent = path.parent.get_obj(root)
         value.root_obj = root
         value.current_path = path
-        resolved_value = value.resolve(context_override=context_override)
+        try:
+            resolved_value = value.resolve(context_override=context_override)
+        except InterpolationError as e:
+            if 'get_obj' in str(e.__cause__ or e):
+                return False
+            raise
         stem = path.stem
         if stem == '/' or stem == ROOTPATH:
             logger.warning(f"Attempted to set value at root path {path}.")
@@ -687,7 +687,7 @@ def recursive_update_lazy_container(obj, root_obj, current_path, seen=None):
         return
 
     if dict_like(obj):
-        # iterate raw — `.items()` would resolve lazies on Dracon's Mapping
+        # iterate raw -- `.items()` would resolve lazies on Dracon's Mapping
         for key, value in list(raw_items(obj)):
             # update key if it's lazy
             if isinstance(key, LazyInterpolable):
@@ -701,7 +701,6 @@ def recursive_update_lazy_container(obj, root_obj, current_path, seen=None):
             recursive_update_lazy_container(value, root_obj, new_path, seen)
 
     elif list_like(obj) and not isinstance(obj, (str, bytes)) and not num_array_like(obj):
-        # iterate over copy in case list is modified
         for i, item in enumerate(list(obj)):
             new_path = current_path + str(i)
             recursive_update_lazy_container(item, root_obj, new_path, seen)
@@ -770,23 +769,13 @@ LazyVal = Annotated[
 
 
 def _ignore_lazy_impl(cls, v, handler, info):
-    """wrap validator that preserves Lazy objects, bypassing field type validation."""
+    # wrap validator: keep Lazy values (and lists containing them) un-validated
     if isinstance(v, Lazy):
         if v.validator is None:
             v.validator = handler
         return v
-    elif list_like(v):
-        # handle list-like objects that may contain Lazy objects
-        processed_items = []
-        for item in v:
-            if isinstance(item, Lazy):
-                # preserve Lazy objects in lists without validation
-                processed_items.append(item)
-            else:
-                processed_items.append(item)
-        # convert back to original type and let normal validation handle the container
-        converted = type(v)(processed_items)
-        return converted
+    if list_like(v):
+        return type(v)(v)
     return handler(v, info)
 
 
@@ -833,7 +822,7 @@ class LazyDraconModel(BaseModel):
                 classmethod(_ignore_lazy_impl)
             )
         else:
-            # no non-Literal fields — shadow the inherited "*" validator with a
+            # no non-Literal fields -- shadow the inherited "*" validator with a
             # no-op targeting a non-existent field so pydantic ignores it
             cls.ignore_lazy = field_validator(
                 '__dracon_noop__', mode="wrap", check_fields=False

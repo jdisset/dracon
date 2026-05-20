@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 """Tests: typed symbol interfaces.
 
@@ -242,7 +242,7 @@ class TestTemplateAnnotations:
         iface = cfg["tmpl"].interface()
         assert iface.return_annotation_name == "PlotData"
         assert iface.return_annotation is PlotData
-        # the marker is stripped — body still constructs cleanly
+        # the marker is stripped -- body still constructs cleanly
         assert cfg["out"]["rows"] == 7
 
     def test_returns_marker_removed_at_runtime(self):

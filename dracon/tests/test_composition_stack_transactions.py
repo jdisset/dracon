@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 """Tests: transactional composition layers."""
 
@@ -168,7 +168,7 @@ class TestTransaction:
         stack.push(base_path)
         with stack.transaction() as outer:
             stack.push(override_path)
-            with stack.transaction():  # not committed → rolls back
+            with stack.transaction():  # not committed -> rolls back
                 stack.push(patch_path)
                 assert len(stack._layers) == 3
             assert len(stack._layers) == 2

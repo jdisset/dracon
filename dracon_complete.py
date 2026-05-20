@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """Ultra-fast completion handler for dracon programs.
 
 This module deliberately avoids importing dracon or any heavy dependencies.

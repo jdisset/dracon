@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """Tests that container access paths consistently resolve lazies.
 
 Bug: see bugs/_archive/lazy-leak-on-non-getitem-container-access.md.
@@ -49,9 +51,9 @@ out: ${tname(m['a'])}
 
 
 def test_mapping_get_returns_default_unmodified():
-    """`.get(missing, default)` must return default as-is — stdlib semantics.
+    """`.get(missing, default)` must return default as-is -- stdlib semantics.
 
-    Note: `.get()` is intentionally NOT overridden to resolve lazies —
+    Note: `.get()` is intentionally NOT overridden to resolve lazies --
     pydantic-core's Rust validator walks model inputs via `.get()` and
     expects raw `LazyInterpolable` objects so the Lazy[T] field
     validator can wrap them. Use `m[key]` for resolved single-key access.

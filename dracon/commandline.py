@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 import os
 import sys
 import typing
@@ -93,9 +93,7 @@ class ConfigFile:
 
 
 def _finalize_yaml_param(decl: CliParam, auto_dash_alias: bool = True) -> CliParam:
-    """Stamp the argparse-side projection onto a YAML-sourced `CliParam`:
-    bare short char (parser stores `'p'`, not `'-p'`), dash-aliased long,
-    explicit `is_flag=False`, fall-back `arg_type=str`. Idempotent."""
+    # normalize a YAML-sourced CliParam for argparse: bare short char, dashed long, str fallback
     short_char = decl.short[1:] if decl.short and decl.short.startswith('-') else decl.short
     long = decl.real_name
     if long and auto_dash_alias and '_' in long:
@@ -112,11 +110,7 @@ def _finalize_yaml_param(decl: CliParam, auto_dash_alias: bool = True) -> CliPar
 
 
 def _scheme_of(path: str) -> Optional[str]:
-    """Return the dracon include scheme prefix (``file``, ``pkg``, ``env``,
-    ...) if ``path`` starts with a known scheme followed by ``:``. Returns
-    ``None`` for bare filesystem paths so callers can apply local-path
-    semantics without confusing a Windows drive letter or a literal colon
-    in a filename for a scheme."""
+    # return the dracon include scheme prefix if path starts with one, else None
     if ':' not in path:
         return None
     from dracon.include import DEFAULT_LOADERS
@@ -125,20 +119,13 @@ def _scheme_of(path: str) -> Optional[str]:
 
 
 def _probe_uri_exists(uri: str) -> bool:
-    """Soft existence check for a dracon include URI.
-
-    Routes through the loader registry so the same scheme grammar that
-    ``!include`` and ``+file:foo.yaml`` accept can drive ``ConfigFile``
-    discovery. Returns False on ``FileNotFoundError`` / ``ImportError``
-    (the contract used by ``!include?``); other errors propagate so a
-    typo'd config doesn't silently disappear.
-    """
+    # soft existence check for a dracon include URI; False on FileNotFoundError/ImportError
     from dracon.include import DEFAULT_LOADERS
     scheme = _scheme_of(uri)
     if scheme is None:
         return False
     rest = uri.split(':', 1)[1]
-    # strip optional @selector — existence is about the resource, not the subtree
+    # strip optional @selector -- existence is about the resource, not the subtree
     if '@' in rest:
         rest = rest.split('@', 1)[0]
     reader = DEFAULT_LOADERS[scheme]
@@ -158,8 +145,8 @@ def _discover_config_files(config_files: List[ConfigFile]) -> List[str]:
     - a dracon include URI (``file:...``, ``pkg:...``, ``env:...``, etc.)
       using any scheme registered in ``DEFAULT_LOADERS``.
 
-    The two paths share one contract: required→raise on missing,
-    optional→silent skip. This keeps ``ConfigFile`` symmetric with the
+    The two paths share one contract: required->raise on missing,
+    optional->silent skip. This keeps ``ConfigFile`` symmetric with the
     user's mental model that it is a leading ``<<(<):`` include layer
     and removes the silent-drop trap where ``ConfigFile("file:...")`` or
     ``ConfigFile("pkg:...")`` looked like a bug in symbol propagation.
@@ -200,20 +187,6 @@ def _discover_config_files(config_files: List[ConfigFile]) -> List[str]:
                 f"Required config file not found: {cf.path}"
             )
     return found
-
-
-def _search_parents(relative: Path) -> Optional[Path]:
-    """walk up from CWD looking for a file matching `relative`.
-    Deprecated: use dracon.loaders.cascade.find_cascade_files instead."""
-    current = Path.cwd()
-    while True:
-        candidate = current / relative
-        if candidate.exists():
-            return candidate
-        parent = current.parent
-        if parent == current:
-            return None
-        current = parent
 
 
 def Subcommand(*cmd_types, discriminator=DEFAULT_DISCRIMINATOR, **arg_kwargs):
@@ -262,11 +235,11 @@ def _is_str_field(arg_type) -> bool:
     if arg_type is str:
         return True
     origin = getattr(arg_type, '__origin__', None)
-    # Annotated[str, ...] → check first arg
+    # Annotated[str, ...] -> check first arg
     if origin is Annotated:
         args = get_args(arg_type)
         return _is_str_field(args[0]) if args else False
-    # str | None (Union) → str if all non-None members are str
+    # str | None (Union) -> str if all non-None members are str
     if origin is Union:
         args = get_args(arg_type)
         non_none = [a for a in args if a is not type(None)]
@@ -347,7 +320,6 @@ def getArg(program: "Program", name: str, pydantic_field) -> CliParam:
     )
     final_settings = {**_cliparam_field_dict(base_arg), **user_arg_settings}
 
-    # use field description as fallback help text
     if final_settings.get('help') is None and pydantic_field.description:
         final_settings['help'] = pydantic_field.description
 
@@ -627,7 +599,7 @@ def _render_options_grouped(
         if help_arg:
             _append_arg_details(content, help_arg, None, is_positional=False)
 
-    # yaml groups: stable order — empty bucket last, named buckets in source order
+    # yaml groups: stable order -- empty bucket last, named buckets in source order
     yaml_keys = [k for k in by_group if k is not None and k != '']
     if '' in by_group:
         yaml_keys.append('')
@@ -885,7 +857,7 @@ class Program(BaseModel, Generic[T]):
         """parses command line arguments and generates configuration."""
 
         # YAML-discovery pre-pass: surface !require / !set_default declared in
-        # +layer files as real CLI flags. Must run before any branch — both
+        # +layer files as real CLI flags. Must run before any branch -- both
         # flat and subcommand parsers consult `self._arg_map` to dispatch
         # tokens, so the registration has to happen up-front. Reuses the same
         # loader factory the final run will use so schemes / context types
@@ -986,7 +958,7 @@ class Program(BaseModel, Generic[T]):
                 continue  # known model-side flag
             if name.startswith('--') and '.' in name[2:]:
                 continue  # dotted nested-path override (handled by parser)
-            return True  # unknown dash-flag — needs discovery
+            return True  # unknown dash-flag -- needs discovery
 
         return False
 
@@ -1023,7 +995,7 @@ class Program(BaseModel, Generic[T]):
 
         # discovery is purely opportunistic: surface yaml-declared flags so
         # argv parsing accepts them. The real loader will run later and raise
-        # any genuine composition errors with full diagnostics — discovery
+        # any genuine composition errors with full diagnostics -- discovery
         # failures here would just be noise, so swallow them all.
         try:
             directives = discover_cli_directives(
@@ -1115,7 +1087,7 @@ class Program(BaseModel, Generic[T]):
         while idx < len(argv):
             token = argv[idx]
             if token.startswith('++') or token.startswith('--define.'):
-                # context variable — skip value if space-separated
+                # context variable -- skip value if space-separated
                 if '=' not in token:
                     idx += 1  # skip the value token
                 idx += 1
@@ -1184,7 +1156,7 @@ class Program(BaseModel, Generic[T]):
                 print(f"\nError: {e}\n", file=sys.stderr)
                 print_help(self, None)
 
-            # parse after_args — route to root or subcmd
+            # parse after_args -- route to root or subcmd
             child_prog._positionals = [a for a in child_prog._args if a.positional][::-1]
             i = 0
             try:
@@ -1207,7 +1179,7 @@ class Program(BaseModel, Generic[T]):
                         break
 
                     if token.startswith('++') or token.startswith('--define.'):
-                        # defined vars go to shared pool — must check before '+' config
+                        # defined vars go to shared pool -- must check before '+' config
                         i = self._parse_single_arg(
                             after_args, i, root_raw_args, root_nested_args,
                             defined_vars, actions, root_confs,
@@ -1238,7 +1210,7 @@ class Program(BaseModel, Generic[T]):
                                 defined_vars, actions, root_confs,
                             )
                         elif '.' in check_token[2:]:
-                            # nested key — route based on first segment ownership
+                            # nested key -- route based on first segment ownership
                             first_seg = check_token[2:].split('.')[0].replace('-', '_')
                             if first_seg in subcmd_type.model_fields:
                                 i = child_prog._parse_single_arg(
@@ -1286,7 +1258,7 @@ class Program(BaseModel, Generic[T]):
                 **subcmd_defaults, **subcmd_raw_args,
             }
         else:
-            # no subcommand token — just config files
+            # no subcommand token -- just config files
             root_raw_args, root_nested_args = {}, {}
             defined_vars, actions = {}, []
             root_confs = []
@@ -1356,7 +1328,7 @@ class Program(BaseModel, Generic[T]):
         error_type = error['type']
 
         item_text = Text()
-        bullet_line = Text("  • ", style=COLOR_DEFAULT)
+        bullet_line = Text("  * ", style=COLOR_DEFAULT)
         bullet_line.append("Arg ", style=COLOR_WHITE)
         bullet_line.append(f"'{loc_str}'", style=COLOR_CYAN)
 
@@ -1433,7 +1405,7 @@ class Program(BaseModel, Generic[T]):
                         prov = Text("\n    Provenance: ", style=COLOR_DIM)
                         for i, entry in enumerate(history):
                             if i > 0:
-                                prov.append(" → ", style=COLOR_DIM)
+                                prov.append(" -> ", style=COLOR_DIM)
                             src = str(entry.source) if entry.source else "?"
                             prov.append(f"{entry.value!r}", style=COLOR_YELLOW)
                             prov.append(f" ({src})", style=COLOR_DIM)
@@ -1588,7 +1560,7 @@ class Program(BaseModel, Generic[T]):
                 # raw=True: full bypass of all composition
                 if arg_obj and arg_obj.raw:
                     v = _FullRawStr(v)
-                # str-typed fields skip YAML composition — pass through raw.
+                # str-typed fields skip YAML composition -- pass through raw.
                 # Covers two sources: model-side `Arg(arg_type=str)` and
                 # YAML-declared `!set_default:str` (context-target with
                 # python_type=str). Both want the raw token to land as a
@@ -1693,7 +1665,6 @@ class Program(BaseModel, Generic[T]):
         """start composition from file/key reference if value starts with +"""
         if isinstance(value, str) and value.startswith('+'):
             include_str = value[1:]
-            print(f"loading value from file/key reference: {include_str}")
             try:
                 comp_val = loader.compose(include_str)
                 logger.debug(f"loaded override value '{include_str}' as: {type(comp_val)}")
@@ -1720,7 +1691,7 @@ class Program(BaseModel, Generic[T]):
 
         # parse defined_vars values as YAML so e.g. "[[5,60]]" becomes list, not string.
         # _RawStr / _FullRawStr signal "this came from a str-typed CLI arg, keep as str"
-        # — otherwise "echo STRATEGY: noop" (containing ':') would parse as a dict.
+        # -- otherwise "echo STRATEGY: noop" (containing ':') would parse as a dict.
         from io import StringIO
         from ruamel.yaml import YAML as _YAML
         _yaml_parser = _YAML()
@@ -1746,7 +1717,7 @@ class Program(BaseModel, Generic[T]):
         tracked_context.update(flat_defined_vars)
 
         loader = DraconLoader(
-            enable_interpolation=True, base_dict_type=dict, base_list_type=list,
+            enable_interpolation=True,
             trace=trace_enabled, **kwargs
         )
         loader.update_context(tracked_context)
@@ -1819,7 +1790,7 @@ class Program(BaseModel, Generic[T]):
                 )
 
         # merge subcommand-scoped config files (wrapped under subcmd field name)
-        # Strategy: recurse + new wins — later files overlay fields, not replace
+        # Strategy: recurse + new wins -- later files overlay fields, not replace
         if subcmd_confs and subcmd_field_name:
             for conf_path in subcmd_confs:
                 this_conf = _compose_layer(conf_path)
@@ -1864,7 +1835,7 @@ class Program(BaseModel, Generic[T]):
                 if is_str:
                     # str-typed fields: only compose if interpolation is present.
                     # Plain values (including integer-looking strings like "1234")
-                    # must not go through YAML composition — it would coerce them
+                    # must not go through YAML composition -- it would coerce them
                     # to their YAML scalar type (int, bool, etc.) with no error.
                     if '${' not in str(v):
                         return loader.yaml.representer.represent_data(str(v))
@@ -2137,7 +2108,7 @@ def dracon_program(
             )
 
         def _dispatch_run(instance, prog):
-            """dispatch .run() — root takes precedence, else subcommand .run(ctx)."""
+            """dispatch .run() -- root takes precedence, else subcommand .run(ctx)."""
             if hasattr(instance, 'run'):
                 return instance.run()
             subcmd_field = prog._subcommand_field_name

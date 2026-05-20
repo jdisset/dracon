@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 """Polish tests for the yaml-cli-args feature (step 04).
 
@@ -41,7 +41,7 @@ def _prog():
 
 
 def test_require_satisfied_by_flag_does_not_warn(tmp_path, capsys):
-    """`!require port` + `--port 9000` → no "not used" warning, even if the
+    """`!require port` + `--port 9000` -> no "not used" warning, even if the
     YAML never reads `${port}`. Routing through a declared flag implies the
     user did exactly what the directive asked for."""
     src = _write(

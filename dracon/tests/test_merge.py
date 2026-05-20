@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 from dracon.merge import merged, MergeKey, MergeMode, MergePriority
 from dracon.utils import ShallowDict
 import pytest

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 import pytest
 import sys
 from pathlib import Path
@@ -3034,7 +3036,7 @@ def test_positional_union_dict_positional_collects_pairs():
 
 
 def test_subcommand_positional_optional_list_str():
-    """subcommand with Optional[list[str]] positional — broodmon submit shape"""
+    """subcommand with Optional[list[str]] positional -- broodmon submit shape"""
 
     @subcommand('submit')
     class SubmitCmd(BaseModel):
@@ -3050,7 +3052,7 @@ def test_subcommand_positional_optional_list_str():
 
 def test_positional_list_rejects_second_positional_with_optional():
     """the 'list positional implies no other positional' invariant must hold
-    through Optional — regression for the union-unwrap fix"""
+    through Optional -- regression for the union-unwrap fix"""
 
     class CLI(BaseModel):
         items: Annotated[list[str] | None, Arg(positional=True)] = None

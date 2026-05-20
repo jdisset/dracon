@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 """Round-trip property tests + per-bug regressions.
 
@@ -263,7 +263,7 @@ def _round_trip(value: Any) -> Any:
 # `$` is also filtered: dracon treats `${...}`, `$(...)`, `$ident`, and `$$`
 # in loaded YAML strings as template syntax (lazy/comptime interpolation,
 # shorthand vars, escape unwinding). A plain python string like `"$A"` is
-# not lossless through dump→load because the load path reinterprets it as
+# not lossless through dump->load because the load path reinterprets it as
 # a template. This is documented semantics, not a bug; users who need
 # strict round-trip for dollar-prefixed strings should disable
 # `enable_shorthand_vars` and `interpolation_enabled` on the loader.
@@ -433,7 +433,7 @@ def test_tier2_resolvable_field_round_trips_structurally(name):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Regression tests — one per fixed bug. These are deterministic anchors for
+# Regression tests -- one per fixed bug. These are deterministic anchors for
 # the property tests: when a property shrinks to an unclear minimum, these
 # tell you which known-bug class it landed in.
 # ═══════════════════════════════════════════════════════════════════════════
@@ -522,7 +522,7 @@ class TestLazyTypedFieldRoundTrip:
         cfg = l.loads("!LazyCfg\nport: ${env_port}")
         text = l.dump(cfg)
         assert "${env_port}" in text
-        # the dumped text must NOT carry the resolved 9000 — that would
+        # the dumped text must NOT carry the resolved 9000 -- that would
         # mean the wrapper got auto-resolved on dump
         assert "port: 9000" not in text
 
@@ -538,7 +538,7 @@ class TestLazyTypedFieldRoundTrip:
         assert cfg2.port == 9000
 
     def test_lazy_wrapper_identity_preserved_until_access(self):
-        """The wrapper must survive load → dump → load without auto-resolving."""
+        """The wrapper must survive load -> dump -> load without auto-resolving."""
         l = make_loader()
         l.context["env_port"] = 9000
         l.context["LazyCfg"] = LazyCfg

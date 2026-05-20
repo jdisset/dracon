@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 from ruamel.yaml.representer import RoundTripRepresenter, RepresenterError
 from ruamel.yaml.nodes import MappingNode, ScalarNode, SequenceNode, Node

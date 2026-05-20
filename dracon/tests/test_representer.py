@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 import pytest
 from dracon import DraconLoader, dump, loads
 from dracon.representer import DraconRepresenter, DraconDumpable

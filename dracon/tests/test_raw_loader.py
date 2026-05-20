@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """Tests for the raw: and rawpkg: include loaders."""
 
 import pytest
@@ -20,7 +22,7 @@ def test_raw_loader_returns_string_not_yaml(tmp_path):
 def test_raw_loader_preserves_colons_and_hashes(tmp_path):
     """Colons and hashes in markdown must not be parsed as YAML keys/comments."""
     md = tmp_path / "prompt.md"
-    md.write_text("## Research Tools — USE THESE:\n- BioMCP: primary tool\n# not a yaml key")
+    md.write_text("## Research Tools -- USE THESE:\n- BioMCP: primary tool\n# not a yaml key")
 
     config_file = tmp_path / "config.yaml"
     config_file.write_text(f"prompt: !include raw:{md}")
@@ -54,7 +56,7 @@ def test_raw_loader_multiline_preserved(tmp_path):
 
 def test_rawpkg_loader_reads_package_file(tmp_path):
     """rawpkg: loader must read a real package file without YAML parsing."""
-    # Use dracon's own test config as the target — it contains YAML structure
+    # Use dracon's own test config as the target -- it contains YAML structure
     config_file = tmp_path / "config.yaml"
     config_file.write_text("value: !include rawpkg:dracon:tests/configs/simple.yaml")
 

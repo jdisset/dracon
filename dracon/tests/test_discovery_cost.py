@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """Discovery pre-pass must stay cheap regardless of argv-supplied values.
 
 Bug class: ``Program._discover_yaml_args`` used to fold ``++name=value``

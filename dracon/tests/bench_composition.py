@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """Benchmark Dracon composition across realistic config scenarios.
 
 Run: python -m dracon.tests.bench_composition

@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 """Core typed symbol model for the open vocabulary runtime."""
 
@@ -591,7 +591,7 @@ def resolve_annotation(name: str | None, scope: Any) -> Any:
 
     `scope` is anything mapping-like (a `SymbolTable` or plain dict). Tries
     the exact string first, then falls back to the bare class name with
-    subscripts/quotes stripped — enough for `list[Event]` to resolve to
+    subscripts/quotes stripped -- enough for `list[Event]` to resolve to
     `Event`. Returns `MISSING` when nothing matches; callers keep the
     string form on `annotation_name`.
     """

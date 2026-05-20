@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 """SymbolTable: the runtime representation of the open vocabulary."""
 
@@ -68,7 +68,7 @@ def _split_parametric(tag: str) -> tuple[str, tuple[str, ...]]:
     return base, args
 
 
-# memoize positive and negative lookups — importlib miss is the dominant
+# memoize positive and negative lookups -- importlib miss is the dominant
 # cost in inner merge loops, and the same candidate names are queried many
 # times during composition.
 _DYNAMIC_LOOKUP_MISS = object()

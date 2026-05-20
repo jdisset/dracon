@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """
 Regression tests for the SetDefault + outer-context override bug.
 
@@ -8,7 +10,7 @@ carries an authoritative `var` (e.g. from CLI `++var=...` or a passed-in
 - plain `${var}` interpolations (always worked),
 - `!include file:${var}` at top level (always worked),
 - `!include file:${var}` inside a `!define NAME: !TypedTag { ... }` body
-  (was broken — the !include resolved to the default),
+  (was broken -- the !include resolved to the default),
 - `!include file:${var}` inside chains of typed !defines,
 - `!include file:${var}` inside !each expansions under typed !defines.
 
@@ -103,7 +105,7 @@ def test_setdefault_does_not_shadow_loader_context_in_defined_vars():
     """SSOT invariant: if the variable already exists in loader.context,
     !set_default must not record a different value in comp_res.defined_vars.
     (Guards against the class of bugs where downstream consumers of
-    defined_vars — like LazyConstructable — re-inject a stale default.)"""
+    defined_vars -- like LazyConstructable -- re-inject a stale default.)"""
     loader = DraconLoader(
         enable_interpolation=True,
         context={'TestWrapper': WrapperModel, 'target_file': '/abs/override/path'},

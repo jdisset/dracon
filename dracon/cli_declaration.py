@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 """CLI-visible directive records.
 
@@ -20,7 +20,7 @@ from dracon.nodes import node_source
 
 def _node_source_with_file(node) -> Optional[SourceContext]:
     """Like ``node_source``, but enriches ``<unicode string>`` source paths
-    with the node's ``FILE_PATH`` / ``FILE`` context — the actual layered file
+    with the node's ``FILE_PATH`` / ``FILE`` context -- the actual layered file
     is what we want to surface in help output, not the in-memory stream."""
     src = node_source(node) if node is not None else None
     if src is None or src.file_path not in ('<unicode string>', '<unknown>'):

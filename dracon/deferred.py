@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 from typing import Optional, Any, List, Dict, TypeVar, Generic, Type, ForwardRef, Union
 import dracon.utils as utils

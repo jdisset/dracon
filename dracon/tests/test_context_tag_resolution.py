@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 import pytest
 from pydantic import BaseModel
 from dracon import DraconLoader, DraconError, load

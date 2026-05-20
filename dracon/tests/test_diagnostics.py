@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """Tests for Dracon's diagnostic error handling system."""
 
 import pytest
@@ -574,7 +574,7 @@ def test_set_default_marks_cli_var_as_used(tmp_path):
     class Config(LazyDraconModel):
         result: int = 0
 
-    # set_default is the only consumer — no ${} interpolation
+    # set_default is the only consumer -- no ${} interpolation
     config_file = tmp_path / "config.yaml"
     config_file.write_text("!set_default my_var: 1\nresult: 42\n")
 

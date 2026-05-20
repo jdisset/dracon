@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 ## {{{                          --     imports     --
 from collections.abc import Mapping, Sequence, Set
@@ -197,8 +197,6 @@ class ListLike(Generic[E], metaclass=ListLikeMeta):
     def __getitem__(self, index: int) -> Any: ...
 
     def __add__(self, other: 'ListLike[E]') -> 'ListLike[E]': ...
-
-    def __append__(self, item: E) -> None: ...
 
     def __len__(self) -> int: ...
 
@@ -688,12 +686,12 @@ def _deepcopy(obj: T, memo=None) -> T:
         # canonical "I refuse to be copied" signals (TypeError from pickle
         # protocol, NotImplementedError from __deepcopy__, copy.Error) on
         # a non-container leaf: carry the value through by reference. This
-        # covers live external resources — JIT executables, GPU handles,
-        # open files, DB cursors — which are inherently shared and can't
+        # covers live external resources -- JIT executables, GPU handles,
+        # open files, DB cursors -- which are inherently shared and can't
         # be cloned. Containers (dict / list / tuple / set) are NOT caught:
         # if a container's deepcopy fails it's because of a leaf inside,
         # and the leaf-level fallback above will already have absorbed
-        # legitimate refusals — anything still raising at container level
+        # legitimate refusals -- anything still raising at container level
         # is a real bug and should surface.
         if isinstance(e, _REFUSED_COPY_EXCEPTIONS) and not isinstance(
             obj, (dict, list, tuple, set, frozenset)
@@ -983,22 +981,10 @@ def get_inner_type(resolvable_type: Type):
     return Any
 
 
-# def get_inner_type(resolvable_type: Type):
-#     args = get_args(resolvable_type)
-#     if args:
-#         origin = get_origin(resolvable_type)
-#         if origin is Annotated:
-#             return get_inner_type(args[0])  # recurse for annotated
-#         return args[0]
-#     # if no args, it's a base type
-#     return resolvable_type
-
-
 ##────────────────────────────────────────────────────────────────────────────}}}
 
 
 DEFAULT_EVAL_ENGINE: Literal['asteval', 'eval'] = 'asteval'
-# or if DRACON_EVAL_ENGINE is set in env, use that
 if 'DRACON_EVAL_ENGINE' in os.environ:
     DEFAULT_EVAL_ENGINE = os.environ['DRACON_EVAL_ENGINE']
     logger.debug(f"Using eval engine from env: {DEFAULT_EVAL_ENGINE}")

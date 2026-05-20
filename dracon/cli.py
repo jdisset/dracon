@@ -1,4 +1,6 @@
-"""dracon CLI — unified tool for inspecting and resolving dracon configs.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
+"""dracon CLI -- unified tool for inspecting and resolving dracon configs.
 
 Replaces the standalone dracon-print tool. The `dracon` command is itself
 a @dracon_program (eat your own dog food).

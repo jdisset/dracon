@@ -1,4 +1,6 @@
-"""Raw text loaders — return file content as a plain string scalar.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
+"""Raw text loaders -- return file content as a plain string scalar.
 
 These loaders bypass YAML parsing, so files containing YAML-breaking characters
 (colons, hashes, pipes, dashes) load correctly as strings.
@@ -16,7 +18,7 @@ from dracon.nodes import DraconScalarNode
 
 
 def read_raw(path: str, **_) -> tuple[CompositionResult, dict]:
-    """Read a file as plain text — content becomes a string scalar, not parsed YAML."""
+    """Read a file as plain text -- content becomes a string scalar, not parsed YAML."""
     p = Path(path).expanduser().resolve()
     if not p.exists():
         raise FileNotFoundError(f"raw: file not found: {path}")
@@ -27,7 +29,7 @@ def read_raw(path: str, **_) -> tuple[CompositionResult, dict]:
 
 
 def read_rawpkg(path: str, **_) -> tuple[CompositionResult, dict]:
-    """Read a package resource as plain text — no YAML parsing.
+    """Read a package resource as plain text -- no YAML parsing.
 
     Path format: ``package_name:path/to/file.md``
     """

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """Tests for !fn:path (DraconPartial) -- partial application of Python callables."""
 import math
 import pickle

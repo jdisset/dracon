@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 ## {{{                          --     imports     --
 from ruamel.yaml import Node
@@ -84,11 +84,7 @@ DEFAULT_CONTEXT = {
 
 @ftrace(watch=[])
 def compose(source, **kwargs) -> CompositionResult:
-    """Compose a DeferredNode with runtime context.
-
-    Returns a CompositionResult that can be passed to dracon.construct().
-    Auto-copies the source DeferredNode to prevent mutation.
-    """
+    # compose a DeferredNode; auto-copies to prevent mutation
     if isinstance(source, DeferredNode):
         return source.copy().compose(**kwargs)
     raise TypeError(f"compose() expects DeferredNode, got {type(source)}")
@@ -260,15 +256,9 @@ class DraconLoader:
 
     @property
     def symbols(self) -> SymbolTable:
-        """SSOT access to the symbol table (same object as self.context)."""
         return self.context
 
     def catalog(self) -> dict:
-        """Catalog projection of the symbol table for tooling.
-
-        Returns a dict of {name: {kind, params, ...}} for user-defined symbols,
-        derived directly from the runtime model.
-        """
         return self.context.to_json()
 
     def _init_yaml(self):
@@ -444,17 +434,6 @@ class DraconLoader:
         comp_res_2: CompositionResult | Node,
         merge_key: MergeKey | str,
     ):
-        """
-        Merges two CompositionResults using the specified merge_key strategy.
-
-        Args:
-            comp_res_1: The first CompositionResult.
-            comp_res_2: The second CompositionResult.
-            merge_key: The Dracon merge key string to use when merging.
-
-        Returns:
-            A new CompositionResult that is the result of merging the two inputs.
-        """
         if isinstance(merge_key, str):
             merge_key = cached_merge_key(merge_key)
 
@@ -471,20 +450,7 @@ class DraconLoader:
         config_paths: Union[str, Path, List[Union[str, Path]]],
         merge_key: str = "<<{<+}[<~]",
     ):
-        """
-        Loads configuration from one or more paths.
-
-        If multiple paths are provided, they are merged sequentially
-        using the specified merge_key strategy.
-
-        Args:
-            config_paths: A single path (str or Path) or a list of paths.
-            merge_key: The Dracon merge key string to use when merging multiple files.
-                       Defaults to "<<{<+}[<~]" (recursive append dicts, new wins; replace list, new wins).
-
-        Returns:
-            The loaded and potentially merged configuration object.
-        """
+        """Load one or more config paths; multiple paths are merged in order using merge_key."""
         final_comp_res = self.compose(config_paths, merge_key=merge_key)
         return self.load_node(final_comp_res.root)
 
@@ -761,14 +727,6 @@ class DraconLoader:
         comp.walk(add_trace)
 
     def dump_to_node(self, data: Any) -> Node:
-        """Quote data into a Node using this loader's bound vocabulary.
-
-        Semantic boundary for the object -> node direction, peer of
-        :meth:`construct`. The loader's :attr:`context` (a SymbolTable)
-        drives vocabulary-aware tag emission; any value whose type is
-        registered canonically gets its short tag, with qualname fallback
-        otherwise.
-        """
         if isinstance(data, Node):
             return data
         prev = self.yaml.representer._vocabulary
@@ -779,12 +737,6 @@ class DraconLoader:
             self.yaml.representer._vocabulary = prev
 
     def dump(self, data, stream=None):
-        """Quote and emit data as YAML text using this loader's vocabulary.
-
-        Equivalent to ``emit(self.dump_to_node(data))``. When ``stream`` is
-        None, returns the YAML string; otherwise writes to the stream and
-        returns None (ruamel convention).
-        """
         node = self.dump_to_node(data)
         if stream is None:
             from io import StringIO
@@ -811,18 +763,6 @@ def dump_to_node(
     data: Any,
     context: SymbolTable | dict[str, Any] | None = None,
 ) -> Node:
-    """Quote a Python value into a Node against the given vocabulary.
-
-    Semantic boundary for the object -> node direction, peer of
-    :func:`construct`. Use this when you want a Node tree for further
-    processing (e.g. inserting as a layer into a ``CompositionStack``)
-    rather than YAML text.
-
-    The vocabulary controls tag naming: any value whose type is registered
-    in the SymbolTable gets its canonical short tag. Values without a
-    vocabulary-local name fall back to qualname, governed by the
-    representer's ``full_module_path``.
-    """
     if isinstance(data, Node):
         return data
     loader = DraconLoader()
@@ -840,22 +780,7 @@ def load(
     merge_key: str = "<<{<+}[<~]",
     **kwargs,
 ):
-    """
-    Loads configuration from one or more paths using a DraconLoader instance.
-
-    If multiple paths are provided, they are merged sequentially
-    using the specified merge_key strategy.
-
-    Args:
-        config_paths: A single path (str or Path) or a list of paths.
-        raw_dict: If True, use standard Python dict/list instead of Dracon containers.
-        merge_key: The Dracon merge key string to use when merging multiple files.
-                   Defaults to "<<{<+}[<~]".
-        **kwargs: Additional arguments passed to the DraconLoader constructor.
-
-    Returns:
-        The loaded and potentially merged configuration object.
-    """
+    """Load one or more config paths; multiple paths are merged in order using merge_key."""
     loader = DraconLoader(**kwargs)
     if raw_dict:
         loader.yaml.constructor.yaml_base_dict_type = dict
@@ -953,10 +878,12 @@ from dracon.loaders.load_utils import FILE_CONTEXT_KEYS as _FILE_CONTEXT_KEYS
 
 
 def _snapshot_for_cache(result: CompositionResult) -> CompositionResult:
-    """Snapshot a post-processed composition: deep-copy the tree and strip
-    per-call context entries so later reuses bind to the new caller."""
+    """Deep-copy + strip caller-context entries while preserving the keys
+    of local !define / !set_default injections: those are subtree-scoped
+    and can't be safely replayed globally on reuse."""
     snap_root = fast_copy_node_tree(result.root)
-    _strip_node_contexts(snap_root)
+    keep = frozenset(_FILE_CONTEXT_KEYS) | frozenset(result.defined_vars or ())
+    _strip_node_contexts(snap_root, keep=keep)
     return CompositionResult(
         root=snap_root,
         special_nodes={},
@@ -970,65 +897,45 @@ def _snapshot_for_cache(result: CompositionResult) -> CompositionResult:
 
 
 def _reuse_post_processed(cached: CompositionResult, loader_ctx) -> CompositionResult:
-    """Clone a cached post-processed composition for reuse: rebuild node_map,
-    re-attach the calling loader.context so lazy resolution sees the new
-    caller's vocabulary, then re-propagate cached defined_vars with
-    Define / SetDefault semantics (`default_vars` tags the soft subset)."""
     new_root = fast_copy_node_tree(cached.root)
-    defined = cached.defined_vars
-    default = cached.default_vars or set()
     res = CompositionResult(
         root=new_root,
         special_nodes={},
         anchor_paths=deepcopy(cached.anchor_paths) if cached.anchor_paths else None,
-        defined_vars=dict(defined) if defined else {},
-        default_vars=set(default),
+        defined_vars=dict(cached.defined_vars) if cached.defined_vars else {},
+        default_vars=set(cached.default_vars or ()),
         pending_requirements=list(cached.pending_requirements),
         cli_directives=list(cached.cli_directives),
         trace=deepcopy(cached.trace) if cached.trace is not None else None,
     )
     res.make_map()
-    soft_pin = cached_merge_key('{>~}[>~]')
-    hard_pin = cached_merge_key('{<~}[<~]')
     if loader_ctx:
+        soft_pin = cached_merge_key('{>~}[>~]')
         res.walk_no_path(
             callback=partial(add_to_context, loader_ctx, merge_key=soft_pin, skip_clean=True)
         )
-    if defined:
-        hard = {k: v for k, v in defined.items() if k not in default}
-        soft = {k: v for k, v in defined.items() if k in default}
-        if hard:
-            res.walk_no_path(
-                callback=partial(add_to_context, hard, merge_key=hard_pin, skip_clean=True)
-            )
-        if soft:
-            res.walk_no_path(
-                callback=partial(add_to_context, soft, merge_key=soft_pin, skip_clean=True)
-            )
     return res
 
 
-def _strip_node_contexts(node):
-    """Reduce each node.context to file-context entries (DIR/FILE/...) and
-    drop the rest, so the new caller's add_to_context fills it in fresh."""
+def _strip_node_contexts(node, keep=_FILE_CONTEXT_KEYS):
     cls = type(node)
     ctx = getattr(node, 'context', None)
     if ctx:
         try:
             new_ctx = type(ctx)()
-            for k in _FILE_CONTEXT_KEYS:
+            for k in keep:
                 if k in ctx:
                     new_ctx[k] = ctx[k]
             node.context = new_ctx
         except Exception:
-            node.context = {k: ctx[k] for k in _FILE_CONTEXT_KEYS if k in ctx}
+            node.context = {k: ctx[k] for k in keep if k in ctx}
     if cls is DraconMappingNode:
         for k, v in node.value:
-            _strip_node_contexts(k)
-            _strip_node_contexts(v)
+            _strip_node_contexts(k, keep)
+            _strip_node_contexts(v, keep)
     elif cls is DraconSequenceNode:
         for v in node.value:
-            _strip_node_contexts(v)
+            _strip_node_contexts(v, keep)
 
 
 @cached(LRUCache(maxsize=128), key=lambda yaml, content: hashkey(content))

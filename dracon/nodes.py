@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 ## {{{                          --     imports     --
 from ruamel.yaml.nodes import Node, MappingNode, SequenceNode, ScalarNode
@@ -19,25 +19,23 @@ STR_TAG = Tag(suffix='tag:yaml.org,2002:str')
 DRACON_UNSET_VALUE = '__!DRACON_UNSET_VALUE!__'
 DIRECTIVE_TAGS = frozenset({
     '!set_default', '!define', '!define?', '!require', '!returns', '!assert',
+    '!each', '!if',
 })
 # Tag.suffix stores without '!' prefix; str tags include it.
 _DIRECTIVE_SUFFIXES = frozenset(DIRECTIVE_TAGS) | frozenset(
     tag[1:] for tag in DIRECTIVE_TAGS
 )
-_DIRECTIVE_TYPED_PREFIXES = (
-    '!define:', '!define?:', '!set_default:', '!require:', '!returns:',
-)
+# parameterised forms `!define:int`, `!each(i)`, `!if cond` all reuse the base tag
+_DIRECTIVE_SEPARATORS = (':', '(', ' ')
 
 
 _directive_str_cache: dict[str, bool] = {}
 
 
 def _is_directive_key(key_node):
-    """Check if a key node has a directive tag (consumed during instruction processing)."""
     tag = key_node.tag
     if tag is None:
         return False
-    # get tag string (cached per string value)
     if tag.__class__ is str:
         tag_str = tag
     else:
@@ -48,12 +46,10 @@ def _is_directive_key(key_node):
     cached = _directive_str_cache.get(tag_str)
     if cached is not None:
         return cached
-    result = False
-    if tag_str in _DIRECTIVE_SUFFIXES:
-        result = True
-    else:
-        for p in _DIRECTIVE_TYPED_PREFIXES:
-            if tag_str.startswith(p):
+    result = tag_str in _DIRECTIVE_SUFFIXES
+    if not result:
+        for base in _DIRECTIVE_SUFFIXES:
+            if tag_str.startswith(base) and tag_str[len(base):len(base) + 1] in _DIRECTIVE_SEPARATORS:
                 result = True
                 break
     _directive_str_cache[tag_str] = result
@@ -503,12 +499,6 @@ class DraconSequenceNode(SourceContextMixin, SequenceNode):
     def __iter__(self):
         return iter(self.value)
 
-    def __append__(self, value: Node):
-        self.value.append(value)
-
-    def __extend__(self, values: list[Node]):
-        self.value.extend(values)
-
     def extend(self, values: list[Node]):
         self.value.extend(values)
 
@@ -596,11 +586,6 @@ class DraconSequenceNode(SourceContextMixin, SequenceNode):
 
 ## {{{                   --     construction helpers     --
 def make_scalar_node(value: str, *, tag: str | None = None) -> DraconScalarNode:
-    """Build a scalar node. Defaults to the plain-string tag.
-
-    Sugar for :class:`DraconDumpable` implementations that want to produce
-    a node tree without importing ruamel node constructors or tag constants.
-    """
     return DraconScalarNode(tag=tag or DEFAULT_SCALAR_TAG, value=value)
 
 
@@ -610,7 +595,6 @@ def make_sequence_node(
     tag: str | None = None,
     flow_style: bool | None = None,
 ) -> DraconSequenceNode:
-    """Build a sequence node from already-quoted child nodes."""
     return DraconSequenceNode(
         tag=tag or DEFAULT_SEQ_TAG, value=list(items), flow_style=flow_style
     )
@@ -622,13 +606,7 @@ def make_mapping_node(
     tag: str | None = None,
     flow_style: bool | None = None,
 ) -> DraconMappingNode:
-    """Build a mapping node from ``(key, value)`` node pairs or a dict-like.
-
-    Accepts either an iterable of node-node pairs or a ``Mapping`` whose keys
-    may be bare strings (auto-wrapped in scalar nodes) and whose values must
-    already be nodes. This lets ``DraconDumpable`` impls write the common
-    case in dict-literal style.
-    """
+    # accepts (key, value) node pairs or a Mapping with str/Node keys
     from collections.abc import Mapping as _Mapping
 
     if isinstance(pairs, _Mapping):
@@ -661,40 +639,5 @@ def context_node_hash(self):
     context_items = make_hashable(self.context)
     return hash((base_hash, context_items))
 
-
-def include_node_hash(self):
-    """Hash function for IncludeNode."""
-    return context_node_hash(self)
-
-
-def merge_node_hash(self):
-    base_hash = dracon_scalar_node_hash(self)
-    return hash((base_hash, self.merge_key_raw))
-
-
-def unset_node_hash(self):
-    # UnsetNode hash is simpler since it has fixed value
-    return hash((self.__class__.__name__, self.tag, self.anchor))
-
-
-def dracon_mapping_node_hash(self):
-    items_hash = hash(
-        tuple((k.value, hash(v)) for k, v in sorted(self.value, key=lambda x: x[0].value))
-    )
-    return hash((self.__class__.__name__, self.tag, items_hash, self.anchor))
-
-
-def dracon_sequence_node_hash(self):
-    elements_hash = hash(tuple(hash(v) for v in self.value))
-    return hash((self.__class__.__name__, self.tag, elements_hash, self.anchor))
-
-
-# DraconScalarNode.__hash__ = dracon_scalar_node_hash
-# ContextNode.__hash__ = context_node_hash
-# IncludeNode.__hash__ = include_node_hash
-# MergeNode.__hash__ = merge_node_hash
-# UnsetNode.__hash__ = unset_node_hash
-# DraconMappingNode.__hash__ = dracon_mapping_node_hash
-# DraconSequenceNode.__hash__ = dracon_sequence_node_hash
 
 ##────────────────────────────────────────────────────────────────────────────}}}

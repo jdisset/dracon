@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 from ruamel.yaml.constructor import Constructor
 import sys
@@ -161,7 +161,7 @@ def get_all_types(items):
     }
 
 
-# cache per module name — module dicts don't change during composition
+# cache per module name -- module dicts don't change during composition
 _module_types_cache: dict[str, dict] = {}
 
 
@@ -213,7 +213,7 @@ def collect_all_types(modules, capture_globals=True, globals_at_frame=15):
     if not capture_globals:
         cache_key = tuple(modules)
         if cache_key in _collect_cache:
-            return dict(_collect_cache[cache_key])  # copy — caller mutates
+            return dict(_collect_cache[cache_key])  # copy -- caller mutates
         types = {}
         for module in modules:
             types.update(get_all_types_from_module(module))
@@ -451,7 +451,7 @@ class Draconstructor(Constructor):
         Unlike the old _resolve_fn_target, accepts any symbol kind (types, pipes, etc).
         Returns the resolved value or raises ConstructorError.
         """
-        # scheme URI first — keeps symbol resolution and !include on the same rail
+        # scheme URI first -- keeps symbol resolution and !include on the same rail
         if self._is_scheme_uri(name):
             try:
                 return self._resolve_via_scheme(name, node)
@@ -503,7 +503,7 @@ class Draconstructor(Constructor):
     def _resolve_via_scheme(self, target: str, node):
         """Resolve a scheme URI (py:..., pkg:...@sel, etc.) to a Python value.
 
-        Single source of truth for !fn:scheme:... — delegates to the same loader
+        Single source of truth for !fn:scheme:... -- delegates to the same loader
         registry used by !include, applies the @selector, and extracts the
         underlying Python value when the loader returned a PyValueNode.
         """

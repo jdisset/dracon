@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """Tests for !if instructions inside sequences.
 
 Regression tests for the sibling-path bug: when a !if evaluates false
@@ -18,7 +20,7 @@ def _load(yaml: str):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# baseline — single !if (was already working)
+# baseline -- single !if (was already working)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
@@ -53,7 +55,7 @@ items:
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# regression — multiple sibling !if in a sequence
+# regression -- multiple sibling !if in a sequence
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
@@ -114,7 +116,7 @@ items:
 
 
 def test_if_siblings_with_interpolations_in_bodies():
-    """Exact minimal reproduction from bug report —
+    """Exact minimal reproduction from bug report --
     sibling !if with ${...} interpolations in their then: bodies.
     """
     out = _load("""
@@ -140,7 +142,7 @@ job_pipe: !MakeJob { pipe: true, prompt: "x" }
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# adjacent generalizations — nested instructions, !each-generated sequences
+# adjacent generalizations -- nested instructions, !each-generated sequences
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
@@ -184,7 +186,7 @@ items:
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# fn-template invocation — reprocess-after-mutation class of bug
+# fn-template invocation -- reprocess-after-mutation class of bug
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 

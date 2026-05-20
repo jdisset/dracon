@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """Tests for nested dictionary key evaluation in !each loops.
 
 This test module verifies that dictionary keys inside !each loop templates

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 import pytest
 from dracon.loader import DraconLoader
 from dracon.include import compose_from_include_str
@@ -55,7 +57,7 @@ def test_vocab_greet_inside_define_body():
 
 
 def test_vocab_greet_inside_set_default_body():
-    """SetDefault extends Define — same deferral must apply to vocab tags."""
+    """SetDefault extends Define -- same deferral must apply to vocab tags."""
     config = get_config("dracon:tests/test_vocab_define_propagation_setdefault.yaml")
     assert config["result"] == "Hello, world!"
 

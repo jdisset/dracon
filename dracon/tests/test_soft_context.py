@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """Tests for soft context priority: !set_default values yield to !define across merge boundaries."""
 
 import tempfile

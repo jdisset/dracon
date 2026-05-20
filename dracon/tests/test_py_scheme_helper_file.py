@@ -1,4 +1,6 @@
-"""File-path helper for py: loader tests — NOT imported by pytest directly.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
+"""File-path helper for py: loader tests -- NOT imported by pytest directly.
 
 This file is referenced by absolute path in test_py_scheme.py to exercise
 the file-path form of py: includes (importlib.util.spec_from_file_location).

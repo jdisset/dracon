@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 """Unit tests for the NodeRewriter helper."""
 
@@ -186,7 +186,7 @@ def test_rewriter_no_change_does_not_loop():
 def test_rewriter_max_passes_guard():
     # apply always reports MUTATED but never actually changes the tag, so the
     # same node would be picked forever. seen_ids guards against this naturally;
-    # exhaust the budget by yielding fresh nodes — drive a pathological case
+    # exhaust the budget by yielding fresh nodes -- drive a pathological case
     # where each iteration creates a new matching node.
     root = _mapping([(_scalar('a'), _scalar('1', tag='!grow'))])
     comp = CompositionResult(root=root)

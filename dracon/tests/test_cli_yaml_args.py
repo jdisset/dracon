@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """End-to-end tests for argparse integration of YAML-declared CLI args.
 
 Step 03 of the yaml-cli-args feature set: discovered `CliDirective`s
@@ -27,7 +29,7 @@ def _write(tmp_path: Path, name: str, content: str) -> Path:
 
 
 class _Cfg(BaseModel):
-    """Plain config: nothing model-side — every flag must come from layers."""
+    """Plain config: nothing model-side -- every flag must come from layers."""
     name: str = "anon"
 
 
@@ -80,14 +82,14 @@ def test_discovery_skipped_when_argv_uses_no_yaml_flags(tmp_path, monkeypatch):
         f"discovery ran for an argv with no YAML-flag needs ({call_count['n']} calls)"
     )
 
-    # case B: --help requested — discovery must run so help can list flags
+    # case B: --help requested -- discovery must run so help can list flags
     try:
         prog.parse_args([f"+file:{layer.as_posix()}", "--help"])
     except SystemExit:
         pass
     assert call_count["n"] >= 1, "discovery must run when --help is requested"
 
-    # case C: an unknown --flag in argv — discovery must run to register it
+    # case C: an unknown --flag in argv -- discovery must run to register it
     pre = call_count["n"]
     prog.parse_args([f"+file:{layer.as_posix()}", "--port", "9000"])
     assert call_count["n"] > pre, (
@@ -196,13 +198,13 @@ def test_long_flag_writes_to_context(tmp_path):
     # the layered file consumed `port` via interpolation, so it lands in
     # the composed tree under `echoed_port`
     assert cfg.name == "anon"
-    # check via the loader's context as well — that is the SSOT bucket
+    # check via the loader's context as well -- that is the SSOT bucket
     # that ++port=... would have written into
     # (we re-validate it via the layered-file echo)
     # the layered file echoed the interpolation, so the value flowed
     # through the loader context
     # re-loading the program and dumping the model fields would be
-    # overkill — this confirms argparse routed --port to defined_vars.
+    # overkill -- this confirms argparse routed --port to defined_vars.
 
 
 def test_short_alias_parsed(tmp_path):
@@ -301,7 +303,7 @@ def test_short_collision_drops_with_warning(tmp_path):
 
 def test_required_satisfied_by_layer(tmp_path):
     """`!require port` plus a `!set_default port: ...` in the same layer.
-    The require is satisfied at compose time — argparse must NOT error
+    The require is satisfied at compose time -- argparse must NOT error
     when --port is omitted."""
     src = _write(
         tmp_path,
@@ -318,7 +320,7 @@ def test_required_satisfied_by_layer(tmp_path):
 
 def test_required_satisfied_by_seed_context(tmp_path):
     """`!require port` is satisfied if the program's context already
-    carries `port` — argparse must not treat it as required."""
+    carries `port` -- argparse must not treat it as required."""
     src = _write(
         tmp_path,
         "layer.yaml",
@@ -336,7 +338,7 @@ def test_required_satisfied_by_seed_context(tmp_path):
 
 
 def test_unknown_flag_still_errors(tmp_path, capsys):
-    """No layer, no model field, --notaknob → argparse errors."""
+    """No layer, no model field, --notaknob -> argparse errors."""
     with pytest.raises(SystemExit):
         _prog().parse_args(["--notaknob", "x"])
 

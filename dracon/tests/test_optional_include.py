@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """Tests for !include? optional include and isfile/isdir in include contexts."""
 import pytest
 from dracon.loader import DraconLoader
@@ -95,7 +97,7 @@ def test_optional_include_with_interpolated_path(tmp_path):
 
 
 def test_optional_include_multiple(tmp_path):
-    """Multiple !include? — some exist, some don't."""
+    """Multiple !include? -- some exist, some don't."""
     exists = tmp_path / "exists.yaml"
     exists.write_text("val: found\n")
     yaml_content = f"""

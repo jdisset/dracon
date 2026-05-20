@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 import pytest
 from dataclasses import dataclass
 from types import ModuleType, FunctionType
@@ -380,7 +382,7 @@ class TestDeepcopyFallback:
         # recurses with the stdlib's own recursive call (not via our
         # _deepcopy), so the leaf's TypeError bubbles back up to the
         # container-level _deepcopy call. Containers are NOT covered by the
-        # fallback — the failure surfaces structured rather than being
+        # fallback -- the failure surfaces structured rather than being
         # silently masked behind shared references inside cloned containers.
         class HardRefuse:
             def __deepcopy__(self, memo):

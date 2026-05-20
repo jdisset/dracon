@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 # tests for the extensible instruction registry (refactor 06)
 # and node copy/mixin correctness (refactor 05)
 import pytest

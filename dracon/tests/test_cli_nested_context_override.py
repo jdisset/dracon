@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """regression: ++a.b=v / --a.b=v should deep-merge into mapping context vars.
 bugs/_archive/cli-nested-context-override-silent-noop.md"""
 from __future__ import annotations

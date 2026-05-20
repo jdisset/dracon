@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 from typing import Any, Dict, List, Union, TypeVar, Generic, Optional, Set
 from dracon.keypath import ROOTPATH, KeyPath
@@ -427,9 +427,6 @@ class Sequence(Dracontainer, list, Generic[V]):
             list.append(self, value)
             return
         list.append(self, self._to_dracontainer(value, key=list.__len__(self)))
-
-    def __append__(self, value):
-        self.append(value)
 
     def extend(self, values):
         if self._dracon_root_obj is None:

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """regression: <<(<): !include must expose set_default vars to in-file compose-time
 instructions (!define / !if / !set_default mapping-body / !each)."""
 from __future__ import annotations

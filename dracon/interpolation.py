@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 ## {{{                          --     imports     --
 from asteval import Interpreter
@@ -971,7 +971,7 @@ class InterpolableNode(ContextNode):
                 offset += len(newexpr) - match.end + match.start
             elif match.symbol == '@' and any([i.contains(match.start) for i in interps]):
                 ...  # handled in postproc
-            # else: @/& outside ${...} — literal text, not a reference
+            # else: @/& outside ${...} -- literal text, not a reference
 
         if references:
             self.init_outermost_interpolations = outermost_interpolation_exprs(self.value)

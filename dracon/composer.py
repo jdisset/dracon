@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 ## {{{                          --     imports     --{{{}}}
 from ruamel.yaml.composer import Composer
@@ -207,7 +207,7 @@ class CompositionResult(BaseModel):
         new_trace = self.trace
         if new_trace is None and isinstance(other, CompositionResult):
             new_trace = other.trace
-        # cli_directives live at the surface — concat in source order so a
+        # cli_directives live at the surface -- concat in source order so a
         # later layer can introduce flags without losing earlier ones
         combined_directives = list(self.cli_directives) + (
             list(other.cli_directives) if isinstance(other, CompositionResult) else []

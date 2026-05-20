@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """!require / !set_default must NOT consider Python builtins as user-defined.
 
 Bug class: ``var in loader.context`` is True for ``min``/``max``/``sum``/...

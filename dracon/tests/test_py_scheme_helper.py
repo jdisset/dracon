@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """Helper module imported by test_py_scheme.py via the py: loader."""
 from pydantic import BaseModel
 

@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 ## {{{                          --     imports     --
 from dataclasses import dataclass
@@ -468,10 +468,10 @@ _COERCE_TYPES: dict[str, type] = {
     'list': list, 'dict': dict,
 }
 _TYPED_DEFINE_RE = re.compile(r'^!define:(\w+)$')
-# !set_default:foo — primitive coerce types match \w+; arbitrary type names
+# !set_default:foo -- primitive coerce types match \w+; arbitrary type names
 # (e.g. list[Event], pkg.Mod) are accepted as pure annotation metadata.
 _TYPED_SET_DEFAULT_RE = re.compile(r'^!(?:define\?|set_default):(.+)$')
-# !require:Type — pure annotation metadata
+# !require:Type -- pure annotation metadata
 _TYPED_REQUIRE_RE = re.compile(r'^!require:(.+)$')
 # !returns or !returns:Type
 _RETURNS_RE = re.compile(r'^!returns(?::(.+))?$')
@@ -492,7 +492,7 @@ def _is_constructable_type_tag(node, loader) -> bool:
     rather than eagerly during !define processing.
 
     Resolvable type tags are always deferred (the lazy path is the point).
-    Unknown tags that look like plain identifiers are *also* deferred —
+    Unknown tags that look like plain identifiers are *also* deferred --
     vocabularies pulled in via `<<(<): !include vocab.yaml` attach their
     exports to node contexts during the merge pass, which runs after
     instructions. Eager construction inside a !define body would see a
@@ -547,18 +547,9 @@ def _is_constructable_type_tag(node, loader) -> bool:
 
 
 class Define(Instruction):
-    """
-    `!define var_name : value`
-    `!define:type var_name : value`  (explicit type coercion)
+    """`!define var_name : value` -- bind value to var_name in parent context, then drop the node.
 
-    Define a variable var_name with the value of the node
-    and add it to the parent node's context
-    The node is then removed from the parent node
-    (if you want to define and keep the node, use !define_keep)
-
-    Supported types for !define:type -- int, float, str, bool, list, dict.
-
-    If value is an interpolation, this node triggers composition-time evaluation
+    Use `!define_keep` to retain the node. Optional `:type` suffix coerces.
     """
 
     def __init__(self, target_type=None):
@@ -662,17 +653,10 @@ class Define(Instruction):
 
 
 class SetDefault(Define):
-    """
-    `!set_default var_name : default_value`
-    `!set_default:TypeName var_name : default_value`  (typed annotation)
+    """`!set_default var_name : value` -- like !define but only if var doesn't already exist.
 
-    Similar to !define, but only sets the variable if it doesn't already exist in the context.
-
-    The optional `:TypeName` is metadata (surfaces in `InterfaceSpec.params`).
-    For primitive types (int, float, str, bool, list, dict) the value is also
-    coerced. For arbitrary type names, only the annotation is recorded.
-
-    If value is an interpolation, this node triggers composition-time evaluation
+    Optional `:TypeName` records an annotation (surfaces in InterfaceSpec.params) and
+    coerces primitive types.
     """
 
     def __init__(self, target_type=None, annotation_name: str | None = None):
@@ -784,26 +768,9 @@ class SetDefault(Define):
 
 
 class Each(Instruction):
+    """`!each(var_name) list-like-expr : value` -- duplicate value per item, bind to var_name."""
+
     PATTERN = r"!each\(([a-zA-Z_]\w*)\)"
-
-    """
-    `!each(var_name) list-like-expr : value`
-
-    Duplicate the value node for each item in the list-like node and assign the item 
-    to the variable var_name (which is added to the context).
-    
-    If list-like-expr is an interpolation, this node triggers its composition-time evaluation.
-
-    For sequence values:
-        !each(i) ${range(3)}:
-            - value_${i}
-    
-    For mapping values with dynamic keys:
-        !each(i) ${range(3)}:
-            key_${i}: value_${i}
-
-    Removed from final composition.
-    """
 
     def __init__(self, var_name: str):
         self.var_name = var_name
@@ -947,7 +914,7 @@ class Each(Instruction):
 
         elif isinstance(value_node, DraconMappingNode):
             new_parent = parent_node.copy()
-            del new_parent[key_node.value]
+            del new_parent[str(path[-1])]
             value_items = list(value_node.items())
             has_single_instruction_child = len(value_items) == 1 and match_instruct(
                 value_items[0][0].tag
@@ -971,7 +938,8 @@ class Each(Instruction):
                         tag='tag:yaml.org,2002:map', value=[(new_inner_knode, new_inner_vnode)]
                     )
                     temp_comp = CompositionResult(root=temp_mapping)
-                    temp_path = KeyPath([KeyPathToken.ROOT, MAPPING_KEY, new_inner_knode.value])
+                    temp_comp.make_map()
+                    temp_path = next(p for p in temp_comp.node_map if p.is_mapping_key())
                     temp_comp = inner_inst.process(temp_comp, temp_path, loader)
                     all_results.append(temp_comp.root)
 
@@ -1194,7 +1162,7 @@ class If(Instruction):
             if condition:
                 self._add_content_to_parent(parent_node, value_node, comp_res, parent_path)
 
-        del parent_node[key_node.value]
+        del parent_node[str(path[-1])]
 
         # if the parent mapping is now empty and lives inside a sequence,
         # remove the empty mapping from the sequence (false !if in a list)

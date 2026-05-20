@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 # Step 2 regression suite: unified CallableSymbol covers plain / template /
 # partial / pipe via factory methods + strategy registry. Asserts the public
 # Symbol-protocol contract, not concrete-class identity.

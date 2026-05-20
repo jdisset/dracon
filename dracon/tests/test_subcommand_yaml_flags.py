@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 """YAML-declared CLI flags must reach argparse on subcommand programs.
 
@@ -71,7 +71,7 @@ def _capture_help(prog, *argv) -> str:
 
 
 class TestSubcommandLongFlag:
-    """Layer placed BEFORE the subcommand → root-scoped, value flows to model."""
+    """Layer placed BEFORE the subcommand -> root-scoped, value flows to model."""
 
     def test_long_flag_accepted_before_subcommand(self, extras_yaml):
         prog = make_program(SubCLI)
@@ -95,7 +95,7 @@ class TestSubcommandLongFlag:
         assert cfg.result == "hello x 1"
 
     def test_long_flag_after_subcommand_does_not_error(self, extras_yaml):
-        """Layer AFTER the subcommand → subcmd-scoped config, but its
+        """Layer AFTER the subcommand -> subcmd-scoped config, but its
         yaml-declared flags must still be accepted at the root level
         (the bug was 'unknown argument --greeting' here)."""
         prog = make_program(SubCLI)
@@ -135,7 +135,7 @@ class TestSubcommandHelpListsYamlFlags:
 
 
 class TestSubcommandContextEscapeStillWorks:
-    """The pre-existing `++name=value` escape must keep working — that's how
+    """The pre-existing `++name=value` escape must keep working -- that's how
     users worked around the bug. After the fix it should still be a valid
     alternative path."""
 
@@ -164,7 +164,7 @@ class FlatCLI(BaseModel):
 
 
 class TestFlatProgramStillWorks:
-    """Flat programs must keep working — this is the unbroken baseline."""
+    """Flat programs must keep working -- this is the unbroken baseline."""
 
     def test_flat_long_flag(self, extras_yaml):
         prog = make_program(FlatCLI)

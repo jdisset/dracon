@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 # compose-time tree rewriter shared by process_instructions / process_includes /
 # process_merges / process_deferred. each pass plugs a discover predicate and an
@@ -116,7 +116,7 @@ class NodeRewriter:
         skipped: set[tuple] = set()
         deferred_pending: dict[tuple, tuple[KeyPath, Node]] = {}
 
-        # only rebuild node_map after MUTATED — NO_CHANGE/DEFERRED don't touch the tree
+        # only rebuild node_map after MUTATED -- NO_CHANGE/DEFERRED don't touch the tree
         self.comp.make_map()
         need_remap = False
         for _ in range(self.max_passes):

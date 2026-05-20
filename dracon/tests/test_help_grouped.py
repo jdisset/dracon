@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 """Help renderer groups YAML-declared flags by source file.
 
@@ -42,7 +42,7 @@ def _write(tmp: Path, name: str, body: str) -> Path:
 
 
 def _run_help(prog, _capfd_unused, *argv):
-    """Capture help output via the rich console module singleton — capfd
+    """Capture help output via the rich console module singleton -- capfd
     misses it because dracon prints through `commandline.console`, not
     through the live sys.stdout."""
     from io import StringIO
@@ -62,7 +62,7 @@ def _run_help(prog, _capfd_unused, *argv):
 
 
 def test_yaml_flags_split_per_file_when_above_threshold(model_cli, capfd, tmp_path):
-    """Three or more yaml-declared flags from two files → two subsections."""
+    """Three or more yaml-declared flags from two files -> two subsections."""
     analytics = _write(tmp_path, "analytics.yaml", (
         "!require api_key:\n"
         "  help: \"API key\"\n"
@@ -135,7 +135,7 @@ def test_help_text_renders_in_grouped_layout(model_cli, capfd, tmp_path):
 
 
 def test_single_yaml_flag_stays_flat(model_cli, capfd, tmp_path):
-    """One yaml flag → no per-file panel; all flags share one Options panel."""
+    """One yaml flag -> no per-file panel; all flags share one Options panel."""
     f = _write(tmp_path, "tiny.yaml", (
         "!require api_key:\n"
         "  help: \"API key\"\n"
@@ -152,7 +152,7 @@ def test_single_yaml_flag_stays_flat(model_cli, capfd, tmp_path):
 
 
 def test_two_yaml_flags_stays_flat(model_cli, capfd, tmp_path):
-    """At threshold → still flat (cleaner for small layered surfaces)."""
+    """At threshold -> still flat (cleaner for small layered surfaces)."""
     f = _write(tmp_path, "two.yaml", (
         "!require api_key:\n"
         "  help: \"API key\"\n"
@@ -173,7 +173,7 @@ def test_two_yaml_flags_stays_flat(model_cli, capfd, tmp_path):
 
 
 def test_pure_model_cli_unchanged(model_cli, capfd):
-    """No layered configs → behavior is identical to before the refactor:
+    """No layered configs -> behavior is identical to before the refactor:
     one Options panel, no subsections."""
     prog = make_program(model_cli)
     out = _run_help(prog, capfd)

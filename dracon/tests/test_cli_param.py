@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """Tests for the unified `CliParam` record.
 
 Both `Arg` (model-side) and `CliDirective` (YAML-side) build the same
@@ -62,7 +64,7 @@ def test_clidirective_python_type_alias():
 
 
 def test_require_default_is_missing():
-    """!require has no default → encoded as MISSING."""
+    """!require has no default -> encoded as MISSING."""
     d = CliDirective(name="port", kind="require")
     assert d.default is MISSING
 

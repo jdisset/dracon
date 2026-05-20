@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 from typing import Optional, Any
 import re
@@ -113,6 +113,29 @@ def _realize_tagged_merge_source(merge_node, loader):
         return merge_node
 
 
+def _realize_interpolable_merge_source(merge_node, loader):
+    """Evaluate a `${...}` merge source so `merged()` sees the concrete
+    value. A scalar InterpolableNode would otherwise fall through to the
+    scalar-replacement branch and wipe the parent mapping."""
+    from dracon.interpolation import InterpolableNode
+    if not isinstance(merge_node, InterpolableNode) or not merge_node.init_outermost_interpolations:
+        return merge_node
+    try:
+        value = merge_node.evaluate()
+    except Exception as e:
+        raise CompositionError(
+            f"merge source {merge_node.value!r} could not be evaluated at "
+            f"compose time: {type(e).__name__}: {e}\n"
+            "Merge keys want compose-time values: use `!include`, an "
+            "inline mapping, an anchor, or a `!define`-bound value.",
+            context=node_source(merge_node),
+        ) from e
+    from dracon.loader import dump_to_node
+    realised = dump_to_node(value)
+    realised.context = getattr(merge_node, 'context', None) or getattr(realised, 'context', None)
+    return realised
+
+
 def _apply_one_merge(comp_res, merge_key_path: KeyPath, loader):
     """apply a single merge: delete the merge-key, splice the value into parent
     via merged(), record trace, propagate defined_vars."""
@@ -159,6 +182,8 @@ def _apply_one_merge(comp_res, merge_key_path: KeyPath, loader):
     new_parent = parent_path.get_obj(comp_res.root)
     # realise tagged merge source (!Pool, !Thing) *now* so its output is what gets merged
     merge_node = _realize_tagged_merge_source(merge_node, loader)
+    # realise lazy scalar merge source (`<<: ${dict}`) the same way
+    merge_node = _realize_interpolable_merge_source(merge_node, loader)
     # propagate parent context into merge source so !define beats !set_default,
     # existing-wins preserves the include's own !define values
     parent_ctx = getattr(new_parent, 'context', None)
@@ -204,7 +229,7 @@ def process_merges(comp_res, loader=None, skip_paths=()):
     """Apply all merge nodes (`<<:` keys) in the tree until quiescent.
 
     Returns (comp_res, mutated_bool). One merge is applied at a time then the
-    rewriter re-discovers — this keeps paths fresh when bare duplicate merge
+    rewriter re-discovers -- this keeps paths fresh when bare duplicate merge
     keys (e.g. two `<<:`) share the same raw value and deleting one renumbers
     the internal `__merge_N_` keys.
     """
@@ -376,7 +401,7 @@ class MergeKey(BaseModel):
 
 DEFAULT_ADD_TO_CONTEXT_MERGE_KEY = MergeKey(raw='<<{~<}[~<]')
 
-# cache parsed MergeKey instances — same raw string always produces same result
+# cache parsed MergeKey instances -- same raw string always produces same result
 _merge_key_cache: dict[str, MergeKey] = {}
 
 
@@ -472,7 +497,7 @@ def _ensure_soft_dict(ctx):
     """Ensure context dict supports soft key tracking."""
     if ctx is None:
         return SoftPriorityDict()
-    # SymbolTable.copy() is an entries-dict copy — no per-symbol materialization
+    # SymbolTable.copy() is an entries-dict copy -- no per-symbol materialization
     from dracon.symbol_table import SymbolTable
     if isinstance(ctx, SymbolTable):
         return ctx.copy()
@@ -495,7 +520,7 @@ def add_to_context(new_context, existing_item, merge_key=DEFAULT_ADD_TO_CONTEXT_
 
     ctx = getattr(existing_item, 'context', None)
     if ctx is not None:
-        # short-circuit: same SymbolTable already attached — nothing to merge in
+        # short-circuit: same SymbolTable already attached -- nothing to merge in
         if ctx is new_context:
             if hasattr(existing_item, '_clear_ctx') and existing_item._clear_ctx:
                 for k in existing_item._clear_ctx:
@@ -624,24 +649,3 @@ def reset_context(item, ignore_dracon_namespace=True):
 
 
 
-def dict_diff(dict1, dict2):
-    """
-    Returns a dictionary with the differences between dict1 and dict2
-    """
-    diff = {}
-    for key, value in dict1.items():
-        if key not in dict2:
-            diff[key] = value
-        elif not values_equal(value, dict2[key]):
-            if dict_like(value) and dict_like(dict2[key]):
-                diff[key] = dict_diff(value, dict2[key])
-            else:
-                diff[key] = dict2[key]
-    for key, value in dict2.items():
-        if key not in dict1:
-            diff[key] = value
-    return diff
-
-
-# ideal syntax:
-# <<{>~}(attr1,attr2{+<}[+](subattr{~})): "value"

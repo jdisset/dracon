@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """Tests for !raw tag -- opaque values that survive all dracon phases."""
 
 import pytest

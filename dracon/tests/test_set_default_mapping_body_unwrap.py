@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """regression: !set_default with mapping-body default must unwrap node trees."""
 from __future__ import annotations
 

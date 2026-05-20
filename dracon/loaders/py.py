@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """Python symbol loader for the `!include py:...` scheme.
 
 This loader unifies Python symbol resolution under dracon's include machinery.
@@ -6,15 +8,15 @@ The same `!include scheme:path[@selector]` grammar that works for YAML sources
 
 Path grammar (after the `py:` prefix is stripped):
 
-- ``dotted.path`` — imported via ``importlib.import_module``. If the full path
+- ``dotted.path`` -- imported via ``importlib.import_module``. If the full path
   isn't importable as a module, the last segment is treated as an attribute of
   the prefix (same fallback used by ``resolve_type``).
 - ``/abs/file.py`` or ``./rel/file.py`` (or ``$VAR/file.py`` after variable
-  substitution done by the outer include machinery) — loaded via
+  substitution done by the outer include machinery) -- loaded via
   ``importlib.util.spec_from_file_location`` with no sys.path mutation.
 
 Selector form (``@Name``) is stripped by the outer include layer and applied
-via composition-result rerooting — so this loader always returns a namespace
+via composition-result rerooting -- so this loader always returns a namespace
 mapping of public names (underscore-prefixed names filtered out; ``__all__``
 honoured when present). When no ``@`` is present and the dotted path resolves
 to a single symbol (not a module), that symbol is returned directly; this
@@ -75,7 +77,7 @@ def _looks_like_file_path(ref: str) -> bool:
         return True
     if ref.startswith(('/', '~', '.')) or ref.startswith('./') or ref.startswith('../'):
         return True
-    # windows drive letter (C:\ etc.) — unlikely to clash with a module name
+    # windows drive letter (C:\ etc.) -- unlikely to clash with a module name
     if len(ref) > 2 and ref[1] == ':' and ref[2] in ('/', '\\'):
         return True
     return False
@@ -173,6 +175,6 @@ def read_from_py(path: str, node=None, draconloader=None, **_) -> tuple[Any, dic
     obj = resolve_py_reference(path)
     if isinstance(obj, types.ModuleType):
         return _namespace_mapping_node(obj), {}
-    # single-symbol resolution: !include py:math.sqrt — path pointed straight
+    # single-symbol resolution: !include py:math.sqrt -- path pointed straight
     # at a non-module attribute.
     return PyValueNode(obj, label=path), {}

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 import os
 import pytest
 from dracon import DraconLoader
@@ -77,7 +79,7 @@ def test_trace_file_layering(tmp_yaml):
     assert port_trace[1].replaced is not None
     assert port_trace[1].replaced.value == "5432"
 
-    # host was not overridden — should only have one entry
+    # host was not overridden -- should only have one entry
     host_trace = cr.trace.get("db.host")
     assert len(host_trace) >= 1
 
@@ -317,6 +319,6 @@ def test_dracon_program_trace_flags_not_in_model(tmp_yaml):
     class Cfg(BaseModel):
         x: int = 1
     prog = Program[Cfg](conf_type=Cfg)
-    # parse without trace flags — should work normally
+    # parse without trace flags -- should work normally
     conf, _ = prog.parse_args([])
     assert conf.x == 1

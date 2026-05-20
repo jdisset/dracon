@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """Tests for dump_to_node as a first-class public API.
 
 Bug-fix regressions live in test_roundtrip_property.py; this file covers

@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ class CompositionStackSnapshot(BaseModel):
 
     Returned by `CompositionStack.snapshot()`; consumed by
     `CompositionStack.restore()`. Layer objects and CompositionResult
-    objects are kept by reference — restore is a structural rewind, not
+    objects are kept by reference -- restore is a structural rewind, not
     a deep copy of node trees.
     """
 

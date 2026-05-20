@@ -1,4 +1,6 @@
-"""Tests for dracon CLI — show subcommand."""
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
+"""Tests for dracon CLI -- show subcommand."""
 import json
 import sys
 from pathlib import Path
@@ -14,7 +16,7 @@ CONFIGS = Path(__file__).parent / "configs"
 
 
 class TestShowRawMode:
-    """Raw YAML mode — same behavior as old dracon-print."""
+    """Raw YAML mode -- same behavior as old dracon-print."""
 
     def _run_show(self, argv):
         from dracon.cli import DraconCLI
@@ -127,7 +129,7 @@ class TestShowModeDetection:
 
 
 class TestShowProgramMode:
-    """Program-aware mode — discovers @dracon_program and shows resolved config."""
+    """Program-aware mode -- discovers @dracon_program and shows resolved config."""
 
     def test_schema_output(self):
         """--schema emits JSON Schema for a registered program model."""

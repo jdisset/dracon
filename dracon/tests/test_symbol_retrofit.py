@@ -1,5 +1,5 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 """Characterization tests: type/callable tags, interpolated tags,
 !fn:path resolution, !define alias, propagation, and DraconCallable/Partial/Pipe
@@ -300,7 +300,7 @@ class TestIsConstructableTypeTagReplacement:
         assert _is_constructable_type_tag(node, loader) is True
 
     def test_unknown_compound_tag_not_deferred(self):
-        """Compound tags (!fn:x, !mod.Class) keep the eager path — they have
+        """Compound tags (!fn:x, !mod.Class) keep the eager path -- they have
         their own handlers in construct_object and must not be deferred."""
         from dracon.instructions import _is_constructable_type_tag
         from dracon.composer import DraconMappingNode

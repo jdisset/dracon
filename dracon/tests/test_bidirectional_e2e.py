@@ -1,9 +1,9 @@
-# Copyright (c) 2025 Jean Disset
-# MIT License - see LICENSE file for details.
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 
 """High-level end-to-end tests for the bidirectional vocabulary contract.
 
-These tests exercise the full compose → construct → dump → reload → resolve
+These tests exercise the full compose -> construct -> dump -> reload -> resolve
 pipeline across combinations of dracon-native types, pydantic models, and
 vocabularies. Each test is designed to fail loudly if a hidden interaction
 between the quotation/construction/resolution phases regresses.
@@ -264,7 +264,7 @@ class TestTemplatesPipesAndBoundSymbolsInDocument:
         callable_ = DraconCallable(template_node=empty, loader=loader, name="mkjob")
         text = loader.dump(callable_)
         assert "!fn:mkjob" in text
-        # deterministic dump — critical for wire protocols and content hashing
+        # deterministic dump -- critical for wire protocols and content hashing
         assert loader.dump(callable_) == text
 
     def test_pipe_dumps_and_reloads_with_symbol_stages(self):
@@ -275,7 +275,7 @@ class TestTemplatesPipesAndBoundSymbolsInDocument:
 
     def test_bound_symbol_reloads_to_invokable_partial(self):
         """A BoundSymbol is the closure from CLI-style arg binding. It must survive
-        a dump → load cycle as something callable with the same effect."""
+        a dump -> load cycle as something callable with the same effect."""
         vocab = make_vocab()
         loader = make_loader(vocab)
         host_sym = CallableSymbol(Host, name="Host")
@@ -311,7 +311,7 @@ job: !Job
         assert isinstance(job, Job)
         assert isinstance(job.env["payload"], DeferredNode)
 
-        # re-dump and reload — must NOT recurse
+        # re-dump and reload -- must NOT recurse
         redumped = make_loader(vocab).dump(job)
         assert "!deferred" in redumped
 
@@ -427,7 +427,7 @@ class TestNodeHelpersThroughDumpable:
 
 
 class TestComposeConstructDumpReloadPipeline:
-    """The full four-peer pipeline (compose → construct → dump → reload)."""
+    """The full four-peer pipeline (compose -> construct -> dump -> reload)."""
 
     def test_multi_source_merge_survives_dump_reload(self):
         """Compose a multi-document YAML, construct it, dump it, reload it.
@@ -540,7 +540,7 @@ class TestNestedDeferredNodes:
         assert isinstance(constructed["inner"], DeferredNode)
 
     def test_nested_deferred_inside_pydantic_untyped_field(self):
-        """Chain: Pydantic → untyped dict → DeferredNode → DeferredNode."""
+        """Chain: Pydantic -> untyped dict -> DeferredNode -> DeferredNode."""
         vocab = make_vocab()
         loader = make_loader(vocab)
 

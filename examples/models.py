@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 from pydantic import BaseModel, Field
 from typing import Annotated, Literal, Optional
 from dracon import Arg, DeferredNode, construct

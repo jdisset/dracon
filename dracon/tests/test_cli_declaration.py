@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """Tests for the CliDirective record and the extended grammar on
 `!require` / `!set_default` (mapping body for CLI metadata).
 

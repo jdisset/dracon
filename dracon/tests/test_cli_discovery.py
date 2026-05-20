@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Jean Disset
 """Tests for the CLI discovery pre-pass.
 
 Step 02 of the yaml-cli-args feature set: a pure function that composes
@@ -618,7 +620,7 @@ def test_discover_walks_through_force_deferred_paths(tmp_path):
 def test_static_fallback_walks_through_dir_relative_include(tmp_path):
     """When full compose fails (e.g. an interpolation needs argv-supplied
     context), the static fallback must still follow `!include file:$DIR/...`
-    references — `$DIR` is resolvable at scan time from the source's own
+    references -- `$DIR` is resolvable at scan time from the source's own
     path. The "ship a vocabulary, point to it via $DIR" SSOT pattern
     breaks otherwise on cold `--help`."""
     ssot = tmp_path / "ssot.yaml"
@@ -648,7 +650,7 @@ def test_static_fallback_walks_through_dir_relative_include(tmp_path):
 
 def test_static_fallback_walks_through_file_stem_include(tmp_path):
     """`$FILE_STEM` and friends are also statically resolvable from the
-    source path — they must be substituted before the literal check."""
+    source path -- they must be substituted before the literal check."""
     sibling = tmp_path / "entry-companion.yaml"
     sibling.write_text(textwrap.dedent("""
         !set_default companion_flag:
