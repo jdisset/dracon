@@ -115,8 +115,10 @@ python app.py +base.yaml +prod.yaml --workers 8
 - Standard CLIs generated from Pydantic models, with nested overrides and config-file layering
 - `!require` / `!set_default` directives that double as CLI flags: layered configs grow the flag set and `--help` text without touching the model
 - YAML callables with `!fn`, `!fn:path`, and `!pipe`
-- Runtime deferral with `!deferred` and `Resolvable[T]`
+- Runtime deferral with `!deferred` (subtree-axis) and `!live` (variable-axis late binding)
 - `make_callable()` for turning YAML into reusable Python factories
+- `register_template()` to bind Python callables as typed YAML symbols, parameters and docs lifted from `inspect.signature`
+- `!cascade:NAME` for predicate-keyed mappings (CSS-shaped rules, `*_params` cascades, route tables, ...) via pluggable dialects
 - `dracon show` and provenance tracing for debugging composition
 - Bidirectional vocabulary: `dump`/`dump_to_node` round-trip Pydantic models and dracon-native wrappers through the same `SymbolTable` that drives the load path
 - `dump_line`/`loads_line`/`document_stream` for line-framed wire protocols and log-replay streams

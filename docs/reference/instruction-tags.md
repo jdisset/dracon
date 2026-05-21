@@ -426,6 +426,86 @@ config: !deferred::reroot=true:ServerConfig
 
 ---
 
+## !live
+
+Late-bind specific `${...}` leaves against per-call runtime context without wrapping the whole subtree in `!deferred`. `!live` shifts the pause-unit from "subtree" to "variable": only `${...}` leaves whose free names intersect the declared scope stay lazy, the rest resolves normally at load time.
+
+```yaml
+theme: !live component:
+  width: "${component.x * 2}"
+  label: "${component.id}"
+  static: "fixed"
+```
+
+Multiple names can be declared with commas: `!live component, theme:`.
+
+```python
+import dracon
+
+cfg = dracon.load("theme.yaml")
+cfg["theme"]["width"]                          # LazyInterpolable, not resolved
+cfg["theme"]["width"].invoke(component=c)      # resolves with this binding
+dracon.resolve_all_lazy(cfg, except_for={"component"})  # resolve everything *but* live lazies
+```
+
+The lazy leaves carry their matched scope params on `_scope_params`. `resolve_all_lazy` skips any lazy whose scope params are non-empty (unless their names are in `except_for`). `dump` re-emits `!live` groups by inspecting `_scope_params`, so `loads(dump(cfg))` is a fixed point.
+
+`!live` is the variable-axis dual of `!deferred`:
+
+- `!deferred` pauses a **subtree** for later construction
+- `!live` pauses **specific leaves** so the surrounding structure stays usable
+
+---
+
+## !cascade:NAME
+
+Predicate-keyed mapping dialects. One tag, two flavors discriminated by the registered `CascadeStrategy`'s `input_params`:
+
+### Inherit-mode (empty `input_params`)
+
+Keys with shared semantics flow into descendants at compose time. Built-in `strip_suffix(SUFFIX)` is the most common case:
+
+```yaml
+!cascade:strip_suffix:params smooth:
+  smooth_params: { sigma: 1.0 }
+  smooth_2d:
+    smooth_2d_params: { sigma: 2.0 }    # merges with smooth_params via the strip_suffix dialect
+```
+
+`strip_suffix:SUFFIX` is a parametric built-in: the dialect collapses `<name>_<SUFFIX>` and `<name>` onto the same target. Compose-time result is a plain dict — no runtime dispatch.
+
+For inherit-mode without a YAML tag, use `dracon.cascade_inherit(tree, key_normalize=...)` directly.
+
+### Select-mode (non-empty `input_params`)
+
+Predicate keys dispatch on a runtime value. Compose-time output is a `CallableSymbol` of kind `'match'`; `invoke(**input_params)` collects matching keys, sorts by specificity, and merges. Each `input_params` name implicitly opens a `!live` scope inside the body, so `${name.x}` leaves stay callable against the per-invocation binding.
+
+```python
+from dracon import CascadeStrategy, register_cascade_strategy
+
+register_cascade_strategy(CascadeStrategy(
+    name="css-like",
+    input_params=("component",),
+    parse=parse_selector,
+    matches=lambda sel, c: sel.matches(c),
+    specificity=lambda sel: sel.specificity,
+))
+```
+
+```yaml
+style: !cascade:css-like
+  "button":           { color: blue }
+  "button.primary":   { color: "${component.theme.accent}" }
+```
+
+```python
+cfg["style"].invoke(component=button)  # merged property dict for that component
+```
+
+Strategy fields: `name`, `input_params`, `apply` (inherit-mode), `parse`/`matches`/`specificity`/`merge` (select-mode), `recursive`. Register parametric builders via the same path used internally by `strip_suffix`; `resolve_cascade_strategy(name, arg)` looks up `NAME` or `NAME:ARG`.
+
+---
+
 ## !raw
 
 Mark a scalar value as opaque to all Dracon phases. The string is carried through composition, construction, and lazy resolution without any interpretation. Downstream systems (runtimes, template engines, shells) can evaluate the contents however they like.

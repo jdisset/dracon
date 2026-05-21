@@ -285,16 +285,43 @@ Output: /var/webmon/a1b2c3d4
 
 The non-deferred parts of the config (sites, database, check_interval) load normally. Only the `reporting` subtree waits for the run ID.
 
+## `!live`: variable-level late binding
+
+`!deferred` pauses a whole subtree. Sometimes that's too coarse: you want most of the config to construct normally, but a handful of `${...}` leaves should stay callable against per-call runtime context. `!live` is the variable-axis dual of `!deferred`:
+
+```yaml
+# theme.yaml
+theme: !live component:
+  width: "${component.x * 2}"
+  label: "${component.id}-${component.kind}"
+  static: "fixed"
+```
+
+```python
+import dracon
+
+cfg = dracon.load("theme.yaml")
+
+cfg["theme"]["static"]                          # "fixed" (resolved at load time)
+cfg["theme"]["width"]                           # LazyInterpolable (not resolved)
+cfg["theme"]["width"].invoke(component=button)  # resolves with this binding
+```
+
+Only `${...}` leaves that reference a name in the `!live` scope stay lazy. Everything else resolves normally. `resolve_all_lazy(cfg, except_for={"component"})` resolves every lazy *except* those waiting on `component`.
+
+`dump` re-emits `!live` groups by inspecting `_scope_params` on each leaf, so `loads(dump(cfg))` is a fixed point.
+
 ## Choosing the right tool
 
 | Situation | Use |
 | :-- | :-- |
 | Object depends on other `!define`d variables | Lazy `!define x: !Type { ... }` |
 | Value depends on runtime context | `!deferred` + `.construct(context=...)` |
+| Specific leaves need per-call runtime values, rest constructs normally | `!live name:` + `.invoke(name=v)` |
 | Single field in a Pydantic model needs user-driven late binding | `Resolvable[T]` + `.resolve(context=...)` |
 | Single typed `${...}` value should resolve on attribute access | `Lazy[T]` on a `LazyDraconModel` field |
 
-Start with lazy `!define`. If you find yourself needing to pass in values that don't exist at load time, switch to `!deferred`. If it's just one field in a model, choose between `Resolvable[T]` (explicit user-driven) and `Lazy[T]` (auto-on-access).
+Start with lazy `!define`. If you find yourself needing to pass in values that don't exist at load time, switch to `!deferred` (for whole subtrees) or `!live` (for individual leaves). If it's just one field in a model, choose between `Resolvable[T]` (explicit user-driven) and `Lazy[T]` (auto-on-access).
 
 ## What you've learned
 
