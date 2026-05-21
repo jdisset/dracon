@@ -202,14 +202,14 @@ class LazyInterpolable(Lazy[T]):
     def __setstate__(self, state):
         self.__init__(
             value=state['value'],
-            name=state['name'],
-            current_path=state['current_path'],
-            root_obj=state['root_obj'],
-            init_outermost_interpolations=state['init_outermost_interpolations'],
-            permissive=state['permissive'],
-            engine=state['engine'],
-            context=state['context'],
-            enable_shorthand_vars=state['enable_shorthand_vars'],
+            name=state.get('name'),
+            current_path=state.get('current_path', ROOTPATH),
+            root_obj=state.get('root_obj'),
+            init_outermost_interpolations=state.get('init_outermost_interpolations'),
+            permissive=state.get('permissive', False),
+            engine=state.get('engine', DEFAULT_EVAL_ENGINE),
+            context=state.get('context'),
+            enable_shorthand_vars=state.get('enable_shorthand_vars', True),
             source_context=state.get('source_context'),
             validator=None,
         )

@@ -2133,7 +2133,8 @@ def dracon_program(
                 deferred_paths=cfg['deferred_paths'],
                 context=cfg['context'],
             )
-            return _dispatch_run(instance, prog)
+            result = _dispatch_run(instance, prog)
+            return result if isinstance(result, int) or result is None else 0
 
         @classmethod
         def invoke(cls, *config_files, **context_kwargs):
