@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Jean Disset
 
-from typing import Optional, Any
+from typing import Optional, Any, Callable
 import re
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from enum import Enum
 from dracon.utils import (
     dict_like,
@@ -284,6 +284,8 @@ class MergePriority(Enum):
 
 
 class MergeKey(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     raw: str
 
     # dict mode default is >+
@@ -301,6 +303,10 @@ class MergeKey(BaseModel):
     context_propagation: bool = False  # False (default) or True (with (<) option)
 
     keypath: Optional[str] = None
+
+    # pure-function hook: string keys are normalised before equality. None on a
+    # key means "not in this dialect"; falls back to name-equality.
+    key_normalize: Optional[Callable[[str], Optional[str]]] = Field(default=None, exclude=True)
 
     @staticmethod
     def is_merge_key(key: str) -> bool:
@@ -423,6 +429,12 @@ def merged(existing: Any, new: Any, k: MergeKey = DEFAULT_ADD_TO_CONTEXT_MERGE_K
     _list_replace = k.list_mode == MergeMode.REPLACE
     _list_existing_wins = k.list_priority == MergePriority.EXISTING
     _list_depth = k.list_depth
+    _normalize = k.key_normalize
+
+    def _norm(key):
+        if _normalize is None or not isinstance(key, str):
+            return None
+        return _normalize(key)
 
     def merge_value(v1: Any, v2: Any, depth: int = 0) -> Any:
         if type(v1) is DeferredNode:
@@ -468,20 +480,39 @@ def merged(existing: Any, new: Any, k: MergeKey = DEFAULT_ADD_TO_CONTEXT_MERGE_K
         result_entries = getattr(result, '_entries', None)
         _result_contains = result_entries.__contains__ if result_entries is not None else result.__contains__
 
+        # normalized -> existing key index; built only when hook is active
+        norm_index: Optional[dict] = None
+        if _normalize is not None:
+            norm_index = {}
+            for ek in result.keys():
+                en = _norm(ek)
+                if en is not None:
+                    norm_index[en] = ek
+
         for key, value in other.items():
-            if not _result_contains(key):
+            new_norm = _norm(key) if norm_index is not None else None
+            if new_norm is not None and new_norm in norm_index:
+                target = norm_index[new_norm]
+            elif _result_contains(key):
+                target = key
+            else:
+                target = None
+
+            if target is None:
                 result[key] = value
+                if norm_index is not None and new_norm is not None:
+                    norm_index[new_norm] = key
                 if other_soft and key in other_soft and result_soft is not None:
                     result_soft.add(key)
-            elif pdict_soft and key in pdict_soft and not (other_soft and key in other_soft):
-                result[key] = value
+            elif pdict_soft and target in pdict_soft and not (other_soft and key in other_soft):
+                result[target] = value
                 if result_soft is not None:
-                    result_soft.discard(key)
+                    result_soft.discard(target)
             elif _dict_append:
-                result[key] = (
-                    merge_value(result[key], value, depth + 1)
+                result[target] = (
+                    merge_value(result[target], value, depth + 1)
                     if _existing_wins
-                    else merge_value(value, result[key], depth + 1)
+                    else merge_value(value, result[target], depth + 1)
                 )
         return result
 
