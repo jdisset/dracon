@@ -36,6 +36,8 @@ class ParamSpec:
     annotation: Any = field(default_factory=lambda: _MISSING)
     annotation_name: str | None = None
     docs: str | None = None
+    cli_short: str | None = None
+    cli_hidden: bool = False
 
 
 @dataclass(frozen=True)
@@ -302,9 +304,10 @@ class CallableSymbol:
 
 class _PlainStrategy:
     def interface(self, sym):
-        kind = SymbolKind.TYPE if isinstance(sym._callable, type) else SymbolKind.CALLABLE
-        params = _params_from_callable(sym._callable)
-        ret_anno, ret_name = _return_annotation_from_callable(sym._callable)
+        target = sym._callable
+        kind = SymbolKind.TYPE if isinstance(target, type) else SymbolKind.CALLABLE
+        params = _params_from_model(target) if _is_pydantic_model(target) else _params_from_callable(target)
+        ret_anno, ret_name = _return_annotation_from_callable(target)
         return InterfaceSpec(
             kind=kind, name=sym._name, params=params, source=sym._source,
             return_annotation=ret_anno, return_annotation_name=ret_name,
@@ -521,6 +524,56 @@ def _params_from_callable(obj: Any) -> tuple[ParamSpec, ...]:
                 annotation=anno_obj, annotation_name=anno_name,
             ))
     return tuple(params)
+
+
+def _is_pydantic_model(obj: Any) -> bool:
+    if not isinstance(obj, type):
+        return False
+    try:
+        from pydantic import BaseModel
+    except ImportError:
+        return False
+    return issubclass(obj, BaseModel) and obj is not BaseModel
+
+
+def _params_from_model(model_cls: Any) -> tuple[ParamSpec, ...]:
+    """Walk a pydantic model's fields; surface `Arg(...)` metadata onto ParamSpec.
+
+    Field annotation + default flow into `annotation` / `default`; `Arg(short=...)`
+    / `Arg(help=...)` / `Arg(hidden=...)` flow into `cli_short` / `docs` / `cli_hidden`.
+    """
+    from pydantic_core import PydanticUndefined
+    from dracon.cli_param import CliParam
+
+    out: list[ParamSpec] = []
+    for fname, finfo in model_cls.model_fields.items():
+        anno = finfo.annotation
+        anno_name = format_annotation(anno) if anno is not None else None
+        if finfo.default is PydanticUndefined and finfo.default_factory is None:
+            default: Any = _MISSING
+            required = True
+        else:
+            default = finfo.default if finfo.default is not PydanticUndefined else _MISSING
+            required = False
+        cli_short: str | None = None
+        cli_hidden = False
+        docs: str | None = finfo.description
+        for m in finfo.metadata:
+            if isinstance(m, CliParam):
+                if m.short:
+                    cli_short = m.short
+                if m.hidden:
+                    cli_hidden = True
+                if m.help:
+                    docs = m.help
+                break
+        out.append(ParamSpec(
+            name=fname, required=required, default=default,
+            annotation=anno if anno is not None else _MISSING,
+            annotation_name=anno_name, docs=docs,
+            cli_short=cli_short, cli_hidden=cli_hidden,
+        ))
+    return tuple(out)
 
 
 def _return_annotation_from_callable(obj: Any) -> tuple[Any, str | None]:

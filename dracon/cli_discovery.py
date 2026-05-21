@@ -24,10 +24,45 @@ from dracon.diagnostics import CompositionError, DraconError
 from dracon.interpolation_utils import transform_dollar_vars
 from dracon.loader import DraconLoader, compose_config_from_str
 from dracon.loaders.load_utils import FILE_CONTEXT_KEYS
+from dracon.symbols import MISSING, InterfaceSpec, ParamSpec, SymbolKind
 
 logger = logging.getLogger(__name__)
 
 _BARE_VAR_REF = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}')
+
+# kinds whose params surface as CLI flags. VALUE (lazies, plain values),
+# DEFERRED (construction-time only) carry runtime bindings, not flags.
+_CLI_FLAG_KINDS = frozenset({
+    SymbolKind.TYPE, SymbolKind.CALLABLE,
+    SymbolKind.TEMPLATE, SymbolKind.PIPE,
+})
+
+
+def collect_cli_params(comp_res: CompositionResult, loader: DraconLoader) -> list[CliParam]:
+    """SSOT walker: YAML directives + flag-bearing symbols in the loader's table.
+
+    Symbols whose `interface().kind` is in `_CLI_FLAG_KINDS` contribute one
+    `CliParam` per param. YAML-side directives win on name collision (they
+    are appended last and `_dedupe_last_wins` keeps the final occurrence).
+    """
+    out = _symbol_table_params(loader)
+    out.extend(comp_res.cli_directives)
+    return _dedupe_last_wins(out)
+
+
+def _param_to_cli(p: ParamSpec, iface: InterfaceSpec) -> CliParam:
+    return CliParam(
+        real_name=p.name,
+        source="yaml",
+        target="context",
+        kind="require" if p.required else "set_default",
+        help=p.docs,
+        short=p.cli_short,
+        hidden=p.cli_hidden,
+        default=p.default if p.default is not MISSING else MISSING,
+        arg_type=p.annotation if p.annotation is not MISSING else None,
+        source_context=iface.source,
+    )
 
 
 def discover_cli_directives(
@@ -97,7 +132,10 @@ def discover_cli_directives(
             else:
                 raise
 
-    return _dedupe_last_wins(aggregate)
+    # symbol-table contributions surface once (independent of sources). They
+    # land at the front so yaml-side directives win on name collisions via
+    # last-writer dedup.
+    return _dedupe_last_wins(_symbol_table_params(loader) + aggregate)
 
 
 def _static_scan(
@@ -280,6 +318,34 @@ def _collect_directives(
                 file_ctx = {k: ctx[k] for k in FILE_CONTEXT_KEYS if k in ctx}
                 _scan_node(inner, loader, file_ctx, _seen, out)
 
+    return out
+
+
+def _symbol_table_params(loader: DraconLoader) -> list[CliParam]:
+    """Walk loader's symbol table; yield CliParams for flag-bearing kinds.
+
+    Excludes built-in / dracon-internal symbols (`listdir`, `Path`, `__scope__`,
+    file-context keys, ...) so only user-registered callables, models, and
+    templates contribute flags.
+    """
+    from dracon.symbol_table import _is_user_symbol
+    out: list[CliParam] = []
+    table = getattr(loader, 'symbols', None) or getattr(loader, 'context', None)
+    if table is None or not hasattr(table, 'interface'):
+        return out
+    for name in list(table):
+        if not _is_user_symbol(name):
+            continue
+        try:
+            iface = table.interface(name)
+        except Exception:
+            continue
+        if iface is None or iface.kind not in _CLI_FLAG_KINDS:
+            continue
+        for p in iface.params:
+            if p.cli_hidden:
+                continue
+            out.append(_param_to_cli(p, iface))
     return out
 
 
