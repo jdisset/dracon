@@ -597,7 +597,7 @@ class DraconComposer(Composer):
 # tags whose presence forces post_process work
 _DYN_TAG_PREFIXES: Final = (
     '!include', '!include?', '!define', '!set_default', '!require',
-    '!each', '!if', '!fn', '!pipe', '!deferred', '!assert', '!noconstruct',
+    '!each', '!if', '!live', '!fn', '!pipe', '!deferred', '!assert', '!noconstruct',
     '!returns',
 )
 

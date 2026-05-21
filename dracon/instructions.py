@@ -764,6 +764,64 @@ class SetDefault(Define):
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
+## {{{                           --     live     --
+
+
+class Live(Instruction):
+    """`!live name1, name2: BODY` -- declare runtime parameters in BODY's scope.
+
+    Pushes the listed names onto each descendant's `_live_scope_stack` during
+    composition. Step 03 intersects this stack with `LazyInterpolable._free_names`
+    to populate InterfaceSpec.params, so leaves stay callable instead of
+    resolving eagerly. The `!live` tag itself is stripped after processing.
+
+    Names come from the key value (`!live a, b:` -> key='a, b'); the tag form
+    `!live:` with no names is a valid no-op.
+    """
+
+    NAMES_RE = re.compile(r"^\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*$")
+
+    def __init__(self, names: tuple[str, ...] = ()):
+        self.names = names
+
+    @staticmethod
+    def match(value: Optional[str]) -> Optional['Live']:
+        return Live() if value == '!live' else None
+
+    @ftrace(watch=[])
+    def process(self, comp_res: CompositionResult, path: KeyPath, loader):
+        from dracon.diagnostics import CompositionError
+        key_node, value_node, parent_node = unpack_mapping_key(comp_res, path, 'live')
+
+        raw = (key_node.value or '').strip()
+        if raw:
+            m = Live.NAMES_RE.match(raw)
+            if m is None:
+                raise CompositionError(
+                    f"!live names must be comma-separated identifiers, got {raw!r}",
+                    context=node_source(key_node),
+                )
+            self.names = tuple(n.strip() for n in m.group(1).split(','))
+
+        if self.names:
+            names = self.names
+            def _push(node):
+                existing = getattr(node, '_live_scope_stack', ())
+                node._live_scope_stack = existing + (names,)
+            walk_node(node=value_node, callback=_push)
+
+        # splice body into parent: mapping -> merge entries, otherwise replace
+        del parent_node[str(path[-1])]
+        if isinstance(value_node, DraconMappingNode):
+            for k, v in value_node.items():
+                parent_node.append((k, v))
+        else:
+            comp_res.set_at(path.parent, value_node)
+
+        return comp_res
+
+
+##────────────────────────────────────────────────────────────────────────────}}}
 ## {{{                           --     each     --
 
 
@@ -1370,6 +1428,7 @@ INSTRUCTION_REGISTRY: dict[str, type[Instruction]] = {
     '!set_default': SetDefault,  # backwards compat alias
     '!each': Each,               # note: Each.match uses a regex, handled specially
     '!if': If,
+    '!live': Live,
     '!require': Require,
     '!returns': Returns,
     '!assert': Assert,
