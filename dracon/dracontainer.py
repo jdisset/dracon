@@ -234,6 +234,9 @@ class Dracontainer:
 
     def _handle_lazy(self, name, value):
         if isinstance(value, Lazy) and self._dracon_lazy_resolve:
+            # live lazies declare unresolved scope params; surface them as-is
+            if getattr(value, '_scope_params', None):
+                return value
             value.name = name
             newval = value.get(self, setval=True)
             return newval

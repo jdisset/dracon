@@ -93,6 +93,7 @@ class LazyInterpolable(Lazy[T]):
         context: Optional[Dict[str, Any]] = None,
         enable_shorthand_vars=True,
         source_context=None,
+        source_node=None,
     ):
         super().__init__(value, validator, name)
 
@@ -121,8 +122,17 @@ class LazyInterpolable(Lazy[T]):
         # !live scope to populate _scope_params. interface() exposes the
         # intersected set via InterfaceSpec.params.
         self._free_names: frozenset[str] = self._compute_free_names()
-        self._scope_params: frozenset[str] = frozenset()
+        self._scope_params: frozenset[str] = self._compute_scope_params(source_node)
         self._cached_interface: Optional[InterfaceSpec] = None
+
+    def _compute_scope_params(self, source_node) -> frozenset[str]:
+        if source_node is None or not self._free_names:
+            return frozenset()
+        stack = getattr(source_node, '_live_scope_stack', ())
+        if not stack:
+            return frozenset()
+        declared = {n for frame in stack for n in frame}
+        return self._free_names & frozenset(declared)
 
     def _compute_free_names(self) -> frozenset[str]:
         if not isinstance(self.value, str):
@@ -153,6 +163,13 @@ class LazyInterpolable(Lazy[T]):
         # Symbol-protocol kwargs are foreground: they override the snapshotted
         # authoring context. resolve()'s context_override has the opposite
         # priority (override is background), so layer kwargs on top here.
+        if self._scope_params:
+            missing = self._scope_params - kwargs.keys()
+            if missing:
+                raise InterpolationError(
+                    f"missing live scope parameters: {sorted(missing)}",
+                    context=self.source_context, expression=self.value,
+                )
         if not kwargs:
             return self.resolve()
         merged = {**self.context, **kwargs}
@@ -183,6 +200,7 @@ class LazyInterpolable(Lazy[T]):
             'enable_shorthand_vars': self.enable_shorthand_vars,
             'source_context': self.source_context,
             'init_outermost_interpolations': self.init_outermost_interpolations or None,
+            'scope_params': self._scope_params,
         }
         state['root_obj'] = self.root_obj if hasattr(self.root_obj, '__getstate__') else None
         return state
@@ -201,6 +219,10 @@ class LazyInterpolable(Lazy[T]):
             source_context=state.get('source_context'),
             validator=None,
         )
+        sp = state.get('scope_params')
+        if sp:
+            self._scope_params = frozenset(sp)
+            self._cached_interface = None
 
     def __repr__(self):
         return f"LazyInterpolable({self.value})"
@@ -543,6 +565,15 @@ def collect_lazy_by_depth(obj, path=ROOTPATH, seen=None):
     return lazy_keys_by_depth, lazy_values
 
 
+def _should_skip_lazy(lazy, except_for) -> bool:
+    sp = getattr(lazy, '_scope_params', None)
+    if not sp:
+        return False
+    if except_for is None:
+        return True
+    return bool(sp & frozenset(except_for))
+
+
 def resolve_all_lazy(
     obj,
     root_obj=None,
@@ -551,13 +582,22 @@ def resolve_all_lazy(
     context_override=None,
     max_passes=20,
     permissive: bool = False,
+    except_for=None,
 ):
-    """Resolves all lazy objects in a multi-pass approach by depth level."""
+    """Resolves all lazy objects in a multi-pass approach by depth level.
+
+    `except_for`: when `None` (default), any lazy whose `_scope_params` is
+    non-empty stays unresolved. When a set, a lazy stays lazy iff its
+    `_scope_params` intersects `except_for`. An empty set resolves
+    everything (no live skip).
+    """
     if visited_ids is None:
         visited_ids = set()
 
     if not (dict_like(obj) or list_like(obj) or isinstance(obj, BaseModel)):
         if isinstance(obj, LazyInterpolable):
+            if _should_skip_lazy(obj, except_for):
+                return obj
             # if the root object itself is lazy
             if root_obj is None:
                 root_obj = obj  # Set root_obj if None
@@ -618,6 +658,8 @@ def resolve_all_lazy(
                 f"Keys to resolve in pass {pass_num}: {[p for p, k in all_keys_to_resolve]}"
             )
             for path, key in all_keys_to_resolve:
+                if _should_skip_lazy(key, except_for):
+                    continue
                 # Adjust path based on previous transformations in this pass
                 adjusted_path_str = str(path)
                 for old_prefix, new_prefix in transformed_paths.items():
@@ -645,6 +687,8 @@ def resolve_all_lazy(
         values_resolved_this_pass = 0
         logger.debug(f"Values to resolve in pass {pass_num}: {[p for p, v in lazy_values]}")
         for path, value in lazy_values:
+            if _should_skip_lazy(value, except_for):
+                continue
             # Adjust path based on key transformations in this pass
             adjusted_path_str = str(path)
             for old_prefix, new_prefix in transformed_paths.items():
@@ -671,20 +715,20 @@ def resolve_all_lazy(
                     key_str = k.value if isinstance(k, LazyInterpolable) else str(k)
                     child_path = current_path + key_str
                     obj[k] = resolve_all_lazy(
-                        v, root_obj, child_path, visited_ids, context_override, max_passes, permissive=permissive
+                        v, root_obj, child_path, visited_ids, context_override, max_passes, permissive=permissive, except_for=except_for
                     )
             elif list_like(obj) and not isinstance(obj, (str, bytes)):
                 for i, item in enumerate(list(obj)):  # iterate copy
                     child_path = current_path + str(i)
                     obj[i] = resolve_all_lazy(
-                        item, root_obj, child_path, visited_ids, context_override, max_passes, permissive=permissive
+                        item, root_obj, child_path, visited_ids, context_override, max_passes, permissive=permissive, except_for=except_for
                     )
             elif isinstance(obj, BaseModel):
                 for field_name in list(obj.model_fields_set):  # iterate copy
                     child_path = current_path + field_name
                     current_val = getattr(obj, field_name)
                     resolved_val = resolve_all_lazy(
-                        current_val, root_obj, child_path, visited_ids, context_override, max_passes, permissive=permissive
+                        current_val, root_obj, child_path, visited_ids, context_override, max_passes, permissive=permissive, except_for=except_for
                     )
                     try:
                         setattr(obj, field_name, resolved_val)

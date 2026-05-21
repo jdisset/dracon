@@ -6,7 +6,7 @@ from ruamel.yaml.nodes import MappingNode, ScalarNode, SequenceNode, Node
 from ruamel.yaml.tag import Tag
 from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
-from dracon.utils import make_hashable
+from dracon.utils import make_hashable, raw_items, list_like, dict_like
 from dracon.resolvable import Resolvable
 from dracon.deferred import DeferredNode
 from dracon.interpolation import InterpolableNode
@@ -35,6 +35,53 @@ logger = logging.getLogger(__name__)
 
 
 _DEFAULT_TAGS = frozenset({DEFAULT_MAP_TAG, DEFAULT_SEQ_TAG, DEFAULT_SCALAR_TAG, '!'})
+
+
+def _collect_scope_params(value, seen=None) -> frozenset[str]:
+    """union of `_scope_params` over LazyInterpolable descendants."""
+    if seen is None:
+        seen = set()
+    if id(value) in seen:
+        return frozenset()
+    seen.add(id(value))
+    if isinstance(value, LazyInterpolable):
+        return getattr(value, '_scope_params', None) or frozenset()
+    if isinstance(value, str):
+        return frozenset()
+    if dict_like(value):
+        out: set[str] = set()
+        for _, v in raw_items(value):
+            out |= _collect_scope_params(v, seen)
+        return frozenset(out)
+    if list_like(value) and not isinstance(value, (bytes,)):
+        out = set()
+        for item in value:
+            out |= _collect_scope_params(item, seen)
+        return frozenset(out)
+    return frozenset()
+
+
+def _group_by_live_scope(items):
+    """Group mapping items by their descendant `_scope_params` union.
+
+    Returns `None` if no item carries live scope params (caller can skip
+    the live-aware emit path). Otherwise returns a list of
+    `(sp_tuple | None, [(k, v), ...])` in original-item order, where
+    consecutive items with the same scope-params signature are merged
+    into one group. `sp_tuple` is `None` for ungrouped items.
+    """
+    groups: list = []
+    any_live = False
+    for k, v in items:
+        sp = _collect_scope_params(v)
+        key = tuple(sorted(sp)) if sp else None
+        if key is not None:
+            any_live = True
+        if groups and groups[-1][0] == key:
+            groups[-1][1].append((k, v))
+        else:
+            groups.append((key, [(k, v)]))
+    return groups if any_live else None
 
 
 def _is_default_tag(tag: Any) -> bool:
@@ -180,7 +227,33 @@ class DraconRepresenter(RoundTripRepresenter):
         return self.represent_scalar('tag:yaml.org,2002:str', data, style=style)
 
     def represent_dracon_mapping(self, data: DraconMapping) -> Node:
-        return self.represent_mapping(DEFAULT_MAP_TAG, data._data)
+        items = list(raw_items(data))
+        grouped = _group_by_live_scope(items)
+        if grouped is None:
+            return self.represent_mapping(DEFAULT_MAP_TAG, data._data)
+        return self._represent_live_grouped_mapping(grouped)
+
+    def _represent_live_grouped_mapping(self, grouped) -> DraconMappingNode:
+        # grouped: list of (scope_params_tuple_or_None, [(k, v), ...])
+        value: list = []
+        node = DraconMappingNode(DEFAULT_MAP_TAG, value)
+        if self.alias_key is not None:
+            self.represented_objects[make_hashable(self.alias_key)] = node
+        for sp, pairs in grouped:
+            if sp is None:
+                for k, v in pairs:
+                    value.append((self.represent_data(k), self.represent_data(v)))
+            else:
+                inner_value: list = []
+                inner = DraconMappingNode(DEFAULT_MAP_TAG, inner_value)
+                for k, v in pairs:
+                    inner_value.append((self.represent_data(k), self.represent_data(v)))
+                inner._recompute_map()
+                key_node = self.represent_scalar(DEFAULT_SCALAR_TAG, ', '.join(sp))
+                key_node.tag = '!live'
+                value.append((key_node, inner))
+        node._recompute_map()
+        return node
 
     def represent_dracon_sequence(self, data: DraconSequence) -> Node:
         return self.represent_sequence(DEFAULT_SEQ_TAG, data._data)

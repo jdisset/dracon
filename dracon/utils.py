@@ -624,9 +624,10 @@ def make_hashable(obj: Any) -> Hashable:
     except TypeError:
         pass
 
-    # Handle mappings (dict-like objects)
+    # Handle mappings (dict-like objects). use raw_items so lazy values
+    # aren't resolved while computing dump-side alias keys.
     if isinstance(obj, Mapping):
-        items = sorted((make_hashable(k), make_hashable(v)) for k, v in obj.items())
+        items = sorted((make_hashable(k), make_hashable(v)) for k, v in raw_items(obj))
         return frozenset(items)
 
     # Handle sequences (list-like objects)
