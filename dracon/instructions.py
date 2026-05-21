@@ -1424,9 +1424,7 @@ class Cascade(Instruction):
             _replace(PyValueNode(strategy.apply(tree), label=f'cascade:{strategy.name}'))
             return comp_res
 
-        # select-mode: push live scope on the deepcopy BEFORE materialising;
-        # __deepcopy__ doesn't carry `_live_scope_stack` so the push lives on
-        # the body we actually feed to load_composition_result
+        # __deepcopy__ drops _live_scope_stack, so push it back on before materialising
         names = strategy.input_params
         body = deepcopy(subject)
         def _push(node):

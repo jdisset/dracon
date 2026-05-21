@@ -30,8 +30,7 @@ logger = logging.getLogger(__name__)
 
 _BARE_VAR_REF = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}')
 
-# kinds whose params surface as CLI flags. VALUE (lazies, plain values),
-# DEFERRED (construction-time only) carry runtime bindings, not flags.
+# kinds whose params surface as cli flags; VALUE/DEFERRED carry runtime bindings, not flags
 _CLI_FLAG_KINDS = frozenset({
     SymbolKind.TYPE, SymbolKind.CALLABLE,
     SymbolKind.TEMPLATE, SymbolKind.PIPE,
@@ -132,9 +131,7 @@ def discover_cli_directives(
             else:
                 raise
 
-    # symbol-table contributions surface once (independent of sources). They
-    # land at the front so yaml-side directives win on name collisions via
-    # last-writer dedup.
+    # symbol-table params go at the front so yaml directives win the dedup
     return _dedupe_last_wins(_symbol_table_params(loader) + aggregate)
 
 

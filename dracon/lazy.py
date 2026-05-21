@@ -117,10 +117,6 @@ class LazyInterpolable(Lazy[T]):
             assert isinstance(value, (str, tuple)), (
                 f"LazyInterpolable expected string, got {type(value)}. Did you mean to contruct with permissive=True?"
             )
-        # symbol-axis metadata: free names referenced by ${...} interpolations.
-        # populated once at construction; step 03 intersects with the active
-        # !live scope to populate _scope_params. interface() exposes the
-        # intersected set via InterfaceSpec.params.
         self._free_names: frozenset[str] = self._compute_free_names()
         self._scope_params: frozenset[str] = self._compute_scope_params(source_node)
         self._cached_interface: Optional[InterfaceSpec] = None
@@ -160,9 +156,7 @@ class LazyInterpolable(Lazy[T]):
         return self._cached_interface
 
     def invoke(self, **kwargs):
-        # Symbol-protocol kwargs are foreground: they override the snapshotted
-        # authoring context. resolve()'s context_override has the opposite
-        # priority (override is background), so layer kwargs on top here.
+        # kwargs are foreground; resolve()'s context_override is background, so layer here
         if self._scope_params:
             missing = self._scope_params - kwargs.keys()
             if missing:

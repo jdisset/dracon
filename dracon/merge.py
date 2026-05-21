@@ -304,8 +304,7 @@ class MergeKey(BaseModel):
 
     keypath: Optional[str] = None
 
-    # pure-function hook: string keys are normalised before equality. None on a
-    # key means "not in this dialect"; falls back to name-equality.
+    # normalises string keys before equality; None on a key falls back to name-equality
     key_normalize: Optional[Callable[[str], Optional[str]]] = Field(default=None, exclude=True)
 
     @staticmethod
