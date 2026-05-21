@@ -5,13 +5,15 @@
 
 from __future__ import annotations
 
+import copy
 import inspect
+import re
 import typing
 import ast
 import builtins
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Literal, Protocol, TypeVar, runtime_checkable
+from typing import Any, Callable, Literal, Protocol, TypeVar, runtime_checkable
 
 T = TypeVar("T")
 
@@ -502,6 +504,7 @@ def _params_from_callable(obj: Any) -> tuple[ParamSpec, ...]:
     sig = _signature(obj)
     if sig is None:
         return ()
+    docs_map = _docstring_param_docs(obj)
     params = []
     for name, p in sig.parameters.items():
         if p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD):
@@ -513,17 +516,111 @@ def _params_from_callable(obj: Any) -> tuple[ParamSpec, ...]:
         else:
             anno_obj = anno
             anno_name = format_annotation(anno)
+        docs = docs_map.get(name)
         if p.default is p.empty:
             params.append(ParamSpec(
                 name=name, required=True,
-                annotation=anno_obj, annotation_name=anno_name,
+                annotation=anno_obj, annotation_name=anno_name, docs=docs,
             ))
         else:
+            default_val = copy.deepcopy(p.default) if isinstance(p.default, (list, dict, set)) else p.default
             params.append(ParamSpec(
-                name=name, required=False, default=p.default,
-                annotation=anno_obj, annotation_name=anno_name,
+                name=name, required=False, default=default_val,
+                annotation=anno_obj, annotation_name=anno_name, docs=docs,
             ))
     return tuple(params)
+
+
+_NUMPY_HEADER_RE = re.compile(r'^[ \t]*(Parameters|Args|Arguments)\s*[:\n]', re.MULTILINE)
+_GOOGLE_PARAM_RE = re.compile(r'^[ \t]*([A-Za-z_]\w*)\s*(?:\([^)]*\))?\s*:\s*(.*)$')
+
+
+def _docstring_param_docs(obj: Any) -> dict[str, str]:
+    """Per-parameter help text harvested from numpy- or google-style docstrings.
+
+    Numpy: ``name : type`` header line followed by indented description.
+    Google: ``name (type): description`` on one line, optionally continued.
+    Returns ``{}`` on no docstring or unrecognised shape.
+    """
+    doc = inspect.getdoc(obj) or ""
+    match = _NUMPY_HEADER_RE.search(doc)
+    if not match:
+        return {}
+    body = doc[match.end():]
+    # numpy puts a `----` underline below the header; skip it if present
+    lines = body.lstrip('\n').splitlines()
+    if lines and set(lines[0].strip()) <= {'-'}:
+        lines = lines[1:]
+    out: dict[str, str] = {}
+    current: str | None = None
+    desc: list[str] = []
+    base_indent: int | None = None
+    for raw in lines:
+        if not raw.strip():
+            if current is not None and desc:
+                desc.append('')
+            continue
+        indent = len(raw) - len(raw.lstrip())
+        if base_indent is None:
+            base_indent = indent
+        # dedent ends the parameters block
+        if indent < base_indent:
+            break
+        m = _GOOGLE_PARAM_RE.match(raw)
+        if m and indent == base_indent:
+            if current is not None:
+                out[current] = '\n'.join(desc).strip()
+            current = m.group(1)
+            tail = m.group(2).strip()
+            desc = [tail] if tail else []
+        elif current is not None:
+            desc.append(raw.strip())
+    if current is not None:
+        out[current] = '\n'.join(desc).strip()
+    return {k: v for k, v in out.items() if v}
+
+
+def register_template(
+    fn: Callable | type,
+    *,
+    name: str | None = None,
+    loader: Any | None = None,
+    allow_extras: bool = False,
+) -> CallableSymbol:
+    """Register a Python callable as a typed `!fn:`-invocable symbol.
+
+    Equivalent to ``loader.context[name] = fn`` (which already builds a typed
+    ``CallableSymbol``), with three policy adds: ``*args`` is rejected,
+    ``**kwargs`` is opt-in via ``allow_extras=True``, and ``name`` overrides
+    the callable's ``__name__``. Re-registration replaces the prior entry.
+    """
+    sig = _signature(fn)
+    if sig is None:
+        raise ValueError(f"register_template: cannot introspect {fn!r}")
+    for p in sig.parameters.values():
+        if p.kind is inspect.Parameter.VAR_POSITIONAL:
+            raise ValueError(
+                f"register_template: {fn!r} has *args; templates only support kwargs"
+            )
+        if p.kind is inspect.Parameter.VAR_KEYWORD and not allow_extras:
+            raise ValueError(
+                f"register_template: {fn!r} has **kwargs; "
+                f"pass allow_extras=True to permit unknown kwargs"
+            )
+    effective_name = name or getattr(fn, '__name__', None)
+    if not effective_name:
+        raise ValueError(f"register_template: cannot derive a name from {fn!r}")
+    try:
+        src_file = inspect.getsourcefile(fn)
+        src_line = inspect.getsourcelines(fn)[1]
+        source = SymbolSourceInfo(file_path=src_file, line=src_line)
+    except (TypeError, OSError):
+        source = None
+    sym = CallableSymbol(fn, name=effective_name, source=source)
+    if loader is not None:
+        from dracon.symbol_table import SymbolEntry
+        loader.context.define(SymbolEntry(name=effective_name, symbol=sym, canonical=False))
+    return sym
 
 
 def _is_pydantic_model(obj: Any) -> bool:

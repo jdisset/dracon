@@ -35,6 +35,7 @@ import types
 from pathlib import Path
 from typing import Any, Iterable
 
+import inspect
 from dracon.nodes import DraconScalarNode, DraconMappingNode
 
 
@@ -61,6 +62,27 @@ class PyValueNode(DraconScalarNode):
     def __setstate__(self, state):
         self.py_value = state.pop('py_value', None)
         super().__setstate__(state)
+
+    def __getitem__(self, key):
+        # virtual selectors for `!include py:fn@defaults`
+        if key == 'defaults':
+            return _defaults_mapping_node(self.py_value)
+        raise KeyError(key)
+
+
+def _defaults_mapping_node(obj):
+    """Synthetic mapping node carrying a callable's default kwargs."""
+    try:
+        sig = inspect.signature(obj)
+    except (TypeError, ValueError) as e:
+        raise KeyError(f"@defaults: {obj!r} has no inspectable signature ({e})")
+    pairs = []
+    for name, p in sig.parameters.items():
+        if p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD) or p.default is p.empty:
+            continue
+        key_node = DraconScalarNode(tag='tag:yaml.org,2002:str', value=name)
+        pairs.append((key_node, PyValueNode(p.default, label=f"{name}=...")))
+    return DraconMappingNode(tag='tag:yaml.org,2002:map', value=pairs)
 
 
 def _short_repr(value: Any) -> str:

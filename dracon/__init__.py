@@ -80,6 +80,7 @@ from dracon.symbols import (
     ValueSymbol,
     CallableSymbol,
     auto_symbol,
+    register_template,
 )
 from dracon.symbol_table import (
     SymbolEntry,
