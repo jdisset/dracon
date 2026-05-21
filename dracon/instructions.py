@@ -1363,6 +1363,88 @@ class Returns(Instruction):
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
+## {{{                          --     cascade     --
+
+
+class Cascade(Instruction):
+    """`!cascade:NAME MAPPING` or `!cascade:NAME(ARG) MAPPING` -- interpret
+    MAPPING via a registered dialect.
+
+    Inherit-mode strategies (empty `input_params`) run at compose time:
+    `strategy.apply(tree)` transforms the body to a plain dict.
+
+    Select-mode strategies (non-empty `input_params`) construct a
+    `CallableSymbol` of kind 'match'. Each `input_param` implicitly opens
+    a `!live` scope over the body so `${name.x}` leaves stay callable.
+    """
+
+    PATTERN = re.compile(r'^!cascade:([A-Za-z_]\w*)(?:\(([^)]+)\))?$')
+
+    def __init__(self, name: str, arg: str | None = None):
+        self.name = name
+        self.arg = arg
+
+    @staticmethod
+    def match(value: Optional[str]) -> Optional['Cascade']:
+        if not value:
+            return None
+        m = Cascade.PATTERN.match(value)
+        return Cascade(name=m.group(1), arg=m.group(2)) if m else None
+
+    @ftrace(watch=[])
+    def process(self, comp_res: CompositionResult, path: KeyPath, loader):
+        from dracon.cascade import resolve_cascade_strategy
+        from dracon.symbols import CallableSymbol
+        from dracon.loaders.py import PyValueNode
+        from dracon.nodes import node_source as _node_source
+
+        # tag can sit on a mapping key (`!cascade:NAME body:`) or on a value
+        # (`key: !cascade:NAME ...`); unify both into (subject_node, replace_fn)
+        target_node = path.get_obj(comp_res.root)
+        if path.is_mapping_key():
+            _, value_node, parent_node = unpack_mapping_key(comp_res, path, 'cascade')
+            target_node.tag = 'tag:yaml.org,2002:str'
+            subject = value_node
+            source_ctx = _node_source(target_node)
+            def _replace(new_node):
+                parent_node[str(path[-1])] = new_node
+        else:
+            subject = target_node
+            subject.tag = 'tag:yaml.org,2002:map'
+            source_ctx = _node_source(subject)
+            def _replace(new_node):
+                comp_res.set_at(path, new_node)
+
+        strategy = resolve_cascade_strategy(self.name, self.arg)
+
+        if strategy.is_inherit():
+            tree = loader.load_composition_result(
+                CompositionResult(root=deepcopy(subject)), post_process=True,
+            )
+            _replace(PyValueNode(strategy.apply(tree), label=f'cascade:{strategy.name}'))
+            return comp_res
+
+        # select-mode: push live scope on the deepcopy BEFORE materialising;
+        # __deepcopy__ doesn't carry `_live_scope_stack` so the push lives on
+        # the body we actually feed to load_composition_result
+        names = strategy.input_params
+        body = deepcopy(subject)
+        def _push(node):
+            existing = getattr(node, '_live_scope_stack', ())
+            node._live_scope_stack = existing + (names,)
+        walk_node(node=body, callback=_push)
+
+        rule_tree = loader.load_composition_result(
+            CompositionResult(root=body), post_process=True,
+        )
+        sym = CallableSymbol.from_match(
+            rule_tree, strategy, loader=loader, source=source_ctx, name=strategy.name,
+        )
+        _replace(PyValueNode(sym, label=f'cascade:{strategy.name}'))
+        return comp_res
+
+
+##────────────────────────────────────────────────────────────────────────────}}}
 ## {{{                          --     assert     --
 
 
@@ -1432,6 +1514,7 @@ INSTRUCTION_REGISTRY: dict[str, type[Instruction]] = {
     '!require': Require,
     '!returns': Returns,
     '!assert': Assert,
+    '!cascade': Cascade,         # regex-matched; covers !cascade:NAME and !cascade:NAME(ARG)
 }
 
 

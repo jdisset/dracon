@@ -28,6 +28,7 @@ class SymbolKind(str, Enum):
     TEMPLATE = "template"
     PIPE = "pipe"
     DEFERRED = "deferred"
+    DISPATCH = "dispatch"  # runtime-keyed callable (cascade match symbols)
 
 
 @dataclass(frozen=True)
@@ -108,7 +109,7 @@ class ValueSymbol:
 
 # ── strategy registry ────────────────────────────────────────────────────────
 
-CallableKind = Literal['plain', 'template', 'partial', 'pipe']
+CallableKind = Literal['plain', 'template', 'partial', 'pipe', 'match']
 
 
 class CallableStrategy(Protocol):
@@ -150,6 +151,8 @@ class CallableSymbol:
         '_cached_params',
         # pipe
         '_stages', '_stage_kwargs',
+        # match (cascade select-mode)
+        '_cascade_strategy', '_rule_tree',
     )
 
     def __init__(
@@ -172,6 +175,8 @@ class CallableSymbol:
         self._cached_params = None
         self._stages = None
         self._stage_kwargs = None
+        self._cascade_strategy = None
+        self._rule_tree = None
 
     # ── factory methods ─────────────────────────────────────────────────
 
@@ -195,6 +200,8 @@ class CallableSymbol:
         sym._cached_params = None
         sym._stages = None
         sym._stage_kwargs = None
+        sym._cascade_strategy = None
+        sym._rule_tree = None
         return sym
 
     @classmethod
@@ -215,6 +222,8 @@ class CallableSymbol:
         sym._cached_params = None
         sym._stages = None
         sym._stage_kwargs = None
+        sym._cascade_strategy = None
+        sym._rule_tree = None
         return sym
 
     @classmethod
@@ -235,6 +244,32 @@ class CallableSymbol:
         sym._cached_params = None
         sym._stages = tuple(stages)
         sym._stage_kwargs = tuple(stage_kwargs)
+        sym._cascade_strategy = None
+        sym._rule_tree = None
+        return sym
+
+    @classmethod
+    def from_match(cls, rule_tree: Any, strategy: Any, *,
+                   loader: Any = None, source: Any = None,
+                   name: str | None = None) -> "CallableSymbol":
+        sym = cls.__new__(cls)
+        sym._kind = 'match'
+        sym._name = name or strategy.name
+        sym._source = source
+        sym._cached_interface = None
+        sym._callable = None
+        sym._func_path = None
+        sym._kwargs = None
+        sym._template_node = None
+        sym._loader = loader
+        sym._file_context = None
+        sym._call_depth = 0
+        sym._has_return = False
+        sym._cached_params = None
+        sym._stages = None
+        sym._stage_kwargs = None
+        sym._cascade_strategy = strategy
+        sym._rule_tree = rule_tree
         return sym
 
     # ── Symbol protocol (dispatched) ────────────────────────────────────
@@ -348,6 +383,8 @@ class _PlainStrategy:
         clone._cached_params = None
         clone._stages = None
         clone._stage_kwargs = None
+        clone._cascade_strategy = None
+        clone._rule_tree = None
         return clone
 
 
@@ -397,6 +434,8 @@ class _PartialStrategy:
         clone._cached_params = None
         clone._stages = None
         clone._stage_kwargs = None
+        clone._cascade_strategy = None
+        clone._rule_tree = None
         return clone
 
 

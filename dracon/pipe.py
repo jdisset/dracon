@@ -117,6 +117,8 @@ class _PipeStrategy:
         clone._call_depth = 0
         clone._has_return = False
         clone._cached_params = None
+        clone._cascade_strategy = None
+        clone._rule_tree = None
         return clone
 
 

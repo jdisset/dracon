@@ -142,6 +142,8 @@ class _TemplateStrategy:
         clone._kwargs = None
         clone._stages = None
         clone._stage_kwargs = None
+        clone._cascade_strategy = None
+        clone._rule_tree = None
         return clone
 
 

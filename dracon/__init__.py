@@ -25,7 +25,13 @@ from dracon.cli_param import CliParam, Arg
 from dracon.commandline import ConfigFile, HelpSection, Program, make_program, dracon_program, Subcommand, subcommand
 from dracon.resolvable import Resolvable
 from dracon.merge import MergeKey
-from dracon.cascade import cascade_inherit
+from dracon.cascade import (
+    cascade_inherit,
+    CascadeStrategy,
+    register_cascade_strategy,
+    get_cascade_strategy,
+    resolve_cascade_strategy,
+)
 from dracon.draconstructor import Draconstructor
 from dracon.keypath import KeyPath
 from dracon.composer import (
