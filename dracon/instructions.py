@@ -1501,6 +1501,151 @@ class Assert(Instruction):
 
 
 ##────────────────────────────────────────────────────────────────────────────}}}
+## {{{                          --     import     --
+
+
+def _parse_import_selector(value_node, key_node):
+    from dracon.diagnostics import CompositionError
+    if isinstance(value_node, DraconMappingNode):
+        out: dict[str, str] = {}
+        for kn, vn in value_node.value:
+            src = getattr(kn, 'value', None)
+            alias = getattr(vn, 'value', None)
+            if not isinstance(src, str) or not isinstance(alias, str):
+                raise CompositionError(
+                    "!import alias body must be a {src: alias} mapping of strings",
+                    context=node_source(key_node),
+                )
+            out[src] = alias
+        return out
+    if isinstance(value_node, DraconSequenceNode):
+        names: list[str] = []
+        for vn in value_node.value:
+            n = getattr(vn, 'value', None)
+            if not isinstance(n, str):
+                raise CompositionError(
+                    "!import name list must be strings",
+                    context=node_source(key_node),
+                )
+            names.append(n)
+        return names
+    # scalar: null or empty -> wildcard
+    val = getattr(value_node, 'value', None)
+    tag = getattr(value_node, 'tag', None)
+    if val in (None, '') or tag == 'tag:yaml.org,2002:null':
+        return None
+    raise CompositionError(
+        f"!import body must be null (wildcard), a name list, or {{src: alias}} mapping",
+        context=node_source(key_node),
+    )
+
+
+def _resolve_import_namespace(ref: str, loader, source) -> dict[str, Any]:
+    """Resolve `ref` to {public_name: value}.
+
+    Bare paths default to `py:`. `py:` paths short-circuit to the importlib
+    layer (cheap, no compose). Other schemes go through the normal include
+    pipeline and harvest `!define`-bound names from the composed result.
+    """
+    from dracon.diagnostics import CompositionError
+    if ':' not in ref:
+        ref = f'py:{ref}'
+    scheme, path = ref.split(':', 1)
+    if scheme == 'py':
+        import types as _types
+        from dracon.loaders.py import resolve_py_reference, _public_names
+        try:
+            obj = resolve_py_reference(path)
+        except (ImportError, FileNotFoundError, AttributeError) as e:
+            raise CompositionError(f"!import {ref}: {e}", context=source) from e
+        if isinstance(obj, _types.ModuleType):
+            ns = {}
+            for n in _public_names(obj):
+                if hasattr(obj, n):
+                    ns[n] = getattr(obj, n)
+            return ns
+        # single-symbol path: bind under its last segment
+        last = path.rsplit('.', 1)[-1] if '.' in path else path
+        return {last: obj}
+    from dracon.include import compose_from_include_str
+    try:
+        comp = compose_from_include_str(loader, ref)
+    except Exception as e:
+        raise CompositionError(f"!import {ref}: {e}", context=source) from e
+    return dict(comp.defined_vars)
+
+
+class Import(Instruction):
+    """`!import <ref>: <selector>` -- bulk-bind names from a Python module
+    or YAML vocab into the current document scope.
+
+    Selector:
+      - null/empty: wildcard (module __all__ or non-_ attributes)
+      - sequence of strings: explicit names
+      - mapping {src: alias}: renamed names
+
+    Collision rule: existing names win. !import is purely additive.
+    """
+
+    @staticmethod
+    def match(value: Optional[str]) -> Optional['Import']:
+        return Import() if value == '!import' else None
+
+    @ftrace(watch=[])
+    def process(self, comp_res: CompositionResult, path: KeyPath, loader):
+        from dracon.diagnostics import CompositionError
+        key_node, value_node, parent_node = unpack_mapping_key(comp_res, path, 'import')
+
+        ref = (key_node.value or '').strip()
+        if not ref:
+            raise CompositionError(
+                "!import requires a module/file path",
+                context=node_source(key_node),
+            )
+
+        selector = _parse_import_selector(value_node, key_node)
+        namespace = _resolve_import_namespace(ref, loader, node_source(key_node))
+
+        if selector is None:
+            imports = namespace
+        else:
+            wanted = selector if isinstance(selector, list) else list(selector.keys())
+            missing = [n for n in wanted if n not in namespace]
+            if missing:
+                available = ', '.join(sorted(namespace)) or '<none>'
+                raise CompositionError(
+                    f"!import {ref}: name(s) {missing!r} not found. Available: {available}",
+                    context=node_source(key_node),
+                )
+            if isinstance(selector, list):
+                imports = {n: namespace[n] for n in selector}
+            else:
+                imports = {alias: namespace[src] for src, alias in selector.items()}
+
+        del parent_node[str(path[-1])]
+
+        def _add(node):
+            ctx = getattr(node, 'context', None)
+            if ctx is None:
+                add_to_context(dict(imports), node)
+                return
+            for alias, value in imports.items():
+                if alias in ctx:
+                    continue
+                ctx[alias] = value
+                sk = getattr(ctx, '_soft_keys', None)
+                if sk is not None:
+                    sk.discard(alias)
+
+        walk_node(node=parent_node, callback=_add)
+
+        for alias, value in imports.items():
+            comp_res.defined_vars.setdefault(alias, value)
+
+        return comp_res
+
+
+##────────────────────────────────────────────────────────────────────────────}}}
 
 INSTRUCTION_REGISTRY: dict[str, type[Instruction]] = {
     '!define': Define,
@@ -1513,6 +1658,7 @@ INSTRUCTION_REGISTRY: dict[str, type[Instruction]] = {
     '!returns': Returns,
     '!assert': Assert,
     '!cascade': Cascade,         # regex-matched; covers !cascade:NAME and !cascade:NAME(ARG)
+    '!import': Import,
 }
 
 

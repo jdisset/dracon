@@ -598,7 +598,7 @@ class DraconComposer(Composer):
 _DYN_TAG_PREFIXES: Final = (
     '!include', '!include?', '!define', '!set_default', '!require',
     '!each', '!if', '!live', '!fn', '!pipe', '!deferred', '!assert', '!noconstruct',
-    '!returns', '!cascade',
+    '!returns', '!cascade', '!import',
 )
 
 # tags whose post_process effect reads outer loader.context. `!define`
@@ -607,7 +607,7 @@ _DYN_TAG_PREFIXES: Final = (
 # scope.
 _CTX_DEPENDENT_TAG_PREFIXES: Final = (
     '!each', '!if', '!fn', '!pipe', '!require', '!assert',
-    '!define', '!define?', '!set_default', '!cascade',
+    '!define', '!define?', '!set_default', '!cascade', '!import',
 )
 
 

@@ -8,13 +8,14 @@ All instruction tags recognized during composition. Tags are processed on YAML m
 
 1. `!set_default` / `!define?` -- soft variable definitions
 2. `!define` -- hard variable definitions
-3. `!each` -- loop expansion
-4. `!if` -- conditional inclusion
+3. `!import` -- bulk name bindings from a module or vocab
+4. `!each` -- loop expansion
+5. `!if` -- conditional inclusion
 
 After all instructions:
 
-5. `!require` -- checked for unsatisfied requirements
-6. `!assert` -- evaluated in a separate pass
+6. `!require` -- checked for unsatisfied requirements
+7. `!assert` -- evaluated in a separate pass
 
 `!include`, `!deferred`, `!raw`, `!noconstruct`, and `!unset` are handled by the composition pipeline directly, not by the instruction registry.
 
@@ -108,6 +109,79 @@ contracts of the template they belong to.
 
 See [CLI flags from config layers](cli-api.md#cli-flags-from-config-layers)
 for the precedence rules and the `++` fallback.
+
+---
+
+## !import
+
+Bulk-bind names from a Python module or YAML vocab into the current document scope. Equivalent to many `!define`s collapsed into a single line.
+
+```yaml
+!import dracon.tests.test_py_scheme_helper:
+
+result: ${add(a=2, b=3)}
+h: !Helper { n: 1, label: x }
+```
+
+Bare paths default to the `py:` scheme. Explicit schemes work the same as `!include` (`py:`, `pkg:`, `file:`).
+
+### Wildcard form
+
+`!import <ref>:` (null body) imports the module's public surface — `__all__` if defined, otherwise non-`_`-prefixed attributes.
+
+```yaml
+!import mypkg.vocab:
+```
+
+### Selective form
+
+A sequence of names imports only those — and surfaces a clear error listing the available names if any are missing.
+
+```yaml
+!import mypkg.vocab: [CircuitPanel, MVPNetworkPanel, build_row]
+```
+
+### Alias form
+
+A `{src: alias}` mapping renames as it imports.
+
+```yaml
+!import mypkg.vocab:
+  CircuitPanel: BioCircuit
+  NetworkDiagramPanel: NetDiagram
+```
+
+### Collision rule
+
+`!import` is purely additive: a name already bound (by an earlier `!define`, `!set_default`, or another `!import`) wins. To force-rebind, use `!define` after the import.
+
+### Propagation through `!include`
+
+Names imported in a vocab file flow through `<<(<):` like `!define`s do:
+
+```yaml
+# vocab.yaml
+!import mypkg.types: [Model, Optimizer]
+
+# job.yaml
+<<(<): !include file:vocab.yaml
+m: !Model { ... }
+```
+
+### YAML-vocab imports
+
+For `pkg:` / `file:` sources, the imported document is composed in isolation; its top-level `!define`-bound names are pulled into the importing document.
+
+```yaml
+!import file:vocab.yaml:
+```
+
+### When to use what
+
+- `!include py:mod@Name` for one symbol.
+- `!define X: !include py:mod@X` for one symbol that needs an explicit `!define` ceremony (e.g., for round-trip stability).
+- `!import mod: [a, b, c]` for several symbols. Selective form is the recommended path — wildcard is for curated vocabulary packages.
+- Fully-qualified tags `!mod.path.Class` still work via the dynamic-import fallback.
 
 ---
 
