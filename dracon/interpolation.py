@@ -160,6 +160,48 @@ def fold_known_vars(expr: str, symbols: dict) -> str:
     return ast.unparse(folded)
 
 
+def _names_in_target(target: ast.AST) -> set[str]:
+    """Names locally bound by a comprehension / assignment target."""
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, (ast.Tuple, ast.List)):
+        out: set[str] = set()
+        for elt in target.elts:
+            out |= _names_in_target(elt)
+        return out
+    if isinstance(target, ast.Starred):
+        return _names_in_target(target.value)
+    return set()
+
+
+def _free_names(expr: str) -> frozenset[str]:
+    """Unbound `ast.Name` references in `expr`. Conservative on parse error.
+
+    Skips dunders (`__scope__`, `__DRACON_*`) and names locally bound by
+    comprehensions / lambdas. Used to populate `LazyInterpolable`'s
+    Symbol-interface params.
+    """
+    try:
+        tree = ast.parse(expr, mode='eval')
+    except SyntaxError:
+        return frozenset()
+    names: set[str] = set()
+    bound: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.comprehension):
+            bound |= _names_in_target(node.target)
+        elif isinstance(node, ast.Lambda):
+            for a in node.args.args + node.args.kwonlyargs + node.args.posonlyargs:
+                bound.add(a.arg)
+            if node.args.vararg:
+                bound.add(node.args.vararg.arg)
+            if node.args.kwarg:
+                bound.add(node.args.kwarg.arg)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            names.add(node.id)
+    return frozenset(n for n in names if not n.startswith('__') and n not in bound)
+
+
 def debug_string_state(label: str, s: str):
     print(f"\n=== {label} ===")
     print(f"Raw string: {repr(s)}")

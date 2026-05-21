@@ -26,10 +26,9 @@ from pydantic import (
     Field,
     GetCoreSchemaHandler,
 )
-from dracon.interpolation_utils import (
-    InterpolationMatch,
-)
-from dracon.interpolation import evaluate_expression, InterpolationError, DraconError
+from dracon.interpolation_utils import InterpolationMatch, outermost_lazy_interpolations
+from dracon.interpolation import evaluate_expression, InterpolationError, DraconError, _free_names
+from dracon.symbols import InterfaceSpec, ParamSpec, SymbolKind, BoundSymbol
 from dracon.utils import list_like, dict_like, raw_items, DEFAULT_EVAL_ENGINE
 
 import inspect
@@ -117,6 +116,61 @@ class LazyInterpolable(Lazy[T]):
             assert isinstance(value, (str, tuple)), (
                 f"LazyInterpolable expected string, got {type(value)}. Did you mean to contruct with permissive=True?"
             )
+        # symbol-axis metadata: free names referenced by ${...} interpolations.
+        # populated once at construction; step 03 intersects with the active
+        # !live scope to populate _scope_params. interface() exposes the
+        # intersected set via InterfaceSpec.params.
+        self._free_names: frozenset[str] = self._compute_free_names()
+        self._scope_params: frozenset[str] = frozenset()
+        self._cached_interface: Optional[InterfaceSpec] = None
+
+    def _compute_free_names(self) -> frozenset[str]:
+        if not isinstance(self.value, str):
+            return frozenset()
+        matches = self.init_outermost_interpolations
+        if matches is None:
+            matches = outermost_lazy_interpolations(self.value)
+        names: set[str] = set()
+        for m in matches:
+            names |= _free_names(m.expr)
+        return frozenset(names)
+
+    # ── Symbol protocol ─────────────────────────────────────────────────
+
+    def interface(self) -> InterfaceSpec:
+        if self._cached_interface is not None:
+            return self._cached_interface
+        params = tuple(
+            ParamSpec(name=n, required=True) for n in sorted(self._scope_params)
+        )
+        self._cached_interface = InterfaceSpec(
+            kind=SymbolKind.VALUE, name=self.name, params=params,
+            source=self.source_context,
+        )
+        return self._cached_interface
+
+    def invoke(self, **kwargs):
+        # Symbol-protocol kwargs are foreground: they override the snapshotted
+        # authoring context. resolve()'s context_override has the opposite
+        # priority (override is background), so layer kwargs on top here.
+        if not kwargs:
+            return self.resolve()
+        merged = {**self.context, **kwargs}
+        saved = self.context
+        try:
+            self.context = merged
+            return self.resolve()
+        finally:
+            self.context = saved
+
+    def materialize(self):
+        return self
+
+    def bind(self, **kwargs):
+        return BoundSymbol(self, **kwargs)
+
+    def represented_type(self):
+        return None
 
     def __getstate__(self):
         state = {
