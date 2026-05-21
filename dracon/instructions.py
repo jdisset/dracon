@@ -152,6 +152,26 @@ def _current_deferred_instruction_path(
     return None
 
 
+def _has_ancestor_propagating_merge(comp_res: CompositionResult, path: KeyPath) -> bool:
+    """True iff an unresolved `<<(<):` lives on a strict ancestor of `path`."""
+    from dracon.composer import MergeNode
+    if not comp_res.node_map:
+        return False
+    target = tuple(path.simplified().parts)
+    for mpath, n in comp_res.node_map.items():
+        if not isinstance(n, MergeNode):
+            continue
+        try:
+            if not cached_merge_key(n.merge_key_raw).context_propagation:
+                continue
+        except Exception:
+            continue
+        parent = tuple(mpath.simplified().parent.parts)
+        if len(parent) < len(target) and target[:len(parent)] == parent:
+            return True
+    return False
+
+
 def deferred_instruction_value_paths(comp_res: CompositionResult) -> tuple[KeyPath, ...]:
     """Return value subtrees owned by deferred parent instructions."""
     pending = getattr(comp_res, '_deferred_instructions', None) or []
@@ -1397,6 +1417,11 @@ class Cascade(Instruction):
         from dracon.symbols import CallableSymbol
         from dracon.loaders.py import PyValueNode
         from dracon.nodes import node_source as _node_source
+        from dracon.interpolation import LazyResolutionPending
+
+        # body lazies snapshot context now; wait for outer `<<(<):` to propagate
+        if _has_ancestor_propagating_merge(comp_res, path):
+            raise LazyResolutionPending(f"!cascade:{self.name} waiting for ancestor merge")
 
         # tag can sit on a mapping key (`!cascade:NAME body:`) or on a value
         # (`key: !cascade:NAME ...`); unify both into (subject_node, replace_fn)

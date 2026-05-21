@@ -15,7 +15,8 @@ dependencies = [
 	"xxhash",
 	"asteval",
 	"cachetools",
-	"regex"
+	"regex",
+	"rich"
 ]
 
 [project.optional-dependencies]
@@ -37,6 +38,9 @@ dracon = "dracon_complete:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["dracon"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"dracon_complete.py" = "dracon_complete.py"
 
 [tool.hatch.build.targets.sdist]
 include = [

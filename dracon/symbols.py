@@ -308,7 +308,34 @@ class CallableSymbol:
         if self._kind == 'partial':
             merged = {**self._kwargs, **kwargs}
             return self._callable(*args, **merged)
-        # template / pipe: positional args not supported, kwargs only
+        if self._kind == 'pipe':
+            # for pipes, a positional becomes the *initial threaded value*,
+            # not a shared kwarg -- so `!my_pipe 10` threads through stages
+            if args:
+                if len(args) > 1:
+                    raise TypeError(
+                        f"pipe {self._name!r} accepts at most 1 positional arg, "
+                        f"got {len(args)}"
+                    )
+                from dracon.pipe import _run_pipe
+                return _run_pipe(self, kwargs, initial=args[0])
+            return self.invoke(**kwargs)
+        # template / match: bind positionals onto interface params by
+        # declaration order, matching Python's positional-to-named binding
+        if args:
+            params = self.interface().params
+            if len(args) > len(params):
+                raise TypeError(
+                    f"{self._kind} {self._name!r} got {len(args)} positional args "
+                    f"but interface has only {len(params)} param(s)"
+                )
+            for spec, val in zip(params, args):
+                if spec.name in kwargs:
+                    raise TypeError(
+                        f"{self._kind} {self._name!r} got multiple values for "
+                        f"argument {spec.name!r}"
+                    )
+                kwargs[spec.name] = val
         return self.invoke(**kwargs)
 
     # ── dump / pickle / deepcopy ────────────────────────────────────────

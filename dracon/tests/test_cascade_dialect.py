@@ -303,3 +303,132 @@ def test_register_replaces_by_name():
     )
     register_cascade_strategy(alt2)
     assert get_cascade_strategy('replaceable_test') is alt2
+
+
+# ── context propagation into cascade bodies (regression tests) ──────────────
+# cascade must defer past `<<(<):` so its body's `${var}` lazies see vars
+# brought in by `!set_default` / `!define` from outer included files.
+
+
+def test_select_body_sees_propagating_merge_setdefault(tmp_path):
+    (tmp_path / 'vars.yaml').write_text('!set_default vlim_min_floor: 0.0\n')
+    (tmp_path / 'theme.yaml').write_text(
+        '<<(<): !include file:$DIR/vars.yaml\n'
+        'rules: !cascade:test_dialect\n'
+        '  Button:\n'
+        '    color: ${vlim_min_floor}\n'
+    )
+    cfg = dr.load(str(tmp_path / 'theme.yaml'))
+    out = cfg['rules'].invoke(component=Component('Button'))
+    assert out == {'color': 0.0}
+
+
+def test_select_body_sees_propagating_merge_define(tmp_path):
+    (tmp_path / 'vars.yaml').write_text('!define accent_color: "red"\n')
+    (tmp_path / 'theme.yaml').write_text(
+        '<<(<): !include file:$DIR/vars.yaml\n'
+        'rules: !cascade:test_dialect\n'
+        '  Button:\n'
+        '    color: ${accent_color}\n'
+    )
+    cfg = dr.load(str(tmp_path / 'theme.yaml'))
+    out = cfg['rules'].invoke(component=Component('Button'))
+    assert out == {'color': 'red'}
+
+
+def test_select_body_sees_propagating_merge_through_selector_include(tmp_path):
+    (tmp_path / 'vars.yaml').write_text('!set_default vlim_min_floor: 0.5\n')
+    (tmp_path / 'theme.yaml').write_text(
+        '<<(<): !include file:$DIR/vars.yaml\n'
+        'rules: !cascade:test_dialect\n'
+        '  Button:\n'
+        '    color: ${vlim_min_floor}\n'
+    )
+    (tmp_path / 'user.yaml').write_text(
+        '<<(<): !include file:$DIR/vars.yaml\n'
+        'figure:\n'
+        '  theme: !include file:$DIR/theme.yaml@rules\n'
+    )
+    cfg = dr.load(str(tmp_path / 'user.yaml'))
+    out = cfg['figure']['theme'].invoke(component=Component('Button'))
+    assert out == {'color': 0.5}
+
+
+def test_inherit_body_sees_propagating_merge_setdefault(tmp_path):
+    (tmp_path / 'vars.yaml').write_text('!set_default cb_value: true\n')
+    (tmp_path / 'cfg.yaml').write_text(
+        '<<(<): !include file:$DIR/vars.yaml\n'
+        'cfg: !cascade:strip_suffix(_params)\n'
+        '  a_params:\n'
+        '    draw_colorbar: ${cb_value}\n'
+        '  b_params:\n'
+        '    a_params:\n'
+        '      style: solid\n'
+    )
+    cfg = dr.load(str(tmp_path / 'cfg.yaml'))
+    assert cfg['cfg']['a_params']['draw_colorbar'] is True
+    assert cfg['cfg']['b_params']['a_params']['draw_colorbar'] is True
+    assert cfg['cfg']['b_params']['a_params']['style'] == 'solid'
+
+
+def test_select_body_chained_propagating_merges(tmp_path):
+    (tmp_path / 'a.yaml').write_text('!set_default a_val: 1\n')
+    (tmp_path / 'b.yaml').write_text(
+        '<<(<): !include file:$DIR/a.yaml\n'
+        '!set_default b_val: 2\n'
+    )
+    (tmp_path / 'theme.yaml').write_text(
+        '<<(<): !include file:$DIR/b.yaml\n'
+        'rules: !cascade:test_dialect\n'
+        '  Button:\n'
+        '    a: ${a_val}\n'
+        '    b: ${b_val}\n'
+    )
+    cfg = dr.load(str(tmp_path / 'theme.yaml'))
+    out = cfg['rules'].invoke(component=Component('Button'))
+    assert out == {'a': 1, 'b': 2}
+
+
+def test_select_body_propagating_merge_inside_body_still_works(tmp_path):
+    # a `<<(<):` inside the body is the body's own compose problem; don't defer outer
+    (tmp_path / 'shared.yaml').write_text('!set_default panel_w: 5\n')
+    (tmp_path / 'theme.yaml').write_text(
+        'rules: !cascade:test_dialect\n'
+        '  <<(<): !include file:$DIR/shared.yaml\n'
+        '  Button:\n'
+        '    width: ${panel_w}\n'
+    )
+    cfg = dr.load(str(tmp_path / 'theme.yaml'))
+    out = cfg['rules'].invoke(component=Component('Button'))
+    assert out == {'width': 5}
+
+
+def test_select_body_propagating_merge_no_false_defer(tmp_path):
+    # sibling merge (not ancestor) must not block the cascade
+    (tmp_path / 'shared.yaml').write_text('extra: hello\n')
+    (tmp_path / 'theme.yaml').write_text(
+        'cfg:\n'
+        '  rules: !cascade:test_dialect\n'
+        '    Button:\n'
+        '      color: red\n'
+        '  other:\n'
+        '    <<(<): !include file:$DIR/shared.yaml\n'
+    )
+    cfg = dr.load(str(tmp_path / 'theme.yaml'))
+    out = cfg['cfg']['rules'].invoke(component=Component('Button'))
+    assert out == {'color': 'red'}
+    assert cfg['cfg']['other']['extra'] == 'hello'
+
+
+def test_select_body_propagates_cli_override(tmp_path):
+    (tmp_path / 'vars.yaml').write_text('!set_default accent: "blue"\n')
+    (tmp_path / 'theme.yaml').write_text(
+        '<<(<): !include file:$DIR/vars.yaml\n'
+        'rules: !cascade:test_dialect\n'
+        '  Button:\n'
+        '    color: ${accent}\n'
+    )
+    loader = dr.DraconLoader(context={'accent': 'green'})
+    cfg = loader.load(str(tmp_path / 'theme.yaml'))
+    out = cfg['rules'].invoke(component=Component('Button'))
+    assert out == {'color': 'green'}

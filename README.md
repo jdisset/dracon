@@ -71,10 +71,10 @@ That separation is a big part of the point. You can inspect the composed config 
 
 ## Quick Start
 
-Install:
+Install (not yet on PyPI):
 
 ```bash
-pip install dracon
+pip install git+https://github.com/jdisset/dracon.git
 ```
 
 Write two config files:

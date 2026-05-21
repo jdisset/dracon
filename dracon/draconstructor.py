@@ -4,7 +4,7 @@
 from ruamel.yaml.constructor import Constructor
 import sys
 import importlib
-from ruamel.yaml.nodes import MappingNode, SequenceNode
+from ruamel.yaml.nodes import MappingNode, SequenceNode, Node
 from ruamel.yaml.constructor import ConstructorError
 from dracon.merge import merged, MergeKey, cached_merge_key
 from dracon.keypath import KeyPath, ROOTPATH
@@ -558,13 +558,59 @@ class Draconstructor(Constructor):
         return self.dracon_loader.load_composition_result(comp)
 
     def _construct_kwargs(self, node):
-        """Extract kwargs dict from a mapping node, or empty dict."""
+        """Extract kwargs dict from a mapping node, or empty dict.
+
+        Kwarg expressions evaluate at the call site, not inside the template
+        body. The kwargs Mapping built by `base_construct_object` is a
+        transient call-site artifact, but its insertion re-rooted any
+        contained `LazyInterpolable` to itself (via the dracontainer
+        bookkeeping) -- which breaks `${@/abs.path}` lookups. Retarget the
+        lazies at the YAML composition root (where the caller's tree lives),
+        then resolve them; any Node-typed results get constructed back into
+        Python values.
+        """
         if isinstance(node, MappingNode):
             reset_tag(node)
             kwargs = self.base_construct_object(node, deep=True)
-            kwargs = resolve_all_lazy(kwargs)
+            self._resolve_call_site_lazies(kwargs)
             return dict(kwargs) if not isinstance(kwargs, dict) else kwargs
         return {}
+
+    def _resolve_call_site_lazies(self, obj, seen=None):
+        """Walk `obj`, resolving any contained LazyInterpolables against the
+        caller's YAML composition root in place. Replaces lazies with their
+        constructed Python value."""
+        if seen is None:
+            seen = set()
+        if id(obj) in seen:
+            return obj
+        seen.add(id(obj))
+
+        if isinstance(obj, LazyInterpolable):
+            return self._resolve_one_call_site_lazy(obj)
+        from dracon.utils import dict_like, list_like, raw_items
+        if dict_like(obj):
+            for k, v in list(raw_items(obj)):
+                resolved = self._resolve_call_site_lazies(v, seen)
+                if resolved is not v:
+                    obj[k] = resolved
+        elif list_like(obj) and not isinstance(obj, (str, bytes)):
+            for i in range(len(obj)):
+                resolved = self._resolve_call_site_lazies(obj[i], seen)
+                if resolved is not obj[i]:
+                    obj[i] = resolved
+        return obj
+
+    def _resolve_one_call_site_lazy(self, lazy):
+        """Resolve a single call-site lazy against the YAML composition root.
+        If the resolution lands on a YAML Node, construct it into a Python
+        value (recursively handling nested lazies the same way)."""
+        lazy.root_obj = self._root_node
+        result = lazy.resolve()
+        if isinstance(result, Node):
+            result = self.construct_object(result, deep=True)
+            result = self._resolve_call_site_lazies(result)
+        return result
 
     def _construct_fn_target(self, target_name, node, loader_context):
         """Handle !fn:target universal binding. Works on any symbol kind."""
@@ -671,9 +717,18 @@ class Draconstructor(Constructor):
             return self._invoke_callable(obj, self._construct_kwargs(node), loader_context, node)
         if isinstance(node, DraconScalarNode):
             reset_tag(node)
-            arg = self.base_construct_object(node, deep=True)
+            # honor InterpolableNode -> LazyInterpolable construction so a
+            # scalar arg like `${@/foo}` reaches us as a lazy (otherwise
+            # base_construct_object would return the raw '${...}' string)
+            if isinstance(node, InterpolableNode):
+                arg = self.construct_interpolable(node)
+            else:
+                arg = self.base_construct_object(node, deep=True)
             if isinstance(arg, LazyInterpolable):
-                arg = resolve_all_lazy(arg)
+                # call-site lazy: resolve against the YAML composition root
+                # so absolute path refs reach the caller's tree (mirrors the
+                # kwargs path in _construct_kwargs)
+                arg = self._resolve_one_call_site_lazy(arg)
             if arg is None or arg == '':
                 return self._invoke_callable(obj, {}, loader_context, node)
             return obj(arg)

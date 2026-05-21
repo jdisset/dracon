@@ -122,8 +122,11 @@ class _PipeStrategy:
         return clone
 
 
-def _run_pipe(sym, kwargs):
-    value = _SENTINEL
+def _run_pipe(sym, kwargs, initial=_SENTINEL):
+    """Run the pipe. `initial` seeds the threaded value for the first stage,
+    which lets tag-form scalar invocation (``!my_pipe 10``) thread its arg
+    instead of treating it as a shared kwarg."""
+    value = initial
     for stage, pre_kwargs in zip(sym._stages, sym._stage_kwargs):
         call_kwargs = {**kwargs, **pre_kwargs}
         if value is not _SENTINEL:
