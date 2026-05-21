@@ -351,6 +351,12 @@ class Draconstructor(Constructor):
             if tag == '!__py__':
                 return getattr(node, 'py_value', None)
 
+            # !Type / !Ref: round-trip-stable references through the loader's resolver
+            if tag == '!Type':
+                return self._construct_type_ref(node)
+            if tag == '!Ref':
+                return self._construct_stable_ref(node)
+
             # !fn:path universal binding
             if tag and isinstance(tag, str) and tag.startswith('!fn:') and target_type is None:
                 return self._construct_fn_target(tag[4:], node, current_loader_context)
@@ -672,6 +678,34 @@ class Draconstructor(Constructor):
                 return self._invoke_callable(obj, {}, loader_context, node)
             return obj(arg)
         return self._invoke_callable(obj, {}, loader_context, node)
+
+    def _construct_type_ref(self, node):
+        from dracon.type_refs import UnknownTypeError
+        dotted = (getattr(node, 'value', '') or '').strip()
+        loader = self.dracon_loader
+        if loader is None or not dotted:
+            raise ConstructorError(
+                None, None,
+                f"!Type requires a dotted path and an attached loader (got {dotted!r})",
+                getattr(node, 'start_mark', None),
+            )
+        try:
+            return loader.resolve_type_ref(dotted)
+        except UnknownTypeError:
+            if loader.preserve_types == 'fallback':
+                return dotted
+            raise
+
+    def _construct_stable_ref(self, node):
+        name = (getattr(node, 'value', '') or '').strip()
+        loader = self.dracon_loader
+        if loader is None or name not in (loader._stable_refs if loader else {}):
+            raise ConstructorError(
+                None, None,
+                f"!Ref '{name}' is not registered on this loader",
+                getattr(node, 'start_mark', None),
+            )
+        return loader._stable_refs[name]
 
     def construct_resolvable(self, node, tag_type):
         newnode = deepcopy(node)

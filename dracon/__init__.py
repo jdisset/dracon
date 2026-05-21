@@ -96,3 +96,4 @@ from dracon.symbol_table import (
     make_dynamic_import_source,
 )
 from dracon.resolution import resolve_symbol, resolve_tag_target, is_type_symbol, is_callable_symbol
+from dracon.type_refs import TypeResolver, UnknownTypeError, dotted_path, import_resolver

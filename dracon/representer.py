@@ -177,6 +177,8 @@ class DraconRepresenter(RoundTripRepresenter):
         self.full_module_path = full_module_path
         self.exclude_defaults = exclude_defaults
         self._vocabulary: 'SymbolTable | None' = None
+        self._preserve_types: bool = False
+        self._stable_refs_by_id: dict[int, tuple[str, Any]] = {}
 
     def _name_for(self, data: Any) -> str:
         """Tag body (without leading '!') for a data value.
@@ -435,8 +437,31 @@ class DraconRepresenter(RoundTripRepresenter):
 
     # --- main dispatch method ---
 
+    def _try_stable_ref(self, data: Any) -> Node | None:
+        entry = self._stable_refs_by_id.get(id(data))
+        if entry is None or entry[1] is not data:
+            return None
+        return self.represent_scalar('!Ref', entry[0])
+
+    def _try_preserve_type(self, data: Any) -> Node | None:
+        if not self._preserve_types or not isinstance(data, type):
+            return None
+        if self._vocabulary is not None and self._vocabulary.identify(data) is not None:
+            return None
+        from dracon.type_refs import dotted_path
+        return self.represent_scalar('!Type', dotted_path(data))
+
     @ftrace(watch=[])
     def represent_data(self, data: Any) -> Node:
+        # stable references and preserved types short-circuit dispatch so any
+        # value (or class) the loader has pinned round-trips by identity.
+        if self._stable_refs_by_id:
+            node = self._try_stable_ref(data)
+            if node is not None:
+                return node
+        node = self._try_preserve_type(data)
+        if node is not None:
+            return node
         # handle aliasing first; nodes with cyclic __hash__ (e.g. loaded
         # DeferredNode trees) fall back to id-only aliasing.
         alias_key = None

@@ -217,6 +217,8 @@ class DraconLoader:
         use_cache: bool = True,
         trace: bool = True,
         symbol_sources: Optional[List[SymbolSource]] = None,
+        preserve_types: bool | Literal['fallback'] = False,
+        type_resolver: Optional[Callable[[str], type]] = None,
     ):
         self.custom_loaders = DEFAULT_LOADERS.copy()
         self.custom_loaders.update(custom_loaders or {})
@@ -253,6 +255,12 @@ class DraconLoader:
         if self._context_arg:
             self.context.update(self._context_arg)
         self.reset_context()
+
+        self.preserve_types = preserve_types
+        self._type_resolver = type_resolver
+        self._stable_refs: dict[str, Any] = {}
+        self._stable_refs_by_id: dict[int, tuple[str, Any]] = {}
+        self._resolved_type_cache: dict[str, type] = {}
 
     @property
     def symbols(self) -> SymbolTable:
@@ -313,7 +321,12 @@ class DraconLoader:
             context=None,  # set context separately to preserve type
             trace=self._trace_enabled,
             symbol_sources=list(self._symbol_sources),
+            preserve_types=self.preserve_types,
+            type_resolver=self._type_resolver,
         )
+        new_loader._stable_refs = dict(self._stable_refs)
+        new_loader._stable_refs_by_id = dict(self._stable_refs_by_id)
+        new_loader._resolved_type_cache = dict(self._resolved_type_cache)
         # preserve context type (e.g. TrackedContext) instead of wrapping in ShallowDict
         if self.context is not None:
             new_loader.context = self.context.copy()
@@ -726,15 +739,51 @@ class DraconLoader:
 
         comp.walk(add_trace)
 
+    def register_stable_reference(self, instance: Any, name: str) -> None:
+        """Pin `instance` so it dumps as `!Ref name` and loads back to the same object."""
+        self._stable_refs[name] = instance
+        self._stable_refs_by_id[id(instance)] = (name, instance)
+
+    def resolve_type_ref(self, dotted: str) -> type:
+        """Resolve a `!Type` dotted path through this loader's trust chain.
+
+        Order: per-loader cache, user-supplied resolver, dynamic_import source
+        (if installed). Misses raise :class:`UnknownTypeError`. When
+        `preserve_types='fallback'` the caller may catch and degrade.
+        """
+        from dracon.type_refs import UnknownTypeError, import_resolver
+        cached = self._resolved_type_cache.get(dotted)
+        if cached is not None:
+            return cached
+        if self._type_resolver is not None:
+            resolved = self._type_resolver(dotted)
+        else:
+            has_dyn = any(s.name == 'dynamic_import' for s in self._symbol_sources)
+            if not has_dyn:
+                raise UnknownTypeError(
+                    f"type '{dotted}' unresolved: no type_resolver and sandboxed loader "
+                    f"(dynamic_import source disabled)"
+                )
+            resolved = import_resolver(dotted)
+        self._resolved_type_cache[dotted] = resolved
+        return resolved
+
     def dump_to_node(self, data: Any) -> Node:
         if isinstance(data, Node):
             return data
-        prev = self.yaml.representer._vocabulary
-        self.yaml.representer._vocabulary = self.context
+        rep = self.yaml.representer
+        prev_vocab = rep._vocabulary
+        prev_preserve = rep._preserve_types
+        prev_refs = rep._stable_refs_by_id
+        rep._vocabulary = self.context
+        rep._preserve_types = bool(self.preserve_types)
+        rep._stable_refs_by_id = self._stable_refs_by_id
         try:
-            return self.yaml.representer.represent_data(data)
+            return rep.represent_data(data)
         finally:
-            self.yaml.representer._vocabulary = prev
+            rep._vocabulary = prev_vocab
+            rep._preserve_types = prev_preserve
+            rep._stable_refs_by_id = prev_refs
 
     def dump(self, data, stream=None):
         node = self.dump_to_node(data)
