@@ -392,5 +392,60 @@ class TestDeepcopyFallback:
             _deepcopy([HardRefuse()])
 
 
+class _UnpicklableHandle:
+    def __reduce__(self):
+        raise TypeError("cannot pickle _UnpicklableHandle")
+
+
+def _make_cascade_strategy(name='deepcopy_test_dialect'):
+    from dracon.cascade import CascadeStrategy
+    return CascadeStrategy(
+        name=name,
+        input_params=('component',),
+        parse=lambda raw: raw,
+        matches=lambda sel, comp: True,
+        specificity=lambda sel: 0,
+    )
+
+
+class TestLazyInterpolableDeepcopy:
+    """LazyInterpolable.context is a frozen authoring-scope snapshot — deep-copy
+    must mirror __init__'s shallow-context contract, otherwise an unpicklable
+    closure leak (JIT executables, file handles) corrupts the deepcopy memo
+    and surfaces as KeyError on this object's state."""
+
+    def test_unpicklable_value_in_context_survives_deepcopy(self):
+        from copy import deepcopy
+        from dracon.lazy import LazyInterpolable
+
+        handle = _UnpicklableHandle()
+        li = LazyInterpolable('${x}', context={'x': 1, 'handle': handle})
+        clone = deepcopy(li)
+
+        assert clone.value == '${x}'
+        assert clone.context['x'] == 1
+        assert clone.context['handle'] is handle
+
+    def test_cascade_rule_tree_with_unpicklable_context(self):
+        from copy import deepcopy
+        from dracon.cascade import register_cascade_strategy
+        from dracon.symbols import CallableSymbol
+        from dracon.dracontainer import Mapping
+        from dracon.lazy import LazyInterpolable
+
+        register_cascade_strategy(_make_cascade_strategy())
+        handle = _UnpicklableHandle()
+        rule_tree = Mapping({
+            'leaf': LazyInterpolable('${x}', context={'x': 42, 'handle': handle}),
+        })
+        sym = CallableSymbol.from_match(rule_tree, _make_cascade_strategy())
+
+        clone = deepcopy(sym)
+        cloned_leaf = dict.__getitem__(clone._rule_tree, 'leaf')
+        assert isinstance(cloned_leaf, LazyInterpolable)
+        assert cloned_leaf.value == '${x}'
+        assert cloned_leaf.context['handle'] is handle
+
+
 if __name__ == '__main__':
     pytest.main([__file__])

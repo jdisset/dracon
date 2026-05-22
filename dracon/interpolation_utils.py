@@ -3,14 +3,16 @@
 
 from typing import (
     Any,
+    Callable,
     Literal,
 )
 from pydantic.dataclasses import dataclass
 from functools import lru_cache
 
-import pyparsing as pp
 import re
 from dracon.utils import ftrace, DictLike
+
+INTERPOLATION_OPENERS = {'{': '}', '(': ')'}
 
 
 class InterpolationError(Exception):
@@ -57,45 +59,105 @@ def fast_prescreen_interpolation_exprs_check(  # 5000x faster prescreen but very
     return False
 
 
+def scan_balanced(
+    peek: Callable[[int], str],
+    start: int,
+    opener: str,
+    closer: str,
+    stop_at: str = '',
+) -> int:
+    """Return index past the matching close, or -1 if unbalanced or stop_at hit.
+    `peek(i)` returns the char at offset i (empty string past EOF). Honors `\\`-escapes
+    and skips quoted spans so braces inside strings don't unbalance the count."""
+    depth = 1
+    i = start
+    while True:
+        c = peek(i)
+        if not c or c in stop_at:
+            return -1
+        if c == '\\':
+            if not peek(i + 1):
+                return -1
+            i += 2
+            continue
+        if c == '"' or c == "'":
+            quote = c
+            i += 1
+            while True:
+                cc = peek(i)
+                if not cc or cc in stop_at:
+                    return -1
+                if cc == '\\':
+                    if not peek(i + 1):
+                        return -1
+                    i += 2
+                    continue
+                if cc == quote:
+                    i += 1
+                    break
+                i += 1
+            continue
+        if c == opener:
+            depth += 1
+        elif c == closer:
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+
+
+def _dollar_is_escaped(peek: Callable[[int], str], pos: int) -> bool:
+    bs = 0
+    k = pos - 1
+    while k >= 0 and peek(k) == '\\':
+        bs += 1
+        k -= 1
+    if bs % 2 == 1:
+        return True
+    if pos > 0 and peek(pos - 1) == '$':
+        pre_bs = 0
+        k2 = pos - 2
+        while k2 >= 0 and peek(k2) == '\\':
+            pre_bs += 1
+            k2 -= 1
+        if pre_bs % 2 == 0:
+            return True
+    return False
+
+
+def _str_peek(text: str) -> Callable[[int], str]:
+    n = len(text)
+    return lambda i: text[i] if 0 <= i < n else ''
+
+
 @lru_cache(maxsize=1024)
 def outermost_interpolation_exprs(
     text: str, interpolation_start_char='$', interpolation_boundary_chars=('{}', '()')
 ) -> list[InterpolationMatch]:
-    matches = []
     if not fast_prescreen_interpolation_exprs_check(
         text, interpolation_start_char, interpolation_boundary_chars
     ):
-        return matches
+        return []
 
-    scanner = pp.MatchFirst(
-        [
-            pp.originalTextFor(pp.nestedExpr(bounds[0], bounds[1]))
-            for bounds in interpolation_boundary_chars
-        ]
-    )
-    scanner = pp.Combine(interpolation_start_char + scanner)
-
-    # handle escaped characters (\$ and $$ escapes)
-    for match_obj, start, end in scanner.scanString(text):
-        num_backslashes = 0
-        k = start - 1
-        while k >= 0 and text[k] == '\\':
-            num_backslashes += 1
-            k -= 1
-        if num_backslashes % 2 == 1:
+    openers = {b[0]: b[1] for b in interpolation_boundary_chars}
+    peek = _str_peek(text)
+    matches: list[InterpolationMatch] = []
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] != interpolation_start_char or text[i + 1 : i + 2] not in openers:
+            i += 1
             continue
-        # $$ escape: preceding non-escaped $ means literal passthrough
-        if start > 0 and text[start - 1] == '$':
-            k2 = start - 2
-            pre_bs = 0
-            while k2 >= 0 and text[k2] == '\\':
-                pre_bs += 1
-                k2 -= 1
-            if pre_bs % 2 == 0:  # preceding $ is not itself escaped
-                continue
-        matches.append(InterpolationMatch(start, end, match_obj[0][2:-1]))
-
-    return sorted(matches, key=lambda m: m.start)
+        if _dollar_is_escaped(peek, i):
+            i += 1
+            continue
+        opener = text[i + 1]
+        end = scan_balanced(peek, i + 2, opener, openers[opener])
+        if end < 0:
+            i += 1
+            continue
+        matches.append(InterpolationMatch(i, end, text[i + 2 : end - 1]))
+        i = end
+    return matches
 
 
 def unescape_dracon_specials(text: str) -> str:

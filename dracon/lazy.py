@@ -218,6 +218,30 @@ class LazyInterpolable(Lazy[T]):
             self._scope_params = frozenset(sp)
             self._cached_interface = None
 
+    def __deepcopy__(self, memo):
+        # Mirror __init__'s shallow-context contract. Deep-traversal here
+        # breaks on unpicklable closure values (JIT executables, file
+        # handles) that legitimately appear in composition scopes: a
+        # TypeError mid-walk corrupts the deepcopy memo and surfaces as a
+        # KeyError on this object's state.
+        new = self.__class__.__new__(self.__class__)
+        memo[id(self)] = new
+        new.value = self.value
+        new.validator = self.validator
+        new.name = self.name
+        new.context = dict(self.context) if self.context is not None else {}
+        new.current_path = self.current_path
+        new.root_obj = self.root_obj
+        new.init_outermost_interpolations = self.init_outermost_interpolations
+        new.permissive = self.permissive
+        new.engine = self.engine
+        new.enable_shorthand_vars = self.enable_shorthand_vars
+        new.source_context = self.source_context
+        new._free_names = self._free_names
+        new._scope_params = self._scope_params
+        new._cached_interface = None
+        return new
+
     def __repr__(self):
         return f"LazyInterpolable({self.value})"
 

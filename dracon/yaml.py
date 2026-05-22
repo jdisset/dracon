@@ -3,8 +3,99 @@
 
 import re
 from ruamel.yaml import YAML
+from ruamel.yaml.scanner import RoundTripScanner, ScannerError, _THE_END_SPACE_TAB
+from ruamel.yaml.tokens import ScalarToken, CommentToken
 from typing import Any, Optional, Union, Dict
 import copyreg
+
+from dracon.interpolation_utils import scan_balanced, INTERPOLATION_OPENERS
+
+_FLOW_COLON_TERMINATORS = _THE_END_SPACE_TAB + ',[]{}'
+
+
+class DraconRoundTripScanner(RoundTripScanner):
+    """Treats `${...}` and `$(...)` as atomic plain-scalar spans so flow indicators
+    (`,`, `}`, `]`) inside them don't terminate the scalar."""
+
+    def scan_plain(self) -> Any:
+        srp = self.reader.peek
+        srf = self.reader.forward
+        chunks: list = []
+        start_mark = self.reader.get_mark()
+        end_mark = start_mark
+        indent = self.indent + 1
+        spaces: list = []
+        while True:
+            length = 0
+            if srp() == '#':
+                break
+            while True:
+                ch = srp(length)
+                if ch == '$' and srp(length + 1) in INTERPOLATION_OPENERS:
+                    opener = srp(length + 1)
+                    end = scan_balanced(
+                        srp, length + 2, opener, INTERPOLATION_OPENERS[opener], stop_at='\0\n\r'
+                    )
+                    if end > 0:
+                        length = end
+                        continue
+                if ch == ':' and srp(length + 1) not in _THE_END_SPACE_TAB:
+                    pass
+                elif ch == '?' and self.scanner_processing_version != (1, 1):
+                    pass
+                elif (
+                    ch in _THE_END_SPACE_TAB
+                    or (
+                        not self.flow_level
+                        and ch == ':'
+                        and srp(length + 1) in _THE_END_SPACE_TAB
+                    )
+                    or (self.flow_level and ch in ',:?[]{}')
+                ):
+                    break
+                length += 1
+            if (
+                self.flow_level
+                and ch == ':'
+                and srp(length + 1) not in _FLOW_COLON_TERMINATORS
+            ):
+                srf(length)
+                raise ScannerError(
+                    'while scanning a plain scalar',
+                    start_mark,
+                    "found unexpected ':'",
+                    self.reader.get_mark(),
+                    'Please check http://pyyaml.org/wiki/YAMLColonInFlowContext for details.',
+                )
+            if length == 0:
+                break
+            self.allow_simple_key = False
+            chunks.extend(spaces)
+            chunks.append(self.reader.prefix(length))
+            srf(length)
+            end_mark = self.reader.get_mark()
+            spaces = self.scan_plain_spaces(indent, start_mark)
+            if (
+                not spaces
+                or srp() == '#'
+                or (not self.flow_level and self.reader.column < indent)
+            ):
+                break
+
+        token = ScalarToken("".join(chunks), True, start_mark, end_mark)
+        if self.loader is not None:
+            comment_handler = getattr(self.loader, 'comment_handling', False)
+            if comment_handler is None:
+                if spaces and spaces[0] == '\n':
+                    comment = CommentToken("".join(spaces) + '\n', start_mark, end_mark)
+                    token.add_post_comment(comment)
+            elif comment_handler is not False:
+                line = start_mark.line + 1
+                for ch in spaces:
+                    if ch == '\n':
+                        self.comments.add_blank_line('\n', 0, line)
+                        line += 1
+        return token
 
 
 class PicklableYAML(YAML):
@@ -15,6 +106,7 @@ class PicklableYAML(YAML):
         self._registered_types = {}  # Store registered types
         self.allow_unicode = True
         self.escape_char = None
+        self.Scanner = DraconRoundTripScanner
 
     def register_class(self, cls):
         """Override register_class to keep track of registered types"""

@@ -495,21 +495,13 @@ def test_used_define_variable_no_warning(tmp_path, capfd):
     assert "my_var" not in captured.err and "not used" not in captured.err.lower()
 
 
-def test_flow_syntax_interpolation_error_message():
-    """Test that flow syntax interpolation errors have helpful message."""
+def test_flow_syntax_interpolation_works():
+    """${...} inside flow mappings parses cleanly via the DraconScanner override."""
     from dracon.loader import DraconLoader
-    from ruamel.yaml import YAMLError
 
-    yaml_content = "config: {max_norm: ${grad_clip_norm}}"
-
-    loader = DraconLoader()
-    with pytest.raises(Exception) as excinfo:
-        loader.loads(yaml_content)
-
-    # error should mention flow syntax and suggest block style
-    err_str = str(excinfo.value).lower()
-    # should suggest using block style or mention flow syntax limitation
-    assert "flow" in err_str or "block" in err_str or "interpolation" in err_str
+    loader = DraconLoader(context={'grad_clip_norm': 1.5})
+    result = loader.loads("config: {max_norm: ${grad_clip_norm}}")
+    assert dict(result['config']) == {'max_norm': 1.5}
 
 
 def test_used_define_variable_in_included_file_no_warning(tmp_path, capfd):
