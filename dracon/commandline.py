@@ -2133,8 +2133,14 @@ def dracon_program(
                 deferred_paths=cfg['deferred_paths'],
                 context=cfg['context'],
             )
-            result = _dispatch_run(instance, prog)
-            return result if isinstance(result, int) or result is None else 0
+            return _dispatch_run(instance, prog)
+
+        @classmethod
+        def main(cls, argv=None):
+            """Entry-point wrapper: dispatches like cli(), then sys.exit() with an int code.
+            Use as `if __name__ == "__main__": MyCLI.main()`. Non-int .run() returns exit 0."""
+            result = cls.cli(argv)
+            sys.exit(result if isinstance(result, int) else 0)
 
         @classmethod
         def invoke(cls, *config_files, **context_kwargs):
@@ -2168,6 +2174,7 @@ def dracon_program(
             return cls.model_validate(data)
 
         cls.cli = cli
+        cls.main = main
         cls.invoke = invoke
         cls.from_config = from_config
         cls.load = load

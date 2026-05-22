@@ -2252,6 +2252,74 @@ def test_root_run_takes_precedence():
     assert result == 'root ran'
 
 
+def test_cli_returns_instance_when_no_run_method():
+    """cli() returns the parsed instance verbatim when no .run() method exists -- not a coerced exit code."""
+
+    @dracon_program(name="noop")
+    class NoRunCLI(BaseModel):
+        x: int = 7
+
+    result = NoRunCLI.cli([])
+    assert isinstance(result, NoRunCLI)
+    assert result.x == 7
+
+
+def test_cli_preserves_run_return_value_verbatim():
+    """cli() must not coerce non-int .run() returns; common types must pass through unchanged."""
+
+    for payload in ['a string', {'k': 'v'}, [1, 2, 3], 42, None]:
+        captured = payload
+
+        @dracon_program(name=f"pass-{type(payload).__name__}")
+        class PassthroughCLI(BaseModel):
+            def run(self):
+                return captured
+
+        result = PassthroughCLI.cli([])
+        assert result == captured
+
+
+def test_main_exits_with_int_from_run():
+    """main() sys.exit()s with the int code .run() returns."""
+
+    @dracon_program(name="exit-7")
+    class IntExitCLI(BaseModel):
+        def run(self):
+            return 7
+
+    with pytest.raises(SystemExit) as exc:
+        IntExitCLI.main([])
+    assert exc.value.code == 7
+
+
+def test_main_exits_zero_for_non_int_returns():
+    """main() sys.exit(0)s when .run() returns None, an instance, or other non-int values."""
+
+    for payload in [None, 'finished', {'ok': True}]:
+        captured = payload
+
+        @dracon_program(name=f"nonint-{type(payload).__name__}")
+        class NonIntCLI(BaseModel):
+            def run(self):
+                return captured
+
+        with pytest.raises(SystemExit) as exc:
+            NonIntCLI.main([])
+        assert exc.value.code == 0
+
+
+def test_main_exits_zero_when_no_run_method():
+    """main() sys.exit(0)s when the model has no .run() (cli() returns the instance)."""
+
+    @dracon_program(name="no-run")
+    class NoRunMainCLI(BaseModel):
+        x: int = 1
+
+    with pytest.raises(SystemExit) as exc:
+        NoRunMainCLI.main([])
+    assert exc.value.code == 0
+
+
 # -- test errors --
 
 def test_unknown_subcommand_error():
