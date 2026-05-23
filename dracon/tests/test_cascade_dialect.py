@@ -432,3 +432,400 @@ def test_select_body_propagates_cli_override(tmp_path):
     cfg = loader.load(str(tmp_path / 'theme.yaml'))
     out = cfg['rules'].invoke(component=Component('Button'))
     assert out == {'color': 'green'}
+
+
+# ── peer-cascade merge (regression: same-strategy cascades on either side of a
+# merge boundary must combine their rule sets, not overwrite one another) ───
+
+
+def test_peer_cascade_merge_via_stack(tmp_path):
+    # two files declare top-level cascades of the same strategy; stacking them
+    # must yield the union of rules (later wins on conflict, both disjoint
+    # selectors preserved).
+    (tmp_path / 'default.yaml').write_text(
+        'rules: !cascade:test_dialect\n'
+        '  Button:\n'
+        '    color: red\n'
+        '  Link:\n'
+        '    underline: true\n'
+    )
+    (tmp_path / 'overlay.yaml').write_text(
+        'rules: !cascade:test_dialect\n'
+        '  Button:\n'
+        '    weight: bold\n'
+    )
+    loader = dr.DraconLoader()
+    cfg = loader.stack(
+        f"file:{tmp_path}/default.yaml",
+        f"file:{tmp_path}/overlay.yaml",
+    ).construct()
+    sym = cfg['rules']
+    assert isinstance(sym, CallableSymbol)
+    # Link rule (default only) must survive
+    assert sym.invoke(component=Component('Link')) == {'underline': True}
+    # Button rule must contain both default's color and overlay's weight
+    assert sym.invoke(component=Component('Button')) == {
+        'color': 'red', 'weight': 'bold',
+    }
+
+
+def test_peer_cascade_merge_stack_later_wins_on_conflict(tmp_path):
+    (tmp_path / 'a.yaml').write_text(
+        'rules: !cascade:test_dialect\n'
+        '  Button:\n'
+        '    color: red\n'
+    )
+    (tmp_path / 'b.yaml').write_text(
+        'rules: !cascade:test_dialect\n'
+        '  Button:\n'
+        '    color: blue\n'
+    )
+    loader = dr.DraconLoader()
+    cfg = loader.stack(
+        f"file:{tmp_path}/a.yaml",
+        f"file:{tmp_path}/b.yaml",
+    ).construct()
+    assert cfg['rules'].invoke(component=Component('Button')) == {'color': 'blue'}
+
+
+def test_peer_cascade_merge_three_layer_stack(tmp_path):
+    (tmp_path / 'a.yaml').write_text(
+        'rules: !cascade:test_dialect\n'
+        '  Button:\n'
+        '    color: red\n'
+    )
+    (tmp_path / 'b.yaml').write_text(
+        'rules: !cascade:test_dialect\n'
+        '  Link:\n'
+        '    underline: true\n'
+    )
+    (tmp_path / 'c.yaml').write_text(
+        'rules: !cascade:test_dialect\n'
+        '  Button:\n'
+        '    weight: bold\n'
+    )
+    loader = dr.DraconLoader()
+    cfg = loader.stack(
+        f"file:{tmp_path}/a.yaml",
+        f"file:{tmp_path}/b.yaml",
+        f"file:{tmp_path}/c.yaml",
+    ).construct()
+    sym = cfg['rules']
+    assert sym.invoke(component=Component('Button')) == {
+        'color': 'red', 'weight': 'bold',
+    }
+    assert sym.invoke(component=Component('Link')) == {'underline': True}
+
+
+def test_peer_cascade_merge_via_in_file_merge_key():
+    yaml_str = """
+rules: !cascade:test_dialect
+  Button:
+    color: red
+  Link:
+    underline: true
+<<{<+}:
+  rules: !cascade:test_dialect
+    Button:
+      weight: bold
+"""
+    cfg = dr.loads(yaml_str)
+    sym = cfg['rules']
+    assert isinstance(sym, CallableSymbol)
+    assert sym.invoke(component=Component('Link')) == {'underline': True}
+    assert sym.invoke(component=Component('Button')) == {
+        'color': 'red', 'weight': 'bold',
+    }
+
+
+def test_peer_cascade_inherit_mode_merge_via_stack(tmp_path):
+    # inherit-mode cascades (strip_suffix) produce a plain dict; same-strategy
+    # peers across the stack must union, not overwrite.
+    (tmp_path / 'a.yaml').write_text(
+        'cfg: !cascade:strip_suffix(_params)\n'
+        '  smooth_2d_params:\n'
+        '    color: red\n'
+    )
+    (tmp_path / 'b.yaml').write_text(
+        'cfg: !cascade:strip_suffix(_params)\n'
+        '  smooth_2d_params:\n'
+        '    weight: bold\n'
+    )
+    loader = dr.DraconLoader()
+    cfg = loader.stack(
+        f"file:{tmp_path}/a.yaml",
+        f"file:{tmp_path}/b.yaml",
+    ).construct()
+    leaf = cfg['cfg']['smooth_2d_params']
+    assert leaf['color'] == 'red'
+    assert leaf['weight'] == 'bold'
+
+
+def test_peer_cascade_merge_preserves_lazy_interpolation_via_stack(tmp_path):
+    # cascade body lazies authored in one layer must keep their captured
+    # context after merging with a peer cascade in another layer.
+    (tmp_path / 'a.yaml').write_text(
+        '!define accent: "lime"\n'
+        'rules: !cascade:test_dialect\n'
+        '  Button:\n'
+        '    color: ${accent}\n'
+    )
+    (tmp_path / 'b.yaml').write_text(
+        'rules: !cascade:test_dialect\n'
+        '  Button:\n'
+        '    weight: bold\n'
+    )
+    loader = dr.DraconLoader()
+    cfg = loader.stack(
+        f"file:{tmp_path}/a.yaml",
+        f"file:{tmp_path}/b.yaml",
+    ).construct()
+    out = cfg['rules'].invoke(component=Component('Button'))
+    assert out == {'color': 'lime', 'weight': 'bold'}
+
+
+def test_peer_cascade_merge_nested_in_subtree(tmp_path):
+    # peer cascade lives under a nested key, not at the root: merge engine
+    # must still recurse through and union them.
+    (tmp_path / 'a.yaml').write_text(
+        'figure:\n'
+        '  theme: !cascade:test_dialect\n'
+        '    Button:\n'
+        '      color: red\n'
+    )
+    (tmp_path / 'b.yaml').write_text(
+        'figure:\n'
+        '  theme: !cascade:test_dialect\n'
+        '    Link:\n'
+        '      underline: true\n'
+    )
+    loader = dr.DraconLoader()
+    cfg = loader.stack(
+        f"file:{tmp_path}/a.yaml",
+        f"file:{tmp_path}/b.yaml",
+    ).construct()
+    sym = cfg['figure']['theme']
+    assert sym.invoke(component=Component('Button')) == {'color': 'red'}
+    assert sym.invoke(component=Component('Link')) == {'underline': True}
+
+
+def test_peer_cascade_deep_body_value_merge(tmp_path):
+    # overlapping selector keys with disjoint property keys: the property
+    # bags themselves must deep-merge, not replace.
+    (tmp_path / 'a.yaml').write_text(
+        'rules: !cascade:test_dialect\n'
+        '  Button:\n'
+        '    color: red\n'
+        '    size: 10\n'
+    )
+    (tmp_path / 'b.yaml').write_text(
+        'rules: !cascade:test_dialect\n'
+        '  Button:\n'
+        '    weight: bold\n'
+        '    size: 12\n'   # later wins on conflict
+    )
+    loader = dr.DraconLoader()
+    cfg = loader.stack(
+        f"file:{tmp_path}/a.yaml",
+        f"file:{tmp_path}/b.yaml",
+    ).construct()
+    out = cfg['rules'].invoke(component=Component('Button'))
+    assert out == {'color': 'red', 'weight': 'bold', 'size': 12}
+
+
+def test_peer_cascade_dump_roundtrip_after_stack_merge(tmp_path):
+    # the post-merge cascade must round-trip through dr.dump as a single
+    # !cascade:NAME mapping with the unioned body.
+    (tmp_path / 'a.yaml').write_text(
+        'rules: !cascade:test_dialect\n'
+        '  Button:\n'
+        '    color: red\n'
+    )
+    (tmp_path / 'b.yaml').write_text(
+        'rules: !cascade:test_dialect\n'
+        '  Link:\n'
+        '    underline: true\n'
+    )
+    loader = dr.DraconLoader()
+    cfg = loader.stack(
+        f"file:{tmp_path}/a.yaml",
+        f"file:{tmp_path}/b.yaml",
+    ).construct()
+    dumped = dr.dump(cfg)
+    assert '!cascade:test_dialect' in dumped
+    cfg2 = dr.loads(dumped)
+    assert cfg2['rules'].invoke(component=Component('Button')) == {'color': 'red'}
+    assert cfg2['rules'].invoke(component=Component('Link')) == {'underline': True}
+
+
+def test_peer_cascade_different_strategies_replace_not_merge(tmp_path):
+    # two cascades with different strategy names should NOT silently merge;
+    # later wins (current replace semantics).
+    other = CascadeStrategy(
+        name='alt_dialect', input_params=('component',),
+        parse=_parse, matches=_matches,
+        specificity=lambda k: k.specificity,
+    )
+    register_cascade_strategy(other)
+    (tmp_path / 'a.yaml').write_text(
+        'rules: !cascade:test_dialect\n'
+        '  Button:\n'
+        '    color: red\n'
+    )
+    (tmp_path / 'b.yaml').write_text(
+        'rules: !cascade:alt_dialect\n'
+        '  Button:\n'
+        '    weight: bold\n'
+    )
+    loader = dr.DraconLoader()
+    cfg = loader.stack(
+        f"file:{tmp_path}/a.yaml",
+        f"file:{tmp_path}/b.yaml",
+    ).construct()
+    # later cascade (different strategy) wins; first one is replaced
+    sym = cfg['rules']
+    assert sym._cascade_strategy.name == 'alt_dialect'
+    assert sym.invoke(component=Component('Button')) == {'weight': 'bold'}
+
+
+# ── sibling-define propagation into cascade body (regression for
+# `2026-05-24-cascade-body-does-not-see-sibling-defines.md`) ────────────────
+# A `!define X: <value>` at the same nesting level as a `!cascade:NAME` block
+# must make `X` discoverable as a tag from inside the cascade body — same as
+# anywhere else in the document. The bug was that scalar nodes inside the
+# cascade body lost their dynamically-attached `.context` (populated by Define
+# at composition time) during the cascade's `deepcopy` of its subject tree.
+
+
+def test_select_body_sees_sibling_define_as_tag():
+    yaml_str = """
+!define f: ${mk()}
+rules: !cascade:test_dialect
+  Button:
+    color: !f dark
+"""
+    loader = dr.DraconLoader(
+        enable_interpolation=True,
+        context={'mk': lambda: (lambda ch: f'<{ch}>')},
+    )
+    cfg = loader.loads(yaml_str)
+    out = cfg['rules'].invoke(component=Component('Button'))
+    assert out == {'color': '<dark>'}
+
+
+def test_select_body_sees_sibling_define_as_tag_with_mapping_arg():
+    def mk_url(host, port):
+        return f'https://{host}:{port}'
+    yaml_str = """
+!define mk_url: ${mk_url_fn}
+rules: !cascade:test_dialect
+  Button:
+    endpoint: !mk_url
+      host: api.local
+      port: 443
+"""
+    loader = dr.DraconLoader(
+        enable_interpolation=True,
+        context={'mk_url_fn': mk_url},
+    )
+    cfg = loader.loads(yaml_str)
+    out = cfg['rules'].invoke(component=Component('Button'))
+    assert out == {'endpoint': 'https://api.local:443'}
+
+
+def test_inherit_body_sees_sibling_define_as_tag():
+    def wrap(s):
+        return f'<{s}>'
+    yaml_str = """
+!define f: ${wrap_fn}
+cfg: !cascade:strip_suffix(_params)
+  a_params:
+    color: !f red
+  b_params:
+    a_params:
+      width: 10
+"""
+    loader = dr.DraconLoader(
+        enable_interpolation=True,
+        context={'wrap_fn': wrap},
+    )
+    cfg = loader.loads(yaml_str)
+    # color inherited via cascade AND must survive tag resolution
+    assert cfg['cfg']['a_params']['color'] == '<red>'
+    assert cfg['cfg']['b_params']['a_params']['color'] == '<red>'
+
+
+def test_select_body_sees_sibling_define_via_interpolation():
+    # control: ${f(...)} form must keep working — exercises the lazy-context path
+    def wrap(s):
+        return f'<{s}>'
+    yaml_str = """
+!define f: ${wrap_fn}
+rules: !cascade:test_dialect
+  Button:
+    color: ${f('dark')}
+"""
+    loader = dr.DraconLoader(
+        enable_interpolation=True,
+        context={'wrap_fn': wrap},
+    )
+    cfg = loader.loads(yaml_str)
+    out = cfg['rules'].invoke(component=Component('Button'))
+    assert out == {'color': '<dark>'}
+
+
+# ── node deepcopy preserves dynamic attributes (SSOT regression) ───────────
+# The root cause of the sibling-define cascade bug was that `DraconScalarNode`
+# silently dropped its dynamically-attached `.context` (populated by composer
+# passes like Define) on deepcopy, while mapping/sequence nodes preserved it.
+# Same issue affected `_live_scope_stack` (worked around ad hoc in Cascade).
+# These tests pin down the SSOT contract: any dynamic attribute attached to a
+# node during composition must survive a deepcopy.
+
+
+def test_scalar_node_deepcopy_preserves_context():
+    from copy import deepcopy
+    from dracon.nodes import DraconScalarNode
+
+    n = DraconScalarNode(tag='!f', value='dark')
+    n.context = {'f': 'value'}
+    c = deepcopy(n)
+    assert getattr(c, 'context', None) == {'f': 'value'}
+    # mutation isolation: copy must be independent
+    n.context['f'] = 'mutated'
+    assert c.context['f'] == 'value'
+
+
+def test_scalar_node_deepcopy_preserves_live_scope_stack():
+    from copy import deepcopy
+    from dracon.nodes import DraconScalarNode
+
+    n = DraconScalarNode(tag='tag:yaml.org,2002:str', value='x')
+    n._live_scope_stack = (('component',),)
+    c = deepcopy(n)
+    assert getattr(c, '_live_scope_stack', ()) == (('component',),)
+
+
+def test_mapping_node_deepcopy_preserves_live_scope_stack():
+    from copy import deepcopy
+    from dracon.nodes import DraconMappingNode, DraconScalarNode
+
+    k = DraconScalarNode(tag='tag:yaml.org,2002:str', value='k')
+    v = DraconScalarNode(tag='tag:yaml.org,2002:str', value='v')
+    n = DraconMappingNode(tag='tag:yaml.org,2002:map', value=[(k, v)])
+    n._live_scope_stack = (('component',),)
+    c = deepcopy(n)
+    assert getattr(c, '_live_scope_stack', ()) == (('component',),)
+
+
+def test_sequence_node_deepcopy_preserves_context():
+    from copy import deepcopy
+    from dracon.nodes import DraconSequenceNode, DraconScalarNode
+
+    n = DraconSequenceNode(
+        tag='tag:yaml.org,2002:seq',
+        value=[DraconScalarNode(tag='tag:yaml.org,2002:int', value='1')],
+    )
+    n.context = {'x': 1}
+    c = deepcopy(n)
+    assert getattr(c, 'context', None) == {'x': 1}

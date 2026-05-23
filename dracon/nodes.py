@@ -104,6 +104,37 @@ class SourceContextMixin:
         self._source_context = value
 
 
+# SSOT for the dynamic attributes composer passes graft onto nodes after they
+# leave the parser. Every node-copy path (`__deepcopy__`, `__getstate__`/
+# `__setstate__`, `fast_copy_node_tree`) routes through these helpers so a new
+# attribute only has to be registered here once.
+_DYNAMIC_NODE_ATTRS: tuple[str, ...] = (
+    'context',             # !define / !set_default propagation, !include capture
+    '_live_scope_stack',   # !cascade select-mode + !live live-scope frames
+    '_clear_ctx',          # explicit context-key removal markers
+    '_cascade_strategy',   # inherit-mode cascade peer-merge marker
+)
+
+
+def _capture_dynamic_attrs(node, *, copy_context: bool = True) -> dict:
+    """Snapshot the dynamic attrs present on `node`. Used by every copy path."""
+    out = {}
+    for name in _DYNAMIC_NODE_ATTRS:
+        val = getattr(node, name, None)
+        if val is None:
+            continue
+        if copy_context and name == 'context' and hasattr(val, 'copy'):
+            val = val.copy()
+        out[name] = val
+    return out
+
+
+def _restore_dynamic_attrs(node, captured: dict) -> None:
+    """Reapply attrs captured by `_capture_dynamic_attrs`."""
+    for name, val in captured.items():
+        setattr(node, name, val)
+
+
 def base_node_hash(node):
     return hash(
         (node.tag, node.value, node.start_mark.line, node.start_mark.column, node.start_mark.name)
@@ -134,6 +165,7 @@ class DraconScalarNode(SourceContextMixin, ScalarNode):
             'comment': self.comment,
             'anchor': self.anchor,
             '_source_context': self._source_context,
+            '_dynamic_attrs': _capture_dynamic_attrs(self),
         }
         return state
 
@@ -146,6 +178,7 @@ class DraconScalarNode(SourceContextMixin, ScalarNode):
         self.comment = state['comment']
         self.anchor = state['anchor']
         self._source_context = state.get('_source_context')
+        _restore_dynamic_attrs(self, state.get('_dynamic_attrs', {}))
 
 
 class ContextNode(DraconScalarNode):
@@ -389,6 +422,7 @@ class DraconMappingNode(SourceContextMixin, MappingNode):
         )
 
     def __deepcopy__(self, memo):
+        from copy import deepcopy as _dc
         copied_value = deepcopy(self.value, memo)
         # bypass __init__ to avoid expensive _recompute_map() - set map directly
         n = DraconMappingNode.__new__(DraconMappingNode)
@@ -399,9 +433,10 @@ class DraconMappingNode(SourceContextMixin, MappingNode):
         n._recompute_map()
         n.ctag = self.ctag
         n.id = self.id
-        ctx = getattr(self, 'context', None)
-        if ctx is not None:
-            n.context = ctx.copy() if hasattr(ctx, 'copy') else ctx
+        captured = _capture_dynamic_attrs(self, copy_context=False)
+        for k, v in captured.items():
+            captured[k] = _dc(v, memo)
+        _restore_dynamic_attrs(n, captured)
         return n
 
     def append(self, newvalue: tuple[Node, Node]):
@@ -429,6 +464,7 @@ class DraconMappingNode(SourceContextMixin, MappingNode):
             'anchor': self.anchor,
             'map': self.map,
             '_source_context': self._source_context,
+            '_dynamic_attrs': _capture_dynamic_attrs(self),
         }
         return state
 
@@ -442,6 +478,7 @@ class DraconMappingNode(SourceContextMixin, MappingNode):
         self.anchor = state['anchor']
         self.map = state['map']
         self._source_context = state.get('_source_context')
+        _restore_dynamic_attrs(self, state.get('_dynamic_attrs', {}))
 
     @classmethod
     def make_empty(cls, tag: Any = DEFAULT_MAP_TAG, start_mark: Any = None, end_mark: Any = None):
@@ -562,6 +599,7 @@ class DraconSequenceNode(SourceContextMixin, SequenceNode):
         return node_repr(self)
 
     def __deepcopy__(self, memo):
+        from copy import deepcopy as _dc
         n = self.__class__(
             tag=self.tag,
             value=deepcopy(self.value, memo),
@@ -574,10 +612,10 @@ class DraconSequenceNode(SourceContextMixin, SequenceNode):
         )
         n.ctag = self.ctag
         n.id = self.id
-        # preserve dynamically-set context (e.g. from !define propagation)
-        ctx = getattr(self, 'context', None)
-        if ctx is not None:
-            n.context = ctx.copy() if hasattr(ctx, 'copy') else ctx
+        captured = _capture_dynamic_attrs(self, copy_context=False)
+        for k, v in captured.items():
+            captured[k] = _dc(v, memo)
+        _restore_dynamic_attrs(n, captured)
         return n
 
 

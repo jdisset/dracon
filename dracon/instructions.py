@@ -1446,10 +1446,14 @@ class Cascade(Instruction):
             tree = loader.load_composition_result(
                 CompositionResult(root=deepcopy(subject)), post_process=True,
             )
-            _replace(PyValueNode(strategy.apply(tree), label=f'cascade:{strategy.name}'))
+            inh_node = PyValueNode(strategy.apply(tree), label=f'cascade:{strategy.name}')
+            # peer-merge marker: inherit-mode wraps a plain dict, so without
+            # this annotation the merge engine has no way to recognize
+            # same-strategy peers across a merge boundary.
+            inh_node._cascade_strategy = strategy
+            _replace(inh_node)
             return comp_res
 
-        # __deepcopy__ drops _live_scope_stack, so push it back on before materialising
         names = strategy.input_params
         body = deepcopy(subject)
         def _push(node):

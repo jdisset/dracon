@@ -681,7 +681,12 @@ def fast_copy_node_tree(node):
     memo dict, and reconstructor overhead. Shares immutable attributes
     (tags, marks, styles) and only copies mutable structure (value lists,
     context dicts).
+
+    Dynamic attrs grafted by composer passes (`context`, `_live_scope_stack`,
+    ...) round-trip through `_capture_dynamic_attrs` / `_restore_dynamic_attrs`
+    — single source of truth lives in `dracon.nodes._DYNAMIC_NODE_ATTRS`.
     """
+    from dracon.nodes import _capture_dynamic_attrs, _restore_dynamic_attrs
     cls = type(node)
     if cls is DraconMappingNode:
         # recursively copy children
@@ -701,9 +706,7 @@ def fast_copy_node_tree(node):
         n.id = node.id
         n._source_context = node._source_context
         n._recompute_map()
-        ctx = getattr(node, 'context', None)
-        if ctx is not None:
-            n.context = ctx.copy() if hasattr(ctx, 'copy') else dict(ctx)
+        _restore_dynamic_attrs(n, _capture_dynamic_attrs(node))
         return n
     elif cls is DraconSequenceNode:
         new_value = [fast_copy_node_tree(v) for v in node.value]
@@ -718,9 +721,7 @@ def fast_copy_node_tree(node):
         n.ctag = node.ctag
         n.id = node.id
         n._source_context = node._source_context
-        ctx = getattr(node, 'context', None)
-        if ctx is not None:
-            n.context = ctx.copy() if hasattr(ctx, 'copy') else dict(ctx)
+        _restore_dynamic_attrs(n, _capture_dynamic_attrs(node))
         return n
     elif cls is InterpolableNode:
         # InterpolableNode has mutable context - must copy
@@ -790,9 +791,7 @@ def fast_copy_node_tree(node):
             n.ctag = node.ctag
         if hasattr(node, 'id'):
             n.id = node.id
-        ctx = getattr(node, 'context', None)
-        if ctx is not None:
-            n.context = ctx.copy() if hasattr(ctx, 'copy') else dict(ctx)
+        _restore_dynamic_attrs(n, _capture_dynamic_attrs(node))
         return n
 
 

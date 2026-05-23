@@ -444,6 +444,14 @@ def merged(existing: Any, new: Any, k: MergeKey = DEFAULT_ADD_TO_CONTEXT_MERGE_K
         # skip deep-merging nested objects that opt out (e.g. SymbolTable used as __scope__)
         if depth > 0 and (getattr(v1, '__dracon_no_merge__', False) or getattr(v2, '__dracon_no_merge__', False)):
             return v1 if _existing_wins else v2
+
+        # peer cascade merge: same-strategy cascades crossing a merge boundary
+        # union their bodies (symmetric or asymmetric stack case)
+        from dracon.cascade import try_peer_cascade_merge
+        cascade_res = try_peer_cascade_merge(v1, v2, k)
+        if cascade_res is not None:
+            return cascade_res
+
         if type(v1) is type(v2) and hasattr(v1, 'merged_with') and hasattr(v2, 'merged_with'):
             return v1.merged_with(v2, depth + 1)
         elif dict_like(v1) and dict_like(v2):

@@ -19,6 +19,7 @@ Strategies register via `register_cascade_strategy(strategy)`; the
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Any
 
@@ -171,6 +172,16 @@ _register_parametric('strip_suffix', _build_strip_suffix)
 # ── select-mode `match` strategy ────────────────────────────────────────────
 
 
+def _call_specificity(fn, parsed, input_value):
+    """Call specificity with (parsed, input) if it accepts 2 args, else (parsed)."""
+    if fn is None:
+        return (0,)
+    try:
+        return fn(parsed, input_value)
+    except TypeError:
+        return fn(parsed)
+
+
 def _cascade_select(rule_tree, kwargs, strategy: CascadeStrategy):
     """Walk rule_tree, collect (specificity, source_order, value) for matching
     keys, sort, and merge with new-wins semantics by default. Live-scope
@@ -187,7 +198,7 @@ def _cascade_select(rule_tree, kwargs, strategy: CascadeStrategy):
             continue
         if strategy.matches and not strategy.matches(parsed, input_value):
             continue
-        spec = strategy.specificity(parsed) if strategy.specificity else (0,)
+        spec = _call_specificity(strategy.specificity, parsed, input_value)
         matches.append((spec, source_idx, value))
     if not matches:
         return {}
@@ -288,3 +299,128 @@ def _register_match_strategy():
 
 
 _register_match_strategy()
+
+
+# ── peer-cascade merge (SSOT for "same-strategy cascades collide on a merge
+# boundary") ────────────────────────────────────────────────────────────────
+#
+# Two same-strategy cascades meeting at a merge boundary must union their
+# bodies, not overwrite one another. Three shapes show up in practice:
+#
+#  1) symmetric `PyValueNode(CallableSymbol-match)` × 2 — both sides have
+#     already been materialised by `Cascade.process`. Happens with in-file
+#     `<<:` peer cascades after `process_instructions` ran.
+#  2) asymmetric `PyValueNode(CallableSymbol-match)` × raw `!cascade:NAME`
+#     mapping — `stack(...)` merges a post-processed prev with a raw comp
+#     whose cascade instruction hasn't run yet.
+#  3) symmetric `PyValueNode(plain dict from inherit-mode)` × 2 — inherit
+#     cascades emit a plain dict; peers must merge dict-wise.
+#
+# Cases 1 and 3 reduce to "unwrap and recurse" (the merge engine handles
+# the inner value); the dispatch knob is `CallableSymbol.merged_with` for
+# kind 'match'. Case 2 rehydrates the materialised side via `dump_to_node`
+# so the merge proceeds at the raw-mapping level and the subsequent
+# `post_process_composed` re-runs `Cascade.process` on the union.
+
+
+_CASCADE_TAG_PATTERN = re.compile(r'^!cascade:([A-Za-z_]\w*)(?:\(([^)]+)\))?$')
+
+
+def _is_match_pvn(v) -> bool:
+    """Test for a PyValueNode wrapping a select-mode (match) CallableSymbol."""
+    from dracon.symbols import CallableSymbol
+    from dracon.loaders.py import PyValueNode
+    return (
+        isinstance(v, PyValueNode)
+        and isinstance(v.py_value, CallableSymbol)
+        and v.py_value._kind == 'match'
+    )
+
+
+def _cascade_strategy_name(v) -> Optional[str]:
+    """Return the canonical strategy name (matching `CascadeStrategy.name`) for
+    a cascade-bearing value, or None when v isn't a cascade peer.
+
+    Covers: PyValueNode wrapping a match CallableSymbol; PyValueNode wrapping
+    an inherit-mode result (carries `_cascade_strategy` marker set by
+    `Cascade.process`); raw YAML mapping nodes tagged `!cascade:NAME` or
+    `!cascade:NAME(ARG)`.
+    """
+    from dracon.symbols import CallableSymbol
+    from dracon.loaders.py import PyValueNode
+    if isinstance(v, PyValueNode):
+        py = v.py_value
+        if isinstance(py, CallableSymbol) and py._kind == 'match':
+            return py._cascade_strategy.name
+        marker = getattr(v, '_cascade_strategy', None)
+        if marker is not None:
+            return marker.name
+    tag = getattr(v, 'tag', None)
+    if isinstance(tag, str):
+        m = _CASCADE_TAG_PATTERN.match(tag)
+        if m:
+            base, arg = m.group(1), m.group(2)
+            return f"{base}:{arg}" if arg else base
+    return None
+
+
+def _rehydrate_match_sym(sym) -> Any:
+    """Convert a match-kind CallableSymbol back to a `!cascade:NAME` tagged
+    mapping node so it can re-enter the merge engine and `Cascade.process`.
+
+    `_MatchStrategy.dump` already produces the correct tagged mapping; we
+    just route through `dump_to_node`, which uses the registered representer.
+    """
+    from dracon.loader import dump_to_node as _dump
+    return _dump(sym)
+
+
+def try_peer_cascade_merge(v1: Any, v2: Any, merge_key: MergeKey) -> Any:
+    """If v1 and v2 are peer cascades of the same strategy, combine them.
+    Returns the merged value, or None when they don't form a cascade pair.
+
+    Called from `merge_value` ahead of the generic fallback so that
+    constructed cascade values participate in stack / `<<:` merges instead
+    of being treated as opaque scalars.
+    """
+    n1 = _cascade_strategy_name(v1)
+    if n1 is None:
+        return None
+    n2 = _cascade_strategy_name(v2)
+    if n2 != n1:
+        return None
+
+    from dracon.loaders.py import PyValueNode
+
+    # symmetric match: merge rule_trees directly
+    if _is_match_pvn(v1) and _is_match_pvn(v2):
+        from dracon.symbols import CallableSymbol
+        s1, s2 = v1.py_value, v2.py_value
+        merged_tree = merged(s1._rule_tree, s2._rule_tree, merge_key)
+        sym = CallableSymbol.from_match(
+            merged_tree, s1._cascade_strategy,
+            loader=s1._loader or s2._loader,
+            source=s1._source or s2._source,
+            name=s1._name,
+        )
+        return PyValueNode(sym, label=f"cascade:{n1}")
+
+    # symmetric inherit: both PyValueNode wrap a plain dict; merge dict-wise
+    inh_marker_1 = isinstance(v1, PyValueNode) and getattr(v1, '_cascade_strategy', None) is not None
+    inh_marker_2 = isinstance(v2, PyValueNode) and getattr(v2, '_cascade_strategy', None) is not None
+    if inh_marker_1 and inh_marker_2 and not _is_match_pvn(v1) and not _is_match_pvn(v2):
+        out = merged(v1.py_value, v2.py_value, merge_key)
+        wrapped = PyValueNode(out, label=f"cascade:{n1}")
+        wrapped._cascade_strategy = getattr(v1, '_cascade_strategy', None) \
+            or getattr(v2, '_cascade_strategy', None)
+        return wrapped
+
+    # asymmetric: one match-PVN, one raw `!cascade:NAME` mapping. Rehydrate
+    # the materialised side so the merge runs at the body level and a later
+    # `Cascade.process` rebuilds the union.
+    if _is_match_pvn(v1) and not _is_match_pvn(v2) and hasattr(v2, 'tag'):
+        return merged(_rehydrate_match_sym(v1.py_value), v2, merge_key)
+    if _is_match_pvn(v2) and not _is_match_pvn(v1) and hasattr(v1, 'tag'):
+        return merged(v1, _rehydrate_match_sym(v2.py_value), merge_key)
+
+    return None
