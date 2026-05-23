@@ -73,6 +73,7 @@ nav:
       - "Deferred Execution": "guides/deferred-execution.md"
       - "Secrets and Environment": "guides/secrets-and-env.md"
       - "Debugging": "guides/debugging.md"
+      - "Observing Progress": "guides/observing-progress.md"
       - "Serialization": "guides/serialization.md"
       - "Extending Dracon": "guides/extending-dracon.md"
       - "Migration from Hydra": "guides/migration-from-hydra.md"
@@ -106,6 +107,7 @@ nav:
       - "Interpolation": "reference/interpolation.md"
       - "KeyPaths": "reference/keypaths.md"
       - "Include Schemes": "reference/include-schemes.md"
+      - "Progress Events": "reference/progress-events.md"
       - "dracon CLI": "reference/dracon-cli.md"
 # Add static assets if needed (e.g., logo)
 # extra:

@@ -122,6 +122,7 @@ python app.py +base.yaml +prod.yaml --workers 8
 - `dracon show` and provenance tracing for debugging composition
 - Bidirectional vocabulary: `dump`/`dump_to_node` round-trip Pydantic models and dracon-native wrappers through the same `SymbolTable` that drives the load path
 - `dump_line`/`loads_line`/`document_stream` for line-framed wire protocols and log-replay streams
+- Live progress events: typed-tag construction and `${...}` resolution emit nestable spans to any `Callable[[Event], None]` subscriber, zero-cost when unbound
 
 ## Patterns Worth Knowing
 
