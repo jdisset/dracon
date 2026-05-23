@@ -55,11 +55,8 @@ _PROGRESS_SKIP_TAGS = frozenset({
 
 
 def _is_progress_tag(tag) -> bool:
-    if not tag or not isinstance(tag, str) or not tag.startswith('!'):
-        return False
-    if tag.startswith('!!'):
-        return False
-    return tag not in _PROGRESS_SKIP_TAGS
+    return (isinstance(tag, str) and tag.startswith('!')
+            and not tag.startswith('!!') and tag not in _PROGRESS_SKIP_TAGS)
 
 ## {{{                        --     type utils     --
 
@@ -353,10 +350,9 @@ class Draconstructor(Constructor):
         if isinstance(node, (MappingNode, SequenceNode)):
             tag = self._resolve_interpolated_tag(node, current_loader_context)
 
-        _pg_sub = _progress._subscriber.get()
         _pg_cm = (
             _progress.step(f"construct {tag}", tag=str(tag))
-            if _pg_sub is not None and _is_progress_tag(tag)
+            if _is_progress_tag(tag) and _progress._subscriber.get() is not None
             else nullcontext()
         )
 

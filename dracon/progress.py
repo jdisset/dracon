@@ -23,7 +23,7 @@ import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from itertools import count
-from typing import Any, Callable, IO, Iterable, Iterator, Union
+from typing import Any, Callable, IO, Iterable, Iterator
 
 from pydantic import BaseModel, Field
 
@@ -43,7 +43,7 @@ class StepEnd(BaseModel):
     error: str | None = None
 
 
-Event = Union[StepStart, StepEnd]
+Event = StepStart | StepEnd
 Subscriber = Callable[[Event], None]
 
 
@@ -54,10 +54,6 @@ _id_seq = count(1)
 
 def subscriber() -> Subscriber | None:
     return _subscriber.get()
-
-
-def active_id() -> int | None:
-    return _active_id.get()
 
 
 @contextmanager

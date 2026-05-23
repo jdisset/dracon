@@ -30,6 +30,8 @@ from dracon.interpolation_utils import InterpolationMatch, outermost_lazy_interp
 from dracon.interpolation import evaluate_expression, InterpolationError, DraconError, _free_names
 from dracon.symbols import InterfaceSpec, ParamSpec, SymbolKind, BoundSymbol
 from dracon.utils import list_like, dict_like, raw_items, DEFAULT_EVAL_ENGINE
+from dracon import progress as _progress
+from contextlib import nullcontext
 
 import inspect
 from pydantic_core import core_schema  # Added core_schema
@@ -247,13 +249,8 @@ class LazyInterpolable(Lazy[T]):
 
     def resolve(self, context_override=None) -> T:
         if isinstance(self.value, str):
-            from dracon import progress as _progress
-            from contextlib import nullcontext
-            _pg_cm = (
-                _progress.step(f"resolve {self.value}", expr=self.value)
-                if _progress._subscriber.get() is not None
-                else nullcontext()
-            )
+            _pg_cm = (_progress.step(f"resolve {self.value}", expr=self.value)
+                      if _progress._subscriber.get() is not None else nullcontext())
             try:
                 with _pg_cm:
                     ctx = self.context if self.context is not None else {}
