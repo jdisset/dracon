@@ -87,6 +87,15 @@ def test_each_unsized_iterable():
     assert names == ["stream 1", "stream 2"]
 
 
+def test_each_explicit_total_overrides_missing_len():
+    out, sink = _collect()
+    with use_subscriber(sink):
+        for _ in each("network", iter([1, 2, 3]), total=3):
+            pass
+    names = [e.name for e in out if isinstance(e, StepStart)]
+    assert names == ["network 1/3", "network 2/3", "network 3/3"]
+
+
 def test_tee_fans_out():
     a_out, a = _collect()
     b_out, b = _collect()

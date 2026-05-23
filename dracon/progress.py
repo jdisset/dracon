@@ -88,13 +88,14 @@ def step(name: str, **meta: Any) -> Iterator[int | None]:
         sub(StepEnd(id=sid, ended_at=t1, duration=t1 - t0, error=err))
 
 
-def each(name: str, items: Iterable[Any]) -> Iterator[Any]:
-    try:
-        n = len(items)  # type: ignore[arg-type]
-    except TypeError:
-        n = None
+def each(name: str, items: Iterable[Any], total: int | None = None) -> Iterator[Any]:
+    if total is None:
+        try:
+            total = len(items)  # type: ignore[arg-type]
+        except TypeError:
+            total = None
     for i, item in enumerate(items):
-        label = f"{name} {i+1}/{n}" if n else f"{name} {i+1}"
+        label = f"{name} {i + 1}/{total}" if total else f"{name} {i + 1}"
         with step(label):
             yield item
 
