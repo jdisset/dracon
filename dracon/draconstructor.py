@@ -36,6 +36,8 @@ from dracon.callable import DraconCallable
 from dracon.pipe import DraconPipe
 from dracon.partial import DraconPartial
 from dracon.symbols import CallableSymbol
+from dracon import progress as _progress
+from contextlib import nullcontext
 import logging
 
 logger = logging.getLogger("dracon")
@@ -45,6 +47,19 @@ logger = logging.getLogger("dracon")
 # !unset: mark a key for deletion (survives composition & merging, removed at construction)
 _SKIP_TAGS = frozenset({'!noconstruct', '!unset'})
 _SYMBOL_MISS = object()  # sentinel: tag is not a symbol invocation
+
+# tags excluded from auto-progress spans: cheap markers, references, raw passthroughs
+_PROGRESS_SKIP_TAGS = frozenset({
+    '!noconstruct', '!unset', '!__py__', '!Type', '!Ref', '!raw',
+})
+
+
+def _is_progress_tag(tag) -> bool:
+    if not tag or not isinstance(tag, str) or not tag.startswith('!'):
+        return False
+    if tag.startswith('!!'):
+        return False
+    return tag not in _PROGRESS_SKIP_TAGS
 
 ## {{{                        --     type utils     --
 
@@ -338,7 +353,15 @@ class Draconstructor(Constructor):
         if isinstance(node, (MappingNode, SequenceNode)):
             tag = self._resolve_interpolated_tag(node, current_loader_context)
 
+        _pg_sub = _progress._subscriber.get()
+        _pg_cm = (
+            _progress.step(f"construct {tag}", tag=str(tag))
+            if _pg_sub is not None and _is_progress_tag(tag)
+            else nullcontext()
+        )
+
         try:
+          with _pg_cm:
             if str(tag) in _SKIP_TAGS:
                 return None
 

@@ -247,29 +247,37 @@ class LazyInterpolable(Lazy[T]):
 
     def resolve(self, context_override=None) -> T:
         if isinstance(self.value, str):
+            from dracon import progress as _progress
+            from contextlib import nullcontext
+            _pg_cm = (
+                _progress.step(f"resolve {self.value}", expr=self.value)
+                if _progress._subscriber.get() is not None
+                else nullcontext()
+            )
             try:
-                ctx = self.context if self.context is not None else {}
-                logger.debug(f"Resolving lazy value: {self.value}, context_override: {context_override}")
-                if context_override is not None:
-                    # preserve context_override type (e.g. TrackedContext) for tracking
-                    if hasattr(context_override, 'copy'):
-                        merged_ctx = context_override.copy()
-                        merged_ctx.update(ctx)
-                        ctx = merged_ctx
-                    else:
-                        ctx = {**ctx, **context_override}
-                resolved_value = evaluate_expression(
-                    self.value,
-                    self.current_path,
-                    self.root_obj,
-                    init_outermost_interpolations=self.init_outermost_interpolations,
-                    engine=self.engine,
-                    context=ctx,
-                    enable_shorthand_vars=self.enable_shorthand_vars,
-                    source_context=self.source_context,
-                    permissive=self.permissive,
-                )
-                return self.validate(resolved_value)
+                with _pg_cm:
+                    ctx = self.context if self.context is not None else {}
+                    logger.debug(f"Resolving lazy value: {self.value}, context_override: {context_override}")
+                    if context_override is not None:
+                        # preserve context_override type (e.g. TrackedContext) for tracking
+                        if hasattr(context_override, 'copy'):
+                            merged_ctx = context_override.copy()
+                            merged_ctx.update(ctx)
+                            ctx = merged_ctx
+                        else:
+                            ctx = {**ctx, **context_override}
+                    resolved_value = evaluate_expression(
+                        self.value,
+                        self.current_path,
+                        self.root_obj,
+                        init_outermost_interpolations=self.init_outermost_interpolations,
+                        engine=self.engine,
+                        context=ctx,
+                        enable_shorthand_vars=self.enable_shorthand_vars,
+                        source_context=self.source_context,
+                        permissive=self.permissive,
+                    )
+                    return self.validate(resolved_value)
             except InterpolationError:
                 raise
             except Exception as e:
