@@ -84,12 +84,15 @@ def _dynamic_import_lookup(tag_name: str) -> Symbol[Any] | None:
         return cached
 
     from dracon.draconstructor import resolve_type
+    from dracon.progress import step
     from typing import Any as _Any
 
-    try:
-        resolved = resolve_type(f'!{tag_name}', localns={})
-    except Exception:
-        resolved = None
+    module = tag_name.rsplit('.', 1)[0] if '.' in tag_name else tag_name
+    with step(f"import {module}"):
+        try:
+            resolved = resolve_type(f'!{tag_name}', localns={})
+        except Exception:
+            resolved = None
     sym = auto_symbol(resolved, name=tag_name) if (resolved is not None and resolved is not _Any) else None
     _dynamic_lookup_cache[tag_name] = sym if sym is not None else _DYNAMIC_LOOKUP_MISS
     return sym
