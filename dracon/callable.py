@@ -165,7 +165,11 @@ def _run_template(sym, kwargs, invocation_context=None):
         loader_copy = sym._loader.copy()
         if invocation_context:
             loader_copy.update_context(invocation_context)
-        ctx = {**sym._file_context, **kwargs} if sym._file_context else kwargs
+        if sym._cached_params is None:
+            sym._cached_params = _scan_template_interface(sym._template_node, sym._loader)
+        declared = {p.name for p in sym._cached_params[0]}
+        extras = {k: v for k, v in kwargs.items() if k not in declared}
+        ctx = {**(sym._file_context or {}), **kwargs, '__extras__': extras}
         loader_copy.update_context(ctx)
         result = loader_copy.load_composition_result(CompositionResult(root=node))
 
