@@ -63,6 +63,21 @@ class PyValueNode(DraconScalarNode):
         self.py_value = state.pop('py_value', None)
         super().__setstate__(state)
 
+    def __deepcopy__(self, memo):
+        "py_value stays shared by reference; only the node shell is copied."
+        from copy import deepcopy as _dc
+        from dracon.nodes import _capture_dynamic_attrs, _restore_dynamic_attrs
+        new = PyValueNode(
+            self.py_value, label=self.value,
+            start_mark=self.start_mark, end_mark=self.end_mark,
+            style=self.style, comment=self.comment, anchor=self.anchor,
+            source_context=self._source_context,
+        )
+        _restore_dynamic_attrs(
+            new, {k: _dc(v, memo) for k, v in _capture_dynamic_attrs(self).items()}
+        )
+        return new
+
     def __getitem__(self, key):
         # virtual selectors for `!include py:fn@defaults`
         if key == 'defaults':

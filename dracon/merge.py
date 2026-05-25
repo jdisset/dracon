@@ -22,6 +22,9 @@ from dracon.nodes import (
     DraconSequenceNode,
     IncludeNode,
     node_source,
+    make_scalar_node,
+    make_mapping_node,
+    make_sequence_node,
 )
 from dracon.diagnostics import CompositionError
 from ruamel.yaml.nodes import Node
@@ -75,6 +78,39 @@ def _has_constructible_tag(node):
     return tag.startswith('!')
 
 
+def _value_to_merge_node(value, *, expand_top: bool = False):
+    """resolved value -> mergeable node. containers expand structurally;
+    constructed objects (models, arrays, instances) are held by reference in a
+    PyValueNode so the merge stays O(structure) and round-trips by identity.
+    `expand_top` expands a top-level model into a field mapping (`<<: ${model}`)."""
+    from dracon.loaders.py import PyValueNode
+    if isinstance(value, Node):
+        return value
+    if dict_like(value):
+        pairs = [
+            (k if isinstance(k, Node) else make_scalar_node(str(k)), _value_to_merge_node(v))
+            for k, v in value.items()
+        ]
+        return make_mapping_node(pairs)
+    if isinstance(value, (list, tuple)):
+        return make_sequence_node([_value_to_merge_node(v) for v in value])
+    if value is None or isinstance(value, (str, bool, int, float, bytes)):
+        from dracon.loader import dump_to_node
+        return dump_to_node(value)
+    if expand_top and isinstance(value, BaseModel):
+        return _model_to_merge_node(value)
+    return PyValueNode(value)
+
+
+def _model_to_merge_node(model):
+    """expand a model's emittable fields into a mapping, each value held by
+    reference. field set comes from the representer (SSOT)."""
+    from dracon.representer import _emit_pydantic_fields
+    fields = [(k, getattr(model, attr)) for attr, k in _emit_pydantic_fields(model, exclude_defaults=True)]
+    fields += (getattr(model, '__pydantic_extra__', None) or {}).items()
+    return make_mapping_node([(make_scalar_node(str(k)), _value_to_merge_node(v)) for k, v in fields])
+
+
 def _realize_tagged_merge_source(merge_node, loader):
     """Construct a tagged merge-source node so its *output* can be merged.
 
@@ -94,7 +130,6 @@ def _realize_tagged_merge_source(merge_node, loader):
         return merge_node
     if not _has_constructible_tag(merge_node):
         return merge_node
-    from dracon.loader import dump_to_node
     try:
         result = loader.load_node(deepcopy(merge_node))
     except Exception as e:
@@ -104,10 +139,16 @@ def _realize_tagged_merge_source(merge_node, loader):
         )
         return merge_node
     try:
-        return dump_to_node(result)
+        # keep the source's own tag so the merged parent reconstructs as that
+        # type, re-resolving the tag that just built `result` (no module.qualname
+        # round-trip that would break for dynamically-created classes).
+        node = _value_to_merge_node(result, expand_top=True)
+        if isinstance(result, BaseModel) and isinstance(node, DraconMappingNode):
+            node.tag = merge_node.tag
+        return node
     except Exception as e:
         logger.debug(
-            f"could not dump realised merge source back to a node: {e}. "
+            f"could not realise merge source back to a node: {e}. "
             f"falling back to naive merge."
         )
         return merge_node
@@ -130,8 +171,7 @@ def _realize_interpolable_merge_source(merge_node, loader):
             "inline mapping, an anchor, or a `!define`-bound value.",
             context=node_source(merge_node),
         ) from e
-    from dracon.loader import dump_to_node
-    realised = dump_to_node(value)
+    realised = _value_to_merge_node(value, expand_top=True)
     realised.context = getattr(merge_node, 'context', None) or getattr(realised, 'context', None)
     return realised
 
