@@ -503,13 +503,21 @@ class DraconComposer(Composer):
         event = self.parser.get_event()
         tag = event.ctag
 
+        value = event.value
+        if event.style == '>' and isinstance(value, str):
+            # ruamel's round-trip scanner marks every fold point in a folded
+            # block scalar with a BEL ('\a'); its own constructor strips it.
+            # we compose our own nodes, so strip it here -- gated on the folded
+            # style so a real BEL in a quoted scalar survives untouched.
+            value = value.replace('\a', '')
+
         if tag is None or str(tag) == '!':
-            tag = self.resolver.resolve(ScalarNode, event.value, event.implicit)
+            tag = self.resolver.resolve(ScalarNode, value, event.implicit)
             assert not isinstance(tag, str)
 
         node = ScalarNode(
             tag,
-            event.value,
+            value,
             event.start_mark,
             event.end_mark,
             style=event.style,
