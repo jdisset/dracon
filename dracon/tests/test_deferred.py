@@ -1478,4 +1478,49 @@ def test_deferred_include_at_runtime(tmp_path):
     assert r.extra_key == 'hello'
 
 
+def test_deferred_paths_recursive_glob_converges():
+    # a `**` recursive glob in deferred_paths must wrap each matching *value*
+    # node exactly once and reach a fixpoint -- it must not match (or attempt
+    # to wrap) the mapping-key node and loop forever (regression: max_passes
+    # RuntimeError from process_deferred's NodeRewriter).
+    Y = """
+    parent:
+      child:
+        leaf: {k: 1}
+    """
+    cfg = DraconLoader(context={}, deferred_paths=["/**.leaf"]).loads(Y)
+    assert isinstance(cfg.parent.child.leaf, DeferredNode)
+    constructed = cfg.parent.child.leaf.construct()
+    assert constructed.k == 1
+
+
+def test_deferred_paths_recursive_glob_matches_multiple_depths():
+    # `**` is depth-agnostic: it should defer every value keyed `leaf`,
+    # wherever it sits, and still converge.
+    Y = """
+    a:
+      leaf: {x: 1}
+    b:
+      c:
+        leaf: {x: 2}
+    """
+    cfg = DraconLoader(context={}, deferred_paths=["/**.leaf"]).loads(Y)
+    assert isinstance(cfg.a.leaf, DeferredNode)
+    assert isinstance(cfg.b.c.leaf, DeferredNode)
+    assert cfg.a.leaf.construct().x == 1
+    assert cfg.b.c.leaf.construct().x == 2
+
+
+def test_deferred_paths_recursive_glob_matching_nothing():
+    # `**` that matches nothing must be a clean no-op.
+    Y = """
+    parent:
+      child:
+        leaf: {k: 1}
+    """
+    cfg = DraconLoader(context={}, deferred_paths=["/**.nonexistent"]).loads(Y)
+    assert not isinstance(cfg.parent.child.leaf, DeferredNode)
+    assert cfg.parent.child.leaf.k == 1
+
+
 ##────────────────────────────────────────────────────────────────────────────}}}

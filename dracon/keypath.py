@@ -379,9 +379,12 @@ class KeyPath:
         return iter(self.parts)
 
     def startswith(self, other: 'KeyPath') -> bool:
-        if len(other) > len(self):
+        # prefix check on raw parts -- must not use __len__, which subtracts one
+        # for a trailing MAPPING_KEY and would make a mapping-key path fail to be
+        # recognised as a prefix of itself
+        if len(other.parts) > len(self.parts):
             return False
-        return self.parts[: len(other)] == other.parts
+        return self.parts[: len(other.parts)] == other.parts
 
     def check_correctness(self) -> None:
         if self.parts and self.parts[-1] == KeyPathToken.MAPPING_KEY:

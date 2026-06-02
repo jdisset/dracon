@@ -783,6 +783,10 @@ def process_deferred(
     def discover(node, path):
         if isinstance(node, DeferredNode):
             return False
+        # deferral wraps values, never keys -- a `**` glob can otherwise skip
+        # over the MAPPING_KEY token and match a key node, which can't be wrapped
+        if path.is_mapping_key():
+            return False
         # already wrapped under a previously processed deferred ancestor
         if any(path.startswith(p) for p in processed_paths):
             return False

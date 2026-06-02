@@ -336,6 +336,27 @@ def test_match_multi_wildcard():
     assert not pattern.match(target4)
 
 
+def test_startswith_prefix_semantics():
+    p = KeyPath("/a.b.c")
+    assert p.startswith(KeyPath("/a"))
+    assert p.startswith(KeyPath("/a.b"))
+    assert p.startswith(p.copy())
+    assert not p.startswith(KeyPath("/a.x"))
+    assert not p.startswith(KeyPath("/a.b.c.d"))
+
+
+def test_startswith_mapping_key_path():
+    # a mapping-key path must be a prefix of itself; the MAPPING_KEY marker
+    # must not corrupt prefix length accounting (regression: __len__ subtracts
+    # 1 for mapping keys, which made path.startswith(path) return False and
+    # broke the process_deferred idempotency guard).
+    mk = KeyPath("/parent.child") + KeyPathToken.MAPPING_KEY + KeyPath("leaf")
+    assert mk.is_mapping_key()
+    assert mk.startswith(mk.copy())
+    assert mk.startswith(KeyPath("/parent"))
+    assert mk.startswith(KeyPath("/parent.child"))
+
+
 def test_match_partial_segment():
     pattern = KeyPath("a.b*.d")
     target1 = KeyPath("a.b.d")

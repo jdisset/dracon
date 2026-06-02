@@ -14,7 +14,7 @@ from dracon.composer import (
 )
 from dracon.utils import ShallowDict
 from ruamel.yaml.nodes import Node
-from dracon.keypath import KeyPath, KeyPathToken, MAPPING_KEY
+from dracon.keypath import KeyPath, KeyPathToken, MAPPING_KEY, simplify_parts
 from dracon.nodes import node_source
 from dracon.merge import merged, cached_merge_key, add_to_context
 from dracon.interpolation import evaluate_expression, InterpolableNode, LazyConstructable
@@ -128,9 +128,9 @@ class DeferredInstruction:
 
 
 def _path_has_prefix(path: KeyPath, prefix: KeyPath) -> bool:
-    path_parts = tuple(path.simplified().parts)
-    prefix_parts = tuple(prefix.simplified().parts)
-    return len(path_parts) >= len(prefix_parts) and path_parts[:len(prefix_parts)] == prefix_parts
+    path_parts = tuple(path.parts) if path.is_simple else simplify_parts(path.parts)
+    prefix_parts = tuple(prefix.parts) if prefix.is_simple else simplify_parts(prefix.parts)
+    return len(path_parts) >= len(prefix_parts) and path_parts[: len(prefix_parts)] == prefix_parts
 
 
 def path_is_under_any(path: KeyPath, prefixes: tuple[KeyPath, ...]) -> bool:
