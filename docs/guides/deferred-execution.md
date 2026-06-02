@@ -117,6 +117,19 @@ thing: !deferred::clear_ctx=True:MyModule.MyClass
 
 The format is `!deferred::[options]:[TypeName]`.
 
+### Shipping a deferred to another process
+
+A deferred node is picklable, including across a process boundary — the natural carrier for fan-out, where a launcher composes N jobs lazily and ships each to a worker for the heavy construction (dataset I/O, model builds). Pickling keeps the picklable slice of the captured scope and drops what can't travel: dracon builtins are regenerated fresh on the far side, and live objects (lambdas, locks) are dropped for the receiver to re-supply at construct.
+
+```python
+node = loader.load("recipe.yaml", deferred_paths=["/job"])["job"]
+blob = pickle.dumps(node.detach())
+# ... worker subprocess ...
+program = pickle.loads(blob).construct(context=program_context_types)
+```
+
+`detach()` reroots the node onto its own subtree and raises if the subtree references the outer tree (`@/`, `&`, cross-file anchor), so a non-portable subtree fails fast instead of on the far side. See [Serialization → Portable deferred nodes](serialization.md#portable-deferred-nodes-cross-process).
+
 ### If runtime chooses the constructor, alias it first
 
 Sometimes the deferred branch does not just need runtime values. It needs runtime logic to choose what to build.

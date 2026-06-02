@@ -126,10 +126,31 @@ Some Dracon types are picklable, some aren't:
 | `DraconCallable` | No | Contains YAML node templates and loader references |
 | Dracontainers | Yes | If all contained values are picklable |
 | Pydantic models | Yes | Standard Pydantic pickling |
-| `DeferredNode` | Yes | Stores the full composition state |
-| `LazyInterpolable` | Yes | Stores expression string and context |
+| `DeferredNode` | Yes | Portable across processes; keeps plain-data scope, regenerates builtins (see below) |
+| `LazyInterpolable` | Yes | Stores expression string and the picklable slice of its context |
 
 If you need to serialize a `DraconCallable`, dump it to YAML first with `dracon.dump()`, then load it back in the target process. `DraconPartial` (created by `!fn:dotted.path`) is the picklable alternative: it stores the function as an import path and reconstructs it on unpickling.
+
+### Portable deferred nodes (cross-process)
+
+A `DeferredNode` is "compose now, construct later" — and "later" can be **another process**. Pickling a deferred node keeps the picklable slice of its captured scope (your `!define`s, `++` overrides, importable types) and drops what can't cross a process boundary: regenerable dracon builtins (`getenv`, `now`, `__scope__`, ...) are re-created fresh on the far side, and live objects (lambdas, locks, filter closures) are dropped — the receiver re-supplies those at construct.
+
+```python
+node = loader.load("recipe.yaml", deferred_paths=["/job"])["job"]
+blob = pickle.dumps(node.detach())          # detach() = reroot + self-containment check
+# ... ship blob to a worker subprocess ...
+obj = pickle.loads(blob).construct(context=extra)   # builds there, builtins fresh
+```
+
+The contract:
+
+```python
+node.construct(C) == pickle.loads(pickle.dumps(node)).construct(C)
+```
+
+holds for any deferred whose scope is plain data. `detach()` reroots the node onto its own subtree and raises if it references the outer tree (`@/`, `&`, cross-file anchor) and so isn't self-contained. Live values that a `!require` needs but that were dropped fail loudly at construct on the far side — supply them via `construct(context=...)`.
+
+This is pickle-only: `dump()` still collapses a `DeferredNode` to its context-less inner node (fine for re-emitting YAML, not a transport).
 
 ## Writing to a file
 

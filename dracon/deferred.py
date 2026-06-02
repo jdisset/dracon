@@ -481,6 +481,20 @@ class DeferredNode(ContextNode, Generic[T]):
 
         return new_obj
 
+    def detach(self) -> 'DeferredNode':
+        """Return a rerooted copy carrying only this subtree (no sibling
+        composition), for shipping to another process. Raises if the subtree
+        references the outer tree (@/, &, cross-file anchor) and is therefore
+        not self-contained."""
+        if self._full_composition is not None and _subtree_needs_outer_tree(
+            self.value, self._full_composition
+        ):
+            raise DraconError(
+                "cannot detach: subtree references the outer composition tree "
+                "(@/, & or cross-file anchor); it is not self-contained / portable"
+            )
+        return self.copy(reroot=True)  # composition rerooted to this subtree, siblings dropped
+
     @classmethod
     def __get_pydantic_core_schema__(
         cls, source_type: Any, handler: GetCoreSchemaHandler

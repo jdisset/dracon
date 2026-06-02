@@ -112,6 +112,20 @@ class ShallowDict(MutableMapping, Generic[K, V]):
     def copy(self):
         return self.__copy__()
 
+    def __getstate__(self):
+        # slim on pickle (drop builtins + live values); deepcopy uses __copy__ (full)
+        from dracon.symbol_table import portable_scope
+        state = {'_dict': portable_scope(self._dict)}
+        sk = getattr(self, '_soft_keys', None)
+        if sk is not None:
+            state['_soft_keys'] = sk
+        return state
+
+    def __setstate__(self, state):
+        self._dict = state['_dict']
+        if '_soft_keys' in state:
+            self._soft_keys = state['_soft_keys']
+
     def __repr__(self):
         return f'ShallowDict({self._dict})'
 

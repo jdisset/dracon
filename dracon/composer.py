@@ -86,6 +86,14 @@ class CompositionResult(BaseModel):
     def __hash__(self):
         return hash(self.root)
 
+    def __getstate__(self):
+        # slim defined_vars on pickle (drop live handles); deepcopy keeps them
+        from dracon.symbol_table import portable_scope
+        state = super().__getstate__()
+        state['__dict__'] = {**state['__dict__'],
+                             'defined_vars': portable_scope(self.defined_vars, drop_builtins=False)}
+        return state
+
     _SPECIAL_NODE_CATEGORIES = ('include', 'merge', 'instruction', 'interpolable')
 
     def model_post_init(self, *args, **kwargs):

@@ -344,11 +344,21 @@ class DraconLoader:
         return self.copy()
 
     def __getstate__(self):
+        from dracon.symbol_table import portable_scope
         state = self.__dict__.copy()
+        state.pop('_symbol_sources', None)  # closures; re-derived from context on load
+        state['_context_arg'] = None        # raw seed context; superseded by self.context
+        state['_stable_refs'] = portable_scope(self._stable_refs, drop_builtins=False)
+        state['_stable_refs_by_id'] = {}     # ids are process-local
         return state
 
     def __setstate__(self, state):
         self.__dict__.update(state)
+        if self.context is not None:
+            self._symbol_sources = list(self.context.sources())
+            self.reset_context()  # regenerate builtins (getenv/now/construct/__scope__) fresh
+        else:
+            self._symbol_sources = []
 
     def compose_config_from_str(self, content: str, _cacheable_pp: bool = False) -> CompositionResult:
         if self.use_cache:

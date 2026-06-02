@@ -5,6 +5,9 @@
 
 from __future__ import annotations
 
+import functools
+import pickle
+import types
 from collections.abc import MutableMapping, Iterator, Iterable
 from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
@@ -493,6 +496,32 @@ class SymbolTable(MutableMapping):
     def __deepcopy__(self, memo: Any) -> SymbolTable:
         return self.copy()
 
+    # ── portable serialization (slim on pickle, full on deepcopy) ─────────
+
+    def __getstate__(self) -> dict:
+        return {
+            'entries': portable_scope(self._entries),
+            'soft_keys': set(self._soft_keys),
+            'parent': self._parent,
+            'had_dynamic_import': any(s.name == 'dynamic_import' for s in self._sources),
+            'sources': [s for s in self._sources
+                        if s.name != 'dynamic_import' and is_portable(s)],
+        }
+
+    def __setstate__(self, state: dict) -> None:
+        self._entries = dict(state['entries'])
+        self._soft_keys = set(state['soft_keys'])
+        self._parent = state['parent']
+        self._accessed_keys = None
+        self._defined_var_keys = None
+        self._suspend_tracking = False
+        self._identify_cache = None
+        sources = list(state['sources'])
+        if state['had_dynamic_import']:
+            sources.append(make_dynamic_import_source())
+        self._sources = sources
+        self._synced_sources = None
+
     # ── rendering API ────────────────────────────────────────────────────
 
     def describe(self, name: str | None = None) -> str:
@@ -523,9 +552,46 @@ _INTERNAL_NAMES = frozenset({
 })
 
 
-def _is_user_symbol(name: str) -> bool:
-    """True if name is not an internal/builtin symbol."""
+def is_user_symbol(name: str) -> bool:
+    """True if name is user data, not a regenerable dracon/loader builtin."""
     return name not in _INTERNAL_NAMES and not name.startswith('__')
+
+
+_is_user_symbol = is_user_symbol  # internal alias
+
+
+def is_portable(value: Any) -> bool:
+    """False for live callables that can't cross a process (lambda, closure,
+    partial/method over one). Structural (no trial-pickle) so node trees with
+    outer-tree refs don't recurse; symbol wrappers are small and trial-pickled
+    (a CallableSymbol over a lambda fails, over a node-backed template passes)."""
+    if isinstance(value, SymbolEntry):
+        return is_portable(value.symbol)
+    if isinstance(value, Symbol):
+        try:
+            pickle.dumps(value)
+            return True
+        except Exception:
+            return False
+    if isinstance(value, functools.partial):
+        return is_portable(value.func) and all(map(is_portable, value.args)) \
+            and all(map(is_portable, (value.keywords or {}).values()))
+    if isinstance(value, types.MethodType):
+        return is_portable(value.__self__) and is_portable(value.__func__)
+    if isinstance(value, (types.FunctionType, types.LambdaType)):
+        return value.__name__ != '<lambda>' and '<locals>' not in value.__qualname__
+    return True
+
+
+def portable_scope(items, *, drop_builtins: bool = True) -> dict:
+    """Portable slice of a scope mapping: drop regenerable builtins
+    (_INTERNAL_NAMES) and live callables, keep plain data, importable
+    types/callables, and data bindings like __DRACON_NODES. Takes raw values or
+    SymbolEntries."""
+    return {
+        k: v for k, v in items.items()
+        if (not drop_builtins or k not in _INTERNAL_NAMES) and is_portable(v)
+    }
 
 
 def _param_sig(iface: InterfaceSpec) -> str:

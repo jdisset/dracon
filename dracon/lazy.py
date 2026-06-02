@@ -186,12 +186,13 @@ class LazyInterpolable(Lazy[T]):
         return None
 
     def __getstate__(self):
+        from dracon.symbol_table import portable_scope
         state = {
             'value': self.value,
             'name': self.name,
             'current_path': self.current_path,
             'permissive': self.permissive,
-            'context': self.context,
+            'context': portable_scope(self.context, drop_builtins=False),
             'engine': self.engine,
             'enable_shorthand_vars': self.enable_shorthand_vars,
             'source_context': self.source_context,
