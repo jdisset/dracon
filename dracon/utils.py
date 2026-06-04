@@ -417,6 +417,22 @@ def build_nested_dict(flat_args: Dict[str, Any]) -> Dict[str, Any]:
 _SER_DEBUG_ENABLED = bool(os.getenv('ENABLE_SER_DEBUG', ''))
 
 
+def _deep_sizeof(obj, _seen=None):
+    # approximate recursive memory size, debug-only (replaces vendored pympler.asizeof)
+    import sys
+    import gc
+
+    if _seen is None:
+        _seen = set()
+    if id(obj) in _seen:
+        return 0
+    _seen.add(id(obj))
+    size = sys.getsizeof(obj, 0)
+    if isinstance(obj, (str, bytes, bytearray)):
+        return size
+    return size + sum(_deep_sizeof(ref, _seen) for ref in gc.get_referents(obj))
+
+
 def debug_serialization(
     obj, operation='pickle', path='', max_depth=20, max_size_mb=None, seen=None
 ):
@@ -441,9 +457,7 @@ def debug_serialization(
 
             dill.dumps(obj)
         elif operation == 'sizeof':
-            from .asizeof import asizeof
-
-            s = asizeof(obj)
+            s = _deep_sizeof(obj)
             import numpy as np
             import pandas as pd
 
@@ -832,13 +846,11 @@ def node_repr(
             matching_items = []
             sizes = {}
             if show_biggest_context > 0:
-                from .asizeof import asizeof
-
                 na = set()
 
                 for key, value in node.context.items():
                     try:
-                        sizes[key] = asizeof(value)
+                        sizes[key] = _deep_sizeof(value)
                     except Exception:
                         na.add(key)
                 sizes = list(sorted(sizes.items(), key=lambda item: item[1], reverse=True))
