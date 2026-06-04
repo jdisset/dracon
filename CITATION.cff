@@ -8,6 +8,8 @@ authors:
   - family-names: Disset
     given-names: Jean
     orcid: "https://orcid.org/0009-0008-7047-2026"
+    affiliation: "Department of Biological Engineering, Massachusetts Institute of Technology"
+    email: "jdisset@mit.edu"
 repository-code: "https://github.com/jdisset/dracon"
 url: "https://github.com/jdisset/dracon"
 abstract: "A staged, inspectable configuration engine and CLI generator for Python research workflows."

@@ -14,46 +14,45 @@ authors:
     corresponding: true
     affiliation: 1
 affiliations:
-  - name: Independent researcher
+  - name: Department of Biological Engineering, Massachusetts Institute of Technology, Cambridge, MA, USA
     index: 1
-date: 8 April 2026
+date: 4 June 2026
 bibliography: paper.bib
 ---
 
 # Summary
 
-Dracon is a Python library for building, combining, and inspecting configuration files for research workflows and command-line programs. It extends YAML with a small set of composition features (includes, conditional blocks, loops, reusable templates, pipelines, and dynamic tags) and constructs validated Python objects through Pydantic models [@Pydantic2022]. The same Pydantic schema can also define a standard command-line interface, so the configuration structure, runtime object model, and CLI stay aligned from a single source.
+I present Dracon, a Python library for building, combining, and inspecting the configuration files that drive research workflows and command-line programs. It works on top of YAML, adding a small number of composition features such as file includes, conditional blocks, loops, reusable templates, and pipelines, and it then turns the composed result into validated Python objects through Pydantic models [@Pydantic2022]. Because the same Pydantic schema can also describe a command-line interface, the structure of the configuration, the runtime objects it produces, and the CLI that drives it are all defined in one place rather than kept in step by hand.
 
-Dracon's main design choice is to treat configuration as a staged artifact instead of a single load step. Files are first composed into an inspectable intermediate tree, then constructed into typed Python objects, while explicitly deferred parts can wait for runtime-only inputs. This staging makes complex configurations easier to inspect, debug, and reproduce in scientific and engineering codebases [@DraconSoftware].
+The idea that shapes most of the library is that a configuration is handled as a staged artifact rather than as a single load step. A set of files is first composed into an intermediate tree that can be inspected on its own, and only afterwards is that tree constructed into typed Python objects, with the parts that depend on runtime-only inputs left to be filled in later. In practice this staging is what makes larger configurations easier to inspect, debug, and reproduce, which matters in scientific codebases where a single run can pull values from many different sources at once [@DraconSoftware].
 
 # Statement of need
 
-Research software often accumulates configuration from many places at once: package defaults, local YAML files, command-line overrides, environment variables, and runtime values that only become available once a program is already running. In machine learning and computational biology workflows, this frequently produces a combinatorial file problem. A project with $M$ datasets, $N$ architecture families, and $K$ training presets can easily drift toward $M \times N \times K$ near-duplicate configurations, along with extra wrapper scripts whose only purpose is to derive filenames, route overrides, or fill in runtime-dependent values.
+Research software tends to accumulate configuration from several places at the same time, including package defaults, local YAML files, command-line overrides, environment variables, and values that only become available once a program is already running. In machine learning and computational biology in particular this often produces a combinatorial file problem, where a project with $M$ datasets, $N$ architecture families, and $K$ training presets drifts toward something close to $M \times N \times K$ near-duplicate files, usually together with small wrapper scripts whose only real job is to derive file names, route overrides, or supply values that are not known until runtime.
 
-Ad hoc solutions based on nested dictionaries, handwritten `argparse` logic, or environment variables do not scale well in this setting. Final parameter values become hard to audit, configuration logic leaks into application code, and reproducing a run requires reconstructing several layers of implicit behavior. Dracon was developed to address this problem for researchers and engineers who want configuration to remain declarative while still supporting composition, validation, runtime deferral, and command-line use.
-
-The target audience is users building experiment pipelines, data-processing jobs, and configurable Python applications where the final configuration needs to be both flexible and understandable. The practical question behind Dracon is simple: when a final value looks wrong, can the user inspect the composed configuration, see where that value came from, and still postpone the parts that genuinely depend on runtime state?
+The usual ad hoc remedies, built on nested dictionaries, hand-written argparse logic, or environment variables, do not hold up well as a project grows, since final values become hard to audit and reproducing an earlier run can mean reconstructing several layers of behavior that were never written down explicitly. I wrote Dracon for researchers and engineers who would like their configuration to stay declarative while still allowing composition, validation, deferral of runtime values, and command-line use. The question that motivated much of the design is an ordinary one: when a final value looks wrong, the user should be able to inspect the composed configuration, see where that value came from, and still leave the genuinely runtime-dependent parts unresolved until they can be filled in.
 
 # State of the field
 
-Hydra [@Yadan2019] is the most widely used Python tool for structured configuration, composition, and interpolation in research workflows. It is built on top of OmegaConf [@OmegaConf2020], which provides the underlying node model and interpolation engine. Together they address important parts of the same problem space and are the main reference points for Dracon. On the CLI side, libraries such as Typer [@Typer] and jsonargparse [@jsonargparse] generate command-line interfaces from typed Python signatures, but they are not by themselves multi-file YAML composition systems. Pydantic itself, and libraries built around it, provide a strong foundation for validation and typed runtime objects, but likewise do not ship an inspectable workflow for layered YAML configuration.
+Hydra [@Yadan2019] is probably the most widely used Python tool for structured configuration, composition, and interpolation in research workflows, and it is built on top of OmegaConf [@OmegaConf2020], which supplies the underlying node model and interpolation engine. Together they cover much of the same problem space, and they are the tools I compare Dracon against most directly. On the command-line side, libraries such as Typer [@Typer] and jsonargparse [@jsonargparse] generate interfaces from typed Python signatures, although on their own they are not multi-file YAML composition systems, and Pydantic and the libraries built around it give a solid foundation for validation and typed objects but do not provide an inspectable workflow for layered YAML configuration.
 
-Dracon's contribution is therefore not the introduction of configuration composition to Python. It is a narrower combination of properties that are particularly useful in research workflows: an explicit composition phase that produces an inspectable intermediate representation, optional provenance tracing for final values, delayed construction of runtime-only subtrees, and schema-driven CLI generation from the same Pydantic models used for validation. Dracon is aimed at users who want a smaller, explicit YAML-centric composition model with staged inspection and runtime deferral as first-class features, rather than a broader application framework.
+Configuration composition in Python is not itself new, so what Dracon adds is mostly a particular combination of properties that I have found useful in research workflows: an explicit composition phase that produces an inspectable intermediate representation, optional provenance tracing for final values, delayed construction of runtime-only subtrees, and schema-driven CLI generation from the same Pydantic models already used for validation. I built it for users who would rather have a smaller and more explicit YAML-centric composition model, with staged inspection and runtime deferral as first-class features, than a broader application framework.
 
 # Software design
 
-Dracon processes configuration in three phases.
+Dracon processes a configuration in three phases, taken here in the order they run.
 
-In the **composition** phase, raw YAML is parsed as a node graph and rewritten by instructions such as `!define`, `!if`, `!each`, `!fn`, and `!include`. Merge keys fold layers together with configurable strategy. The result is a `CompositionResult`: an inspectable intermediate representation that already reflects includes, merges, and control-flow decisions, but may still contain explicitly deferred subtrees.
+In the composition phase, the raw YAML is parsed into a node tree and rewritten according to instructions such as `!define`, `!if`, `!each`, `!fn`, and `!include`, while merge keys fold the layers together using a configurable strategy. The output is a `CompositionResult`, an inspectable intermediate representation that reflects the includes, merges, and control-flow decisions but may still contain subtrees that were explicitly marked to be deferred.
 
-In the **construction** phase, the composed tree is converted into Python objects. YAML tags resolve to Python types, mappings are validated through Pydantic V2, and the result becomes the runtime object model used by the application. Because Dracon uses the same Pydantic schemas for both validation and CLI generation, a single schema definition can drive field validation, help text, nested overrides, and subcommands.
+In the construction phase, that tree is turned into Python objects: YAML tags resolve to Python types, mappings are validated through Pydantic V2, and the result becomes the runtime object model the application uses. Because Dracon uses the same Pydantic schemas for both validation and CLI generation, one schema definition can drive field validation, help text, nested overrides, and subcommands at once.
 
-In the **resolution and deferral** phase, lazy interpolations may resolve on demand and `!deferred` nodes may be composed and constructed later with extra runtime context. This allows a configuration to remain declarative even when some values depend on objects that do not exist at load time, such as trained models, database handles, experiment trackers, or run-specific identifiers.
+In the resolution and deferral phase, lazy interpolations resolve when they are first accessed, and `!deferred` nodes can be composed and constructed later with additional runtime context, which lets a configuration stay declarative even when some of its values depend on objects that do not exist at load time, such as trained models, database handles, or run-specific identifiers.
 
-A minimal example shows the three phases in one place:
+The following small example brings the three phases together:
 
 ```yaml
 # app.yaml
+!set_default env: dev
 workers: 4
 database:
   host: db.${env}.internal
@@ -64,15 +63,14 @@ database:
 ```python
 # app.py
 from pydantic import BaseModel
-from dracon import dracon_program
+from dracon import dracon_program, DeferredNode
 
 class Database(BaseModel):
     host: str
-    credentials: dict
+    credentials: DeferredNode[dict]
 
 @dracon_program()
 class App(BaseModel):
-    env: str = "dev"
     workers: int = 1
     database: Database
 
@@ -83,24 +81,20 @@ App.cli()
 $ python app.py +app.yaml --env prod --workers 8
 ```
 
-The same Pydantic model validates the YAML, produces the CLI, and accepts overrides; `host` resolves during composition; `credentials` waits for a runtime `vault` object supplied to `.construct(context=...)`.
+Here `app.yaml` supplies the `workers` value and `--workers 8` overrides it again at the command line, while `env` is declared in the YAML rather than on the model and surfaces as `--env`, so that `host` resolves to `db.prod.internal` once `env` is known. The `credentials` entry stays a deferred subtree, unresolved until it is constructed later with a runtime `vault` object through `.construct(context=...)`.
 
-This staged design reflects an explicit trade-off: Dracon favors visible composition steps over hiding configuration behavior inside a one-shot loader. That choice enables features such as `dracon show`, provenance tracing, and mutable `CompositionStack` layer manipulation, all aimed at making configuration behavior inspectable instead of implicit.
+I chose to keep the composition steps visible, rather than hide them inside a single load call, because that is what makes features like `dracon show`, provenance tracing, and the mutable `CompositionStack` possible, since each of them depends on there being an inspectable intermediate state. The same scope also holds what I call an "open vocabulary", in which values, types, callables, templates, serializable partials, and pipelines can be selected or invoked through the same mechanisms, which is what supports patterns such as layered vocabularies, constructor slots, runtime contracts, and hybrid pipelines.
 
-Another design choice is what the documentation calls an "open vocabulary": values, types, Python callables, YAML templates, serializable partials, and pipelines can all live in the same scope and can often be selected or invoked through the same mechanisms. This supports higher-level patterns such as layered vocabularies, constructor slots, runtime contracts, and hybrid pipelines without requiring users to define a separate plugin system for each one.
+# Research impact
 
-# Use in research
-
-Dracon is in active use in computational biology research workflows, where it composes training, design, plotting, and job-launch configurations across datasets, architecture families, and hyperparameter presets. In these workflows, Dracon supports patterns such as dynamic skeletons, layered vocabularies, weighted registries, runtime contracts, and YAML-defined pipelines. It also serves as the configuration substrate for a related job-orchestration layer (Broodmon) used to launch and manage experiment sweeps, which relies on Dracon's composition and deferral model to describe jobs, edges, and resource pools in a single declarative format.
-
-Use is not limited to toy examples. A current modernization effort applies Dracon to a legacy corpus of more than 1,200 YAML files in an experiment-management stack, with the goal of collapsing duplicated configuration families into a much smaller set of reusable templates, registries, and sweep definitions. That is precisely the class of problem Dracon was designed to address: reducing configuration sprawl while keeping the final topology inspectable and reproducible.
+I use Dracon in my own computational biology work, where it composes training, design, plotting, and job-launch configurations across datasets, architecture families, and hyperparameter presets, and where it supports patterns such as dynamic skeletons, layered vocabularies, weighted registries, runtime contracts, and YAML-defined pipelines. It is also the configuration substrate for a related job-orchestration layer called Broodmon, which launches and manages experiment sweeps and relies on Dracon's composition and deferral model to describe its jobs, edges, and resource pools in a single declarative format. Beyond these examples, an ongoing modernization effort applies Dracon to a legacy collection of more than 1,200 YAML files in an experiment-management stack, with the aim of collapsing duplicated configuration families into a much smaller set of reusable templates, registries, and sweep definitions.
 
 # AI usage disclosure
 
-Generative AI tools were used to assist with documentation and manuscript drafting. The author reviewed, edited, and verified all resulting text and technical claims against the codebase and software behavior before submission.
+I used generative AI tools to help with documentation and with drafting the manuscript, and I reviewed, edited, and checked all of the resulting text and the technical claims against the codebase and the behavior of the software before submission.
 
 # Acknowledgements
 
-Dracon builds on Pydantic [@Pydantic2022] for type validation, ruamel.yaml [@ruamel] for YAML parsing with structure preservation, and asteval [@asteval] for expression evaluation.
+Dracon builds on Pydantic [@Pydantic2022] for type validation, ruamel.yaml [@ruamel] for structure-preserving YAML parsing, and asteval [@asteval] for evaluating expressions.
 
 # References

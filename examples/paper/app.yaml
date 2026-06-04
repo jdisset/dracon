@@ -1,0 +1,6 @@
+!set_default env: dev
+workers: 4
+database:
+  host: db.${env}.internal
+  credentials: !deferred
+    password: ${vault.get('db')}
