@@ -693,8 +693,23 @@ def print_help_subcommand(parent_prg: "Program", child_prg: "Program", subcmd_na
     _append_description(content, subcmd_type.__doc__)
 
     usage_parts = [parent_prg.name or "command", subcmd_name, "[OPTIONS]"]
+    if child_prg._subcommand_map:
+        usage_parts.append("COMMAND [COMMAND_OPTIONS]")
     content.append("Usage: ", style=COLOR_BOLD)
     content.append(" ".join(usage_parts) + "\n\n", style=COLOR_YELLOW)
+
+    # nested commands, if this subcommand is itself a group
+    if child_prg._subcommand_map:
+        content.append("Commands:\n", style=COLOR_BOLD_CYAN)
+        max_name_len = max(len(n) for n in child_prg._subcommand_map)
+        for cmd_name, cmd_type in child_prg._subcommand_map.items():
+            doc = (cmd_type.__doc__ or "").strip().split('\n')[0]
+            padding = " " * (max_name_len - len(cmd_name) + 4)
+            content.append(f"  {cmd_name}", style=COLOR_YELLOW)
+            if doc:
+                content.append(f"{padding}{doc}")
+            content.append("\n")
+        content.append("\n")
 
     # subcmd options (exclude discriminator)
     disc = parent_prg._subcommand_discriminator
@@ -1827,6 +1842,8 @@ class Program(BaseModel, Generic[T]):
             if isinstance(v, _RawStr):
                 is_str = True
                 v = str(v)
+            if v is None:  # keep null null -- str(None) would compose to the string "None"
+                return loader.yaml.representer.represent_data(None)
             if isinstance(v, Node):
                 val = v
             elif isinstance(v, dict):

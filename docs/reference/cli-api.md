@@ -157,6 +157,15 @@ them when a flag has no declaration, when a model field shadows a YAML
 variable of the same name, or when you want to feed a raw YAML literal that
 sidesteps argparse coercion.
 
+**Spelling: dashes with `--`, underscores with `++`.** The `--flag` form
+auto-dash-aliases underscore names — a `!set_default training_set_file:` (or a
+model field `training_set_file`) is reached as `--training-set-file`, and the
+underscore spelling `--training_set_file` is rejected as unknown. `++` and
+`--define.` do the opposite: they take the variable's *literal* name with no
+aliasing, so it's `++training_set_file=…`. An accidental `++training-set-file=…`
+does not error — it just sets an unrelated variable that nothing reads (you'll
+see it in the unused-variable warning).
+
 ---
 
 ## CLI flags from config layers

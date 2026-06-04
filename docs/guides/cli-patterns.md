@@ -97,6 +97,30 @@ ml train --help     # shows train-specific options
 
 The docstring on each subcommand model appears as the command description.
 
+### Nested subcommands (command groups)
+
+Subcommands nest: a subcommand whose own field is itself a `Subcommand(...)` becomes
+a command group, giving you `tool group leaf` (e.g. `calibrie gui gating`). The group
+has no options of its own; its `run` just forwards to the selected leaf:
+
+```python
+@subcommand("gui")
+class GuiCmd(BaseModel):
+    """Interactive editors."""
+    command: Subcommand(GatingCmd)        # one member is fine — Union[X] collapses to X
+    def run(self, ctx=None):
+        return self.command.run(self)     # forward to the chosen leaf
+
+@dracon_program(name="calibrie")
+class Calibrie(BaseModel):
+    command: Subcommand(GuiCmd)
+```
+
+The root model must NOT define `run` (so dispatch descends into the subcommand);
+the group's `run(ctx)` forwards to its leaf. `+file.yaml`, `--field`, and `++var`
+all route to the leaf after the final command token, and `tool group --help` lists
+the group's nested commands.
+
 ## Layered configs as CLI plug-ins
 
 `--name value` is a single rail: it targets any Pydantic field on the program
