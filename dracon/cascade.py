@@ -95,9 +95,10 @@ class CascadeStrategy:
     # inherit
     apply: Optional[Callable[[Any], Any]] = None
     # select
-    parse: Optional[Callable[[str], Any]] = None
+    parse: Optional[Callable[[Any], Any]] = None
     matches: Optional[Callable[[Any, Any], bool]] = None
-    specificity: Optional[Callable[[Any], tuple]] = None
+    # called with (parsed) or (parsed, input_value) -- see `_call_specificity`
+    specificity: Optional[Callable[..., tuple]] = None
     merge: Optional[Callable[[Any, Any], Any]] = None
     recursive: bool = True
 

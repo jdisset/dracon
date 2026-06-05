@@ -547,6 +547,11 @@ class DraconComposer(Composer):
         if node.tag == RAW_TAG:
             return node
 
+        from dracon.ref import REF_TAGS, lower_ref_node
+
+        if node.tag in REF_TAGS:
+            return lower_ref_node(node)
+
         value_for_scan = node.value
         tag_for_scan = node.tag
 

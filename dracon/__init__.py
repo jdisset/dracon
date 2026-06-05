@@ -54,6 +54,12 @@ from dracon.locator import (
     resolve_one,
     get_inexactness,
 )
+from dracon.cascade_select import (
+    make_locator_cascade_strategy,
+    compose_nested_locators,
+    default_locator_key_parse,
+)
+from dracon.ref import RefSpec, dracon_ref, lower_ref_node
 from dracon.composer import (
     CompositionResult,
     DraconComposer,

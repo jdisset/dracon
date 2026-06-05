@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, Sequence, runtime_checkable
 
 from dracon.keypath import KeyPath, KeyPathToken, ROOTPATH
-from dracon.utils import dict_like, list_like
+from dracon.utils import dict_like, list_like, raw_items
 
 
 @runtime_checkable
@@ -61,11 +61,16 @@ class NodeTreeAdapter:
         return PathNode(pp.get_obj(node.root), pp, node.root)
 
     def children(self, node: PathNode) -> Sequence[PathNode]:
+        # raw (non-resolving) enumeration: walking a live dracontainer must not
+        # force-resolve sibling lazies (e.g. an in-flight `!ref`), which would
+        # re-enter resolution. Predicate attr reads still resolve the specific
+        # field they touch via descend_value.
         v = node.value
         if dict_like(v):
-            return [PathNode(v[k], node.path + str(k), node.root) for k in v.keys()]
+            return [PathNode(val, node.path + str(k), node.root) for k, val in raw_items(v)]
         if list_like(v):
-            return [PathNode(v[i], node.path + str(i), node.root) for i in range(len(v))]
+            raw = getattr(v, '_data', v)
+            return [PathNode(raw[i], node.path + str(i), node.root) for i in range(len(v))]
         return []
 
     def type_names(self, node: PathNode) -> Sequence[str]:

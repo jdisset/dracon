@@ -727,6 +727,9 @@ def dracon_resolve(obj, **ctx):
     return node
 
 
+_dracon_ref = None
+
+
 def prepare_symbols(current_path, root_obj, context):
     # if context has special behavior (e.g. TrackedContext), preserve it
     if context is not None and hasattr(context, 'copy'):
@@ -734,11 +737,18 @@ def prepare_symbols(current_path, root_obj, context):
     else:
         symbols = dict(context) if context else {}
 
+    global _dracon_ref
+    if _dracon_ref is None:
+        from dracon.ref import dracon_ref as _dr
+
+        _dracon_ref = _dr
+
     # add dracon-specific internal symbols (always override)
     symbols["__DRACON__CURRENT_PATH"] = current_path
     symbols["__DRACON__PARENT_PATH"] = current_path.parent
     symbols["__DRACON__CURRENT_ROOT_OBJ"] = root_obj
     symbols["__DRACON_RESOLVE"] = dracon_resolve
+    symbols["__dracon_ref"] = _dracon_ref
     symbols["__dracon_KeyPath"] = KeyPath
 
     # add base symbols only if not already in context
