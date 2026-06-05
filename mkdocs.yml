@@ -106,6 +106,7 @@ nav:
       - "Merge Syntax": "reference/merge-syntax.md"
       - "Interpolation": "reference/interpolation.md"
       - "KeyPaths": "reference/keypaths.md"
+      - "Locators": "reference/locators.md"
       - "Include Schemes": "reference/include-schemes.md"
       - "Progress Events": "reference/progress-events.md"
       - "dracon CLI": "reference/dracon-cli.md"

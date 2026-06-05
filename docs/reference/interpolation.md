@@ -124,6 +124,15 @@ Also works with anchors: `${&anchor_name}` or `${&anchor_name.sub.key}`.
 
 Context can be passed to the copied node: `${&path:var1=expr1,var2=expr2}`.
 
+### `!ref` / `!refs` -- locator reference
+
+`@path` is positional. When you need predicates, axes (nearest-enclosing, sibling), or a list of matches, use `!ref` / `!refs`: a [Locator](locators.md) resolved through the same lazy, post-construction frame as `@`, so it reads constructed values and survives `!include` merges.
+
+```yaml
+replica: { port: !ref ^.primary.port }       # sibling, by identity (no predicate -> flow ok)
+scrape:  !refs /services.*[enabled].port      # predicate fan-out -> list (truthy filter)
+```
+
 ---
 
 ## Built-in Functions

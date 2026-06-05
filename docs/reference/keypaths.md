@@ -95,3 +95,9 @@ pattern = KeyPath("/servers.*.port")
 target = KeyPath("/servers.web.port")
 pattern.match(target)  # True
 ```
+
+---
+
+## See also
+
+KeyPaths are positional. When you need *predicates* (`[enabled=true]`), *axes* (nearest-enclosing, sibling), or to reference by identity rather than index, reach for a [Locator](locators.md) — it generalizes the KeyPath navigation above with attribute matching and is the engine behind `!ref` / `!refs`.

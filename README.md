@@ -190,6 +190,28 @@ reporting = config["reporting"].construct(
 
 So the config itself declares what it needs at runtime and what should happen once those values exist.
 
+### References by Identity
+
+`!ref` / `!refs` point at other nodes by *what they are*, not where they sit. A locator carries axes (nearest-enclosing, sibling, ancestor) and predicates, resolved lazily over the constructed tree:
+
+```yaml
+services:
+  api:    { enabled: true,  port: 8080 }
+  worker: { enabled: false, port: 8081 }
+  cron:   { enabled: true,  port: 8082 }
+
+monitoring:
+  scrape: !refs /services.*[enabled].port   # [8080, 8082] — truthy filter
+
+pipeline:
+  - id: load
+    out: raw
+  - id: clean
+    in: !ref ^.*[id=load].out               # by identity — survives reordering
+```
+
+The same locator engine backs predicate-keyed [`!cascade`](https://jdisset.github.io/dracon/reference/locators/) dialects, so one grammar covers references, styling, and attachment.
+
 The docs go deeper on these in the [Patterns](https://jdisset.github.io/dracon/patterns/) section.
 
 ## Documentation
