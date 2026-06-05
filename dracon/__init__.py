@@ -34,6 +34,26 @@ from dracon.cascade import (
 )
 from dracon.draconstructor import Draconstructor
 from dracon.keypath import KeyPath
+from dracon.tree_adapter import (
+    TreeAdapter,
+    PathNode,
+    NodeTreeAdapter,
+    node_root,
+    descend_value,
+)
+from dracon.locator import (
+    Specificity,
+    Predicate,
+    Axis,
+    Step,
+    Locator,
+    parse_predicate,
+    parse_locator,
+    matches,
+    resolve,
+    resolve_one,
+    get_inexactness,
+)
 from dracon.composer import (
     CompositionResult,
     DraconComposer,
