@@ -10,6 +10,7 @@ import pytest
 from dracon.locator import (
     Axis,
     Locator,
+    Specificity,
     get_inexactness,
     matches,
     parse_locator,
@@ -18,7 +19,6 @@ from dracon.locator import (
     resolve_one,
 )
 from dracon.tree_adapter import NodeTreeAdapter, descend_value, node_root
-from jeanplot.core.style_selector import Selector, _SimpleSelector
 
 
 # --------------------------------------------------------------------------- #
@@ -59,8 +59,8 @@ class NAdapter:
 
 
 class ObjAdapter:
-    """parity adapter: type_names == class MRO names, attr == getattr (mirrors
-    jeanplot's _SimpleSelector exactly)."""
+    """CSS-shaped adapter: type_names == class MRO names, attr == getattr (the
+    pure Selector-style semantics jeanplot's ComponentTreeAdapter consumes)."""
 
     def parent(self, node):
         return getattr(node, "parent", None)
@@ -141,33 +141,37 @@ def test_parse_predicate_on_wildcard():
 
 
 # --------------------------------------------------------------------------- #
-# 2. every operator (parity vs _SimpleSelector)
+# 2. every operator (frozen CSS semantics: the set ported from _SimpleSelector)
 # --------------------------------------------------------------------------- #
 
-OP_SEGMENTS = [
-    "[x=1]",
-    "[x!=1]",
-    "[x=2]",
-    "[missing=1]",
-    "[x>=2]",
-    "[x>2]",
-    "[x<5]",
-    "[x<=1]",
-    "[name^=ab]",
-    "[name$=yz]",
-    "[name*=cd]",
-    "[tag=~HELLO]",
-    "[tag=hello]",
-    "[val=/^a.*z$/]",
-    "[val=/^A.*Z$/i]",
-    "[present]",
-    "[!present]",
-    "[!missing]",
-    "[gone=none]",
-    "[name!=none]",
-    "[items=3]",
-    "[items=9]",
-    "[items>=2]",
+# (segment, matches o1, matches o2) — o1/o2 below. Each is a single attribute
+# condition, so specificity is always (id=0, attr=1, type=0).
+OP_CASES = [
+    ("[x=1]", True, False),
+    # ported '!=' quirk: when the attr exists and the pattern isn't 'none', != is
+    # always True (it never compares the value) -- preserved verbatim from _SimpleSelector.
+    ("[x!=1]", True, True),
+    ("[x=2]", False, True),
+    ("[missing=1]", False, False),
+    ("[x>=2]", False, True),
+    ("[x>2]", False, False),
+    ("[x<5]", True, True),
+    ("[x<=1]", True, False),
+    ("[name^=ab]", True, False),
+    ("[name$=yz]", True, False),
+    ("[name*=cd]", True, False),
+    ("[tag=~HELLO]", True, False),
+    ("[tag=hello]", True, False),
+    ("[val=/^a.*z$/]", True, False),
+    ("[val=/^A.*Z$/i]", True, False),
+    ("[present]", True, False),
+    ("[!present]", False, True),
+    ("[!missing]", True, True),
+    ("[gone=none]", False, False),  # value None => attr_exists False => '=' fails
+    ("[name!=none]", True, True),
+    ("[items=3]", True, False),  # list: any element matches
+    ("[items=9]", False, False),
+    ("[items>=2]", True, False),
 ]
 
 
@@ -182,14 +186,14 @@ def op_objects():
     return [o1, o2]
 
 
-@pytest.mark.parametrize("seg", OP_SEGMENTS)
-def test_operator_parity(seg, op_objects):
+@pytest.mark.parametrize("seg,m1,m2", OP_CASES)
+def test_operator_semantics(seg, m1, m2, op_objects):
     adapter = ObjAdapter()
-    mine = parse_predicate(seg)
-    theirs = _SimpleSelector(seg)
-    assert mine.specificity == theirs.specificity
-    for o in op_objects:
-        assert mine.matches(o, adapter) == theirs.matches(o), (seg, vars(o))
+    pred = parse_predicate(seg)
+    assert pred.specificity == Specificity(0, 1, 0)
+    o1, o2 = op_objects
+    assert pred.matches(o1, adapter) is m1, (seg, vars(o1))
+    assert pred.matches(o2, adapter) is m2, (seg, vars(o2))
 
 
 # --------------------------------------------------------------------------- #
@@ -270,7 +274,7 @@ def test_matches_ignores_rootedness(small_tree):
 
 
 # --------------------------------------------------------------------------- #
-# 4. descendant non-adjacency + matching parity vs Selector
+# 4. descendant non-adjacency + matching/specificity over a class tree
 # --------------------------------------------------------------------------- #
 
 
@@ -310,31 +314,28 @@ def class_tree():
     return outer, mid, inner
 
 
-PARITY_SELECTORS = [
-    "Inner",
-    "Outer Inner",
-    "Outer Mid Inner",
-    "Outer Inner",
-    "Mid Inner",
-    "Root Inner",
-    "Outer[role=top] Inner",
-    "Outer[role=top] Inner[role=leaf]",
-    "Mid[role=top] Inner",
-    "Outer[missing] Inner",
-    "Inner[role=leaf]",
+# (selector, matches inner, specificity) over the Outer > Mid > Inner tree.
+CLASS_TREE_CASES = [
+    ("Inner", True, Specificity(0, 0, 1)),
+    ("Outer Inner", True, Specificity(0, 0, 2)),
+    ("Outer Mid Inner", True, Specificity(0, 0, 3)),
+    ("Mid Inner", True, Specificity(0, 0, 2)),
+    ("Root Inner", True, Specificity(0, 0, 2)),
+    ("Outer[role=top] Inner", True, Specificity(0, 1, 2)),
+    ("Outer[role=top] Inner[role=leaf]", True, Specificity(0, 2, 2)),
+    ("Mid[role=top] Inner", False, Specificity(0, 1, 2)),  # Mid has no role attr
+    ("Outer[missing] Inner", False, Specificity(0, 1, 2)),  # presence of absent attr
+    ("Inner[role=leaf]", True, Specificity(0, 1, 1)),
 ]
 
 
-@pytest.mark.parametrize("sel", PARITY_SELECTORS)
-def test_matching_parity_vs_selector(sel, class_tree):
+@pytest.mark.parametrize("sel,expect_match,expect_spec", CLASS_TREE_CASES)
+def test_matching_over_class_tree(sel, expect_match, expect_spec, class_tree):
     _, _, inner = class_tree
     adapter = ObjAdapter()
-    assert matches(inner, parse_locator(sel), adapter) == Selector(sel).matches(inner)
-
-
-@pytest.mark.parametrize("sel", PARITY_SELECTORS)
-def test_specificity_parity_vs_selector(sel):
-    assert parse_locator(sel).specificity == Selector(sel).specificity
+    loc = parse_locator(sel)
+    assert matches(inner, loc, adapter) is expect_match
+    assert loc.specificity == expect_spec
 
 
 def test_descendant_non_adjacent(class_tree):
@@ -348,13 +349,14 @@ def test_descendant_non_adjacent(class_tree):
     assert matches(inner, parse_locator("Mid > Inner"), adapter) is True
 
 
-def test_inexactness_parity_vs_selector(class_tree):
+def test_inexactness_snug_chain_tiebreak(class_tree):
+    """(skipped_ancestors, mro_distance): immediate-parent + exact class beats
+    distant + inherited. Frozen values from the ported get_inexactness."""
     _, _, inner = class_tree
     adapter = ObjAdapter()
-    for sel in ["Outer Inner", "Mid Inner", "Root Inner"]:
-        assert get_inexactness(inner, parse_locator(sel), adapter) == Selector(sel).get_inexactness(
-            inner
-        )
+    assert get_inexactness(inner, parse_locator("Outer Inner"), adapter) == (1, 0)
+    assert get_inexactness(inner, parse_locator("Mid Inner"), adapter) == (0, 0)
+    assert get_inexactness(inner, parse_locator("Root Inner"), adapter) == (0, 1)
 
 
 # --------------------------------------------------------------------------- #
