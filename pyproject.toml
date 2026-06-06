@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "dracon"
 authors = [{name = "Jean Disset", email = "jdisset@mit.edu"}]
-version = "0.1.1"
+version = "0.1.2"
 description = "Type-safe configuration system and command-line interface (CLI) generator built on top of YAML."
 readme = "README.md"
 requires-python = ">=3.10"

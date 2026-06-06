@@ -1,7 +1,7 @@
 cff-version: 1.2.0
 message: "If you use Dracon, please cite the software using the metadata below. Once the JOSS paper is published, this file should be updated with the preferred paper citation."
 title: "Dracon"
-version: "0.1.1"
+version: "0.1.2"
 type: software
 license: MIT
 authors:
