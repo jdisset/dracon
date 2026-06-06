@@ -2,6 +2,7 @@ cff-version: 1.2.0
 message: "If you use Dracon, please cite the software using the metadata below. Once the JOSS paper is published, this file should be updated with the preferred paper citation."
 title: "Dracon"
 version: "0.1.2"
+doi: "10.5281/zenodo.20572083"
 type: software
 license: MIT
 authors:
@@ -12,7 +13,7 @@ authors:
     email: "jdisset@mit.edu"
 repository-code: "https://github.com/jdisset/dracon"
 url: "https://github.com/jdisset/dracon"
-abstract: "A staged, inspectable configuration engine and CLI generator for Python research workflows."
+abstract: "A composable configuration engine and CLI generator for Python research workflows."
 keywords:
   - Python
   - configuration
